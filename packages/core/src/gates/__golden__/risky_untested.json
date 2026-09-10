@@ -1,0 +1,11 @@
+{
+  "name": "Untested change with moderate confidence",
+  "input": {
+    "confidence": 0.8,
+    "hasCoverage": false,
+    "testIntegrity": { "flagged": false },
+    "contractChanging": false
+  },
+  "expectedAction": "human_confirm",
+  "expectedConfidence": 0.8
+}

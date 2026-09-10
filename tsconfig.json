@@ -1,0 +1,11 @@
+{
+  // Not used for building — each package's own tsconfig.json (which extends
+  // this file's settings via extends: "../../tsconfig.base.json") is what
+  // `npm run typecheck` (via Turborepo, see turbo.json) actually runs,
+  // fanned out per package. This root file exists so editors opening the
+  // repo root get consistent path/lib settings before drilling into a
+  // package.
+  "extends": "./tsconfig.base.json",
+  "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
+  "compilerOptions": {}
+}

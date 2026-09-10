@@ -1,0 +1,11 @@
+{
+  "name": "Safe small refactor with coverage and high confidence",
+  "input": {
+    "confidence": 0.9,
+    "hasCoverage": true,
+    "testIntegrity": { "flagged": false },
+    "contractChanging": false
+  },
+  "expectedAction": "auto_commit",
+  "expectedConfidence": 0.9
+}

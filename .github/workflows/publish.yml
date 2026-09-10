@@ -1,0 +1,88 @@
+name: Publish to npm
+
+# Triggered by pushing a version tag, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Uses npm's OIDC "trusted publishing" — no NPM_TOKEN secret stored anywhere.
+# GitHub Actions exchanges a short-lived OIDC token for a one-shot publish
+# credential at run time. This requires a ONE-TIME manual step per package
+# before it works the first time: npm can only enable trusted publishing for
+# a package that already exists on the registry (see
+# https://docs.npmjs.com/trusted-publishers). Until each of @purix/core,
+# @purix/mcp-server, and purix has been published at least once by hand and
+# had trusted publishing turned on for it in that package's Settings >
+# Publishing access page (pointing at this repo + this workflow file), this
+# job will fail with an auth error — that's expected, not a bug in this file.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required for OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Never publish anything that hasn't passed the same gates CI checks
+      # on every PR. A tag push skips normal PR review, so this is the one
+      # thing standing between "someone pushed a bad tag" and a broken
+      # release reaching real users.
+      - name: Boundary check
+        run: pnpm run boundary-check
+      - name: Artifact check
+        run: pnpm run artifact-check
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Test
+        run: pnpm run test
+
+      # All three packages currently move in lockstep at the same version
+      # (see each package.json). Fail loudly rather than publish a package
+      # whose package.json version doesn't match the git tag that triggered
+      # this — that mismatch means someone forgot to bump a version file, or
+      # tagged the wrong commit, and either way this should stop, not guess.
+      - name: Verify tag matches package versions
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          for pkg in packages/core packages/mcp-server packages/cli; do
+            PKG_VERSION=$(node -p "require('./$pkg/package.json').version")
+            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME (version $TAG_VERSION) does not match $pkg/package.json version $PKG_VERSION"
+              exit 1
+            fi
+          done
+
+      # Publish order matters: @purix/core has no internal dependency on the
+      # others, @purix/mcp-server depends on @purix/core, and purix (the
+      # CLI) depends on both. Each publish makes the next one resolvable —
+      # publishing cli before core/mcp-server are live on the registry would
+      # leave its declared workspace-protocol ranges unsatisfiable for
+      # anyone installing at that moment (pnpm rewrites workspace: ranges to
+      # the matching real semver range at publish time).
+      - name: Publish @purix/core
+        run: pnpm --filter @purix/core publish --access public --provenance --no-git-checks
+
+      - name: Publish @purix/mcp-server
+        run: pnpm --filter @purix/mcp-server publish --access public --provenance --no-git-checks
+
+      - name: Publish purix (CLI)
+        run: pnpm --filter purix publish --access public --provenance --no-git-checks

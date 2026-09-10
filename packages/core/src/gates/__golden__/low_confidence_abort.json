@@ -1,0 +1,11 @@
+{
+  "name": "Low confidence change below reject threshold",
+  "input": {
+    "confidence": 0.2,
+    "hasCoverage": true,
+    "testIntegrity": { "flagged": false },
+    "contractChanging": false
+  },
+  "expectedAction": "abort",
+  "expectedConfidence": 0.2
+}
