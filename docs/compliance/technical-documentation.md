@@ -1,7 +1,7 @@
 # EU AI Act — Annex IV Technical Documentation
 
 ## 1. System Description & Intended Purpose
-Purix is a verification and governance framework (`@purix/core`, `purix` (CLI), `@purix/api`, `@purix/mcp-server`) designed to govern AI-generated code edits. It provides cryptographic provenance, deterministic override floors, and multi-language verification sandbox execution.
+Purix is a verification and governance framework (`@purix/core`, `@purix/cli`, `@purix/api`, `@purix/mcp-server`) designed to govern AI-generated code edits. It provides cryptographic provenance, deterministic override floors, and multi-language verification sandbox execution.
 
 ## 2. Risk Controls & Thresholds
 - **TrustGate Thresholds (`packages/core/src/gates/trustgate.ts`):**

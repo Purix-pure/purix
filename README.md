@@ -16,14 +16,14 @@ account or network dependency required.
 ## Installation
 
 ```bash
-npm install -g purix
+npm install -g @purix/cli
 purix --help
 ```
 
 Or run it without installing anything:
 
 ```bash
-npx purix --help
+npx @purix/cli --help
 ```
 
 ### Using Purix as an MCP server
@@ -36,7 +36,7 @@ any other MCP-compatible agent):
   "mcpServers": {
     "purix": {
       "command": "npx",
-      "args": ["-y", "purix", "mcp-serve"]
+      "args": ["-y", "@purix/cli", "mcp-serve"]
     }
   }
 }
@@ -51,7 +51,7 @@ in the audit trail attributed to something more specific than a generic label.
 | Package | What it is |
 |---|---|
 | `packages/core` | The classify → sandbox-verify → commit pipeline, language providers, manifest/audit trail |
-| `packages/cli` | The `purix` command-line tool |
+| `packages/cli` | The `@purix/cli` command-line tool |
 | `packages/mcp-server` | `purix mcp-serve` — exposes the same pipeline as MCP tools over stdio, for use by other agents/orchestrators |
 
 ## Supported languages (beta)

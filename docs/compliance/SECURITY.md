@@ -10,7 +10,7 @@ advisory visible only to maintainers until a fix is ready, which avoids
 disclosing an exploitable issue before a patch exists.
 
 Include, if you have them:
-- The affected package (`@purix/core`, `@purix/mcp-server`, or `purix`) and version.
+- The affected package (`@purix/core`, `@purix/mcp-server`, or `@purix/cli`) and version.
 - Steps to reproduce, or a minimal repro case.
 - What you'd expect to happen vs. what actually happens.
 - Whether the issue requires a specific target-project setup to trigger (Purix

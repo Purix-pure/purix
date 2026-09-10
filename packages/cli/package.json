@@ -1,5 +1,5 @@
 {
-  "name": "purix",
+  "name": "@purix/cli",
   "version": "0.1.0",
   "description": "Governance-first AI coding agent CLI: classifies and verifies AI-driven code changes in a sandbox, against your test suite, before they land. Also runs as an MCP server for other coding agents.",
   "keywords": [

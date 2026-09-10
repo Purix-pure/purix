@@ -44,6 +44,6 @@ When adding or removing a CLI command, update the command contract test and add
 one behavior assertion beyond registration. Run:
 
 ```bash
-npm run test --workspace=purix
-npm run typecheck --workspace=purix
+npm run test --workspace=@purix/cli
+npm run typecheck --workspace=@purix/cli
 ```

@@ -9,7 +9,7 @@ name: Publish to npm
 # before it works the first time: npm can only enable trusted publishing for
 # a package that already exists on the registry (see
 # https://docs.npmjs.com/trusted-publishers). Until each of @purix/core,
-# @purix/mcp-server, and purix has been published at least once by hand and
+# @purix/mcp-server, and @purix/cli has been published at least once by hand and
 # had trusted publishing turned on for it in that package's Settings >
 # Publishing access page (pointing at this repo + this workflow file), this
 # job will fail with an auth error — that's expected, not a bug in this file.
@@ -72,8 +72,8 @@ jobs:
           done
 
       # Publish order matters: @purix/core has no internal dependency on the
-      # others, @purix/mcp-server depends on @purix/core, and purix (the
-      # CLI) depends on both. Each publish makes the next one resolvable —
+      # others, @purix/mcp-server depends on @purix/core, and @purix/cli
+      # depends on both. Each publish makes the next one resolvable —
       # publishing cli before core/mcp-server are live on the registry would
       # leave its declared workspace-protocol ranges unsatisfiable for
       # anyone installing at that moment (pnpm rewrites workspace: ranges to
@@ -84,5 +84,5 @@ jobs:
       - name: Publish @purix/mcp-server
         run: pnpm --filter @purix/mcp-server publish --access public --provenance --no-git-checks
 
-      - name: Publish purix (CLI)
-        run: pnpm --filter purix publish --access public --provenance --no-git-checks
+      - name: Publish @purix/cli
+        run: pnpm --filter @purix/cli publish --access public --provenance --no-git-checks
