@@ -1,0 +1,559 @@
+﻿diff --git a/packages/cli/src/cli.ts b/packages/cli/src/cli.ts
+index 0424118..e3f2b74 100644
+--- a/packages/cli/src/cli.ts
++++ b/packages/cli/src/cli.ts
+@@ -12,42 +12,86 @@ import { reconcilePendingOperations } from "@purix/core/state/reconcile";
+ import { acquireRepoLock, releaseRepoLock } from "@purix/core/state/repo_lock";
+ import { startScheduler } from "@purix/core/state/scheduler";
+ import { setQuiet } from "./cli/output.js";
+-import { registerLifecycleCommands } from "./cli/commands/lifecycle.js";
+-import { registerMigrationsCommands } from "./cli/commands/migrations.js";
+-import { registerObservabilityCommands } from "./cli/commands/observability.js";
+-import { registerSecurityCommands } from "./cli/commands/security.js";
+-import { registerProviderCommands } from "./cli/commands/provider.js";
+-import { registerTierCommands } from "./cli/commands/tier.js";
+-
+-// registerMcpCommands intentionally not wired in for v1.0 launch ΓÇö see
+-// ADR-057 ("MCP Client Commands Governance Deferral"). The gateway/registry
+-// code is intact and untouched; re-enable this import + the
+-// registerMcpCommands(program) call below once the governance hardening
+-// (identity-backed provenance, DLP scrub, escalation budget caps) ships.
+-// import { registerMcpCommands } from "./cli/commands/mcp";
+-import { registerBackupCommands } from "./cli/commands/backup.js";
+-import { registerMemoryCommands } from "./cli/commands/memory.js";
+-import { registerToolsCommands } from "./cli/commands/tools.js";
+-import { registerConfigCommands } from "./cli/commands/config.js";
+-import { registerAuthCommands } from "./cli/commands/auth.js";
+-import { registerLangCommands } from "./cli/commands/lang.js";
+-// registerDevCommands intentionally not wired in for beta ΓÇö `purix dev
+-// scaffold-language` is an internal codegen tool for Purix's own
+-// contributors (generates provider/pack/fixture stubs for a new
+-// language), not an end-user-facing command. It was previously
+-// unconditionally registered with no gate, unlike every other
+-// internal-only surface in this file (see registerMcpCommands above and
+-// PURIX_INTERNAL_LANGUAGES in language/registry.ts for the established
+-// pattern). Re-enable via an explicit internal/dev-mode flag if
+-// contributor tooling needs it exposed through the published binary;
+-// until then this is dead weight in the public `purix --help` output.
+-// import { registerDevCommands } from "./cli/commands/dev";
+-import { registerIndexCommands } from "./cli/commands/index.js";
+-import { registerMcpServeCommand } from "./cli/commands/mcp_serve.js";
+ import { fileURLToPath } from "node:url";
+ import { realpathSync } from "node:fs";
+ import { logError } from "./telemetry/log.js";
+-import { registerConnectCommand } from "./cli/commands/connect.js";
++
++const MODE = process.env.PURIX_DEBUG_TIMING === "1";
++const timingState = {
++  startupToFirstLineMs: performance.now(),
++  cumulativeImportMs: 0,
++  parseMs: 0,
++  actionMs: 0,
++};
++let commandActionStartMs = 0;
++
++const COMMAND_REGISTRY_SPECS = [
++  { name: "registerLifecycleCommands", path: "./cli/commands/lifecycle.js", exportName: "registerLifecycleCommands" },
++  { name: "registerMigrationsCommands", path: "./cli/commands/migrations.js", exportName: "registerMigrationsCommands" },
++  { name: "registerObservabilityCommands", path: "./cli/commands/observability.js", exportName: "registerObservabilityCommands" },
++  { name: "registerSecurityCommands", path: "./cli/commands/security.js", exportName: "registerSecurityCommands" },
++  { name: "registerProviderCommands", path: "./cli/commands/provider.js", exportName: "registerProviderCommands" },
++  { name: "registerTierCommands", path: "./cli/commands/tier.js", exportName: "registerTierCommands" },
++  // registerMcpCommands intentionally not wired in for v1.0 launch ΓÇö see
++  // ADR-057 ("MCP Client Commands Governance Deferral"). The gateway/registry
++  // code is intact and untouched; re-enable this export + the
++  // registerMcpCommands(program) call below once the governance hardening
++  // (identity-backed provenance, DLP scrub, escalation budget caps) ships.
++  // { name: "registerMcpCommands", path: "./cli/commands/mcp.js", exportName: "registerMcpCommands" },
++  { name: "registerBackupCommands", path: "./cli/commands/backup.js", exportName: "registerBackupCommands" },
++  { name: "registerMemoryCommands", path: "./cli/commands/memory.js", exportName: "registerMemoryCommands" },
++  { name: "registerToolsCommands", path: "./cli/commands/tools.js", exportName: "registerToolsCommands" },
++  { name: "registerConfigCommands", path: "./cli/commands/config.js", exportName: "registerConfigCommands" },
++  { name: "registerAuthCommands", path: "./cli/commands/auth.js", exportName: "registerAuthCommands" },
++  { name: "registerLangCommands", path: "./cli/commands/lang.js", exportName: "registerLangCommands" },
++  // registerDevCommands intentionally not wired in for beta ΓÇö `purix dev
++  // scaffold-language` is an internal codegen tool for Purix's own
++  // contributors (generates provider/pack/fixture stubs for a new
++  // language), not an end-user-facing command. It was previously
++  // unconditionally registered with no gate, unlike every other
++  // internal-only surface in this file (see registerMcpCommands above and
++  // PURIX_INTERNAL_LANGUAGES in language/registry.ts for the established
++  // pattern). Re-enable via an explicit internal/dev-mode flag if
++  // contributor tooling needs it exposed through the published binary;
++  // until then this is dead weight in the public `purix --help` output.
++  // { name: "registerDevCommands", path: "./cli/commands/dev.js", exportName: "registerDevCommands" },
++  { name: "registerIndexCommands", path: "./cli/commands/index.js", exportName: "registerIndexCommands" },
++  { name: "registerMcpServeCommand", path: "./cli/commands/mcp_serve.js", exportName: "registerMcpServeCommand" },
++  { name: "registerConnectCommand", path: "./cli/commands/connect.js", exportName: "registerConnectCommand" },
++] as const;
++
++function emitTimingSummary(): void {
++  if (!MODE) return;
++  process.stderr.write(
++    `[timing-summary] startupToFirstLineMs=${timingState.startupToFirstLineMs.toFixed(1)} cumulativeImportMs=${timingState.cumulativeImportMs.toFixed(1)} parseMs=${timingState.parseMs.toFixed(1)} actionMs=${timingState.actionMs.toFixed(1)}\n`,
++  );
++}
++
++process.on("exit", () => {
++  emitTimingSummary();
++});
++
++async function registerCommandModules(program: Command): Promise<void> {
++  const registrations = await Promise.all(
++    COMMAND_REGISTRY_SPECS.map(async ({ name, path, exportName }) => {
++      const before = performance.now();
++      const module = await import(path);
++      const importMs = performance.now() - before;
++      timingState.cumulativeImportMs += importMs;
++
++      if (MODE) {
++        process.stderr.write(`[module-load] ${name}: ${Math.round(importMs)}ms\n`);
++      }
++
++      const registrar = module[exportName] as (program: Command) => void;
++      return registrar;
++    }),
++  );
++
++  for (const registrar of registrations) {
++    registrar(program);
++  }
++}
+ 
+ 
+ process.on("uncaughtException", (err) => {
+@@ -71,7 +115,7 @@ process.on("unhandledRejection", (err) => {
+  * would otherwise run (and try to interpret the test runner's own argv)
+  * the moment anything imported this module.
+  */
+-export function buildProgram(): Command {
++export async function buildProgram(): Promise<Command> {
+   const program = new Command();
+   program
+     .name("purix")
+@@ -90,9 +134,11 @@ export function buildProgram(): Command {
+     await reconcilePendingOperations();
+     acquireRepoLock();
+     startScheduler();
++    commandActionStartMs = performance.now();
+   });
+ 
+   program.hook("postAction", async () => {
++    timingState.actionMs = Math.max(0, performance.now() - commandActionStartMs);
+     releaseRepoLock();
+   });
+ 
+@@ -105,23 +151,7 @@ export function buildProgram(): Command {
+     process.exit(143);
+   });
+ 
+-  registerLifecycleCommands(program);
+-  registerMigrationsCommands(program);
+-  registerObservabilityCommands(program);
+-  registerSecurityCommands(program);
+-  registerProviderCommands(program);
+-  registerTierCommands(program);
+-  // registerMcpCommands(program); ΓÇö gated off for v1.0, see note above import
+-  registerBackupCommands(program);
+-  registerMemoryCommands(program);
+-  registerToolsCommands(program);
+-  registerConfigCommands(program);
+-  registerAuthCommands(program);
+-  registerLangCommands(program);
+-  // registerDevCommands(program); ΓÇö gated off for beta, see note above import
+-  registerIndexCommands(program);
+-  registerMcpServeCommand(program);
+-  registerConnectCommand(program);
++  await registerCommandModules(program);
+   return program;
+ }
+ 
+@@ -151,13 +181,40 @@ function isDirectlyExecuted(): boolean {
+ }
+ 
+ if (isDirectlyExecuted()) {
+-  const program = buildProgram();
+-  if (process.argv.length <= 2) {
+-    program.help();
+-  } else {
+-    program.parseAsync(process.argv).catch((err) => {
++  const main = async () => {
++    const argv = process.argv.slice(2);
++    const canSkipCommandRegistration = argv.every(
++      (arg) => arg === "--help" || arg === "-h" || arg === "--version" || arg === "-v" || arg === "--quiet" || arg === "-q",
++    );
++
++    if (canSkipCommandRegistration) {
++      const minimalProgram = new Command();
++      minimalProgram
++        .name("purix")
++        .description("Verification & Governance Layer for AI-Generated Code (Purix v0.1.0)")
++        .version("0.1.0")
++        .option("-q, --quiet", "suppress non-essential output");
++
++      try {
++        await minimalProgram.parseAsync(process.argv);
++      } catch (err) {
++        console.error(`\n≡ƒ¢æ Unhandled error: ${err instanceof Error ? err.message : err}`);
++        process.exitCode = 1;
++      }
++      return;
++    }
++
++    const program = await buildProgram();
++    const parseStartMs = performance.now();
++    try {
++      await program.parseAsync(process.argv);
++    } catch (err) {
+       console.error(`\n≡ƒ¢æ Unhandled error: ${err instanceof Error ? err.message : err}`);
+       process.exitCode = 1;
+-    });
+-  }
++    } finally {
++      timingState.parseMs = Math.max(0, performance.now() - parseStartMs - timingState.actionMs);
++    }
++  };
++
++  await main();
+ }
+\ No newline at end of file
+diff --git a/packages/cli/src/cli/commands/lifecycle.ts b/packages/cli/src/cli/commands/lifecycle.ts
+index 87faddb..bf03f93 100644
+--- a/packages/cli/src/cli/commands/lifecycle.ts
++++ b/packages/cli/src/cli/commands/lifecycle.ts
+@@ -1,45 +1,122 @@
+ // src/cli/commands/lifecycle.ts
+ import type { Command } from "commander";
+-import { confirmGated } from "@purix/core/cli-io/gated-confirm";
+-import {
+-  readManifest,
+-  writeManifestWithLimitCheck,
+-  linkComponents,
+-  createPendingOperation,
+-  completeModification,
+-  commitManifestWithRetry,
+-  deletePendingOperation,
+-  deleteManifestEntry,
+-  removeDependent,
+-  removeDependencyReference,
+-} from "@purix/core/manifest/store";
+ import { existsSync, rmSync } from "node:fs";
+ import { join } from "node:path";
+-import { buildManifestEntry, writeScaffold } from "@purix/core/entrypoints/scaffold";
+ import { snapshotSavings, printRunSummary } from "../savings_output.js";
+-import { classifyGreenfield, refineIntent, classifyModification, classifyDiff, scanDiffForInjectionAttempts, scanFilesForInjectionAttempts } from "@purix/core/llm/classify";
+-import { scanForInjectionAttempts } from "@purix/core/llm/injection";
+-import { checkDrift } from "@purix/core/state/drift";
+-import { applyModificationFiles, rollbackModification } from "@purix/core/entrypoints/modify";
+-import { computeSyncHash } from "@purix/core/state/hash";
+-import { compilePatch } from "@purix/core/verify/compile";
+-import { verifyInSandbox } from "@purix/core/sandbox/sandbox";
+-import { getDependents, reVerifyDependents } from "@purix/core/verify/impact";
+-import { runSelfHealingLoop } from "@purix/core/recovery/heal";
+-import { runEscalation } from "@purix/core/recovery/escalate";
+-import { auditSecurityPatterns } from "@purix/core/security/security_audit";
+-import { suggestTools, formatSuggestions } from "@purix/core/tools/matchmaker";
+-import { buildMigrationPlan, stageMigration } from "@purix/core/state/migration";
+-import { assertAuthorizedToApprove } from "@purix/core/security/auth";
+-import { recordEvent } from "@purix/core/manifest/events";
+-import { readRelevantMemory, readGlobalMemory, formatMemoryLines } from "@purix/core/manifest/memory";
+-import { computeRequestKey, findPriorCommit, recordRequestCommit } from "@purix/core/state/idempotency";
+-import { ingestDiffFromFile } from "@purix/core/entrypoints/ingest";
+-import { resolveLanguage, getLanguageProvider } from "@purix/core/language/registry";
+-import { evaluateTrustGate, hasTestCoverage, checkDeterministicOverrideFloor, loadDofPatterns } from "@purix/core/gates/trustgate";
+-import { setBudgetOverride } from "@purix/core/llm/budget";
+-import { setSecurityOverride } from "@purix/core/gates/security_gate";
+-import { recordOverrideAudit } from "@purix/core/security/override_audit";
++
++async function loadLifecycleRuntime() {
++  const [
++    gatedConfirmModule,
++    manifestStoreModule,
++    scaffoldModule,
++    classifyModule,
++    injectionModule,
++    driftModule,
++    modifyModule,
++    hashModule,
++    compileModule,
++    sandboxModule,
++    impactModule,
++    healModule,
++    escalateModule,
++    securityAuditModule,
++    matchmakerModule,
++    migrationModule,
++    authModule,
++    eventsModule,
++    memoryModule,
++    idempotencyModule,
++    ingestModule,
++    registryModule,
++    trustgateModule,
++    budgetModule,
++    securityGateModule,
++    overrideAuditModule,
++  ] = await Promise.all([
++    import("@purix/core/cli-io/gated-confirm"),
++    import("@purix/core/manifest/store"),
++    import("@purix/core/entrypoints/scaffold"),
++    import("@purix/core/llm/classify"),
++    import("@purix/core/llm/injection"),
++    import("@purix/core/state/drift"),
++    import("@purix/core/entrypoints/modify"),
++    import("@purix/core/state/hash"),
++    import("@purix/core/verify/compile"),
++    import("@purix/core/sandbox/sandbox"),
++    import("@purix/core/verify/impact"),
++    import("@purix/core/recovery/heal"),
++    import("@purix/core/recovery/escalate"),
++    import("@purix/core/security/security_audit"),
++    import("@purix/core/tools/matchmaker"),
++    import("@purix/core/state/migration"),
++    import("@purix/core/security/auth"),
++    import("@purix/core/manifest/events"),
++    import("@purix/core/manifest/memory"),
++    import("@purix/core/state/idempotency"),
++    import("@purix/core/entrypoints/ingest"),
++    import("@purix/core/language/registry"),
++    import("@purix/core/gates/trustgate"),
++    import("@purix/core/llm/budget"),
++    import("@purix/core/gates/security_gate"),
++    import("@purix/core/security/override_audit"),
++  ]);
++
++  return {
++    confirmGated: gatedConfirmModule.confirmGated,
++    readManifest: manifestStoreModule.readManifest,
++    writeManifestWithLimitCheck: manifestStoreModule.writeManifestWithLimitCheck,
++    linkComponents: manifestStoreModule.linkComponents,
++    createPendingOperation: manifestStoreModule.createPendingOperation,
++    completeModification: manifestStoreModule.completeModification,
++    commitManifestWithRetry: manifestStoreModule.commitManifestWithRetry,
++    deletePendingOperation: manifestStoreModule.deletePendingOperation,
++    deleteManifestEntry: manifestStoreModule.deleteManifestEntry,
++    removeDependent: manifestStoreModule.removeDependent,
++    removeDependencyReference: manifestStoreModule.removeDependencyReference,
++    buildManifestEntry: scaffoldModule.buildManifestEntry,
++    writeScaffold: scaffoldModule.writeScaffold,
++    classifyGreenfield: classifyModule.classifyGreenfield,
++    refineIntent: classifyModule.refineIntent,
++    classifyModification: classifyModule.classifyModification,
++    classifyDiff: classifyModule.classifyDiff,
++    scanDiffForInjectionAttempts: classifyModule.scanDiffForInjectionAttempts,
++    scanFilesForInjectionAttempts: classifyModule.scanFilesForInjectionAttempts,
++    scanForInjectionAttempts: injectionModule.scanForInjectionAttempts,
++    checkDrift: driftModule.checkDrift,
++    applyModificationFiles: modifyModule.applyModificationFiles,
++    rollbackModification: modifyModule.rollbackModification,
++    computeSyncHash: hashModule.computeSyncHash,
++    compilePatch: compileModule.compilePatch,
++    verifyInSandbox: sandboxModule.verifyInSandbox,
++    getDependents: impactModule.getDependents,
++    reVerifyDependents: impactModule.reVerifyDependents,
++    runSelfHealingLoop: healModule.runSelfHealingLoop,
++    runEscalation: escalateModule.runEscalation,
++    auditSecurityPatterns: securityAuditModule.auditSecurityPatterns,
++    suggestTools: matchmakerModule.suggestTools,
++    formatSuggestions: matchmakerModule.formatSuggestions,
++    buildMigrationPlan: migrationModule.buildMigrationPlan,
++    stageMigration: migrationModule.stageMigration,
++    assertAuthorizedToApprove: authModule.assertAuthorizedToApprove,
++    recordEvent: eventsModule.recordEvent,
++    readRelevantMemory: memoryModule.readRelevantMemory,
++    readGlobalMemory: memoryModule.readGlobalMemory,
++    formatMemoryLines: memoryModule.formatMemoryLines,
++    computeRequestKey: idempotencyModule.computeRequestKey,
++    findPriorCommit: idempotencyModule.findPriorCommit,
++    recordRequestCommit: idempotencyModule.recordRequestCommit,
++    ingestDiffFromFile: ingestModule.ingestDiffFromFile,
++    resolveLanguage: registryModule.resolveLanguage,
++    getLanguageProvider: registryModule.getLanguageProvider,
++    evaluateTrustGate: trustgateModule.evaluateTrustGate,
++    hasTestCoverage: trustgateModule.hasTestCoverage,
++    checkDeterministicOverrideFloor: trustgateModule.checkDeterministicOverrideFloor,
++    loadDofPatterns: trustgateModule.loadDofPatterns,
++    setBudgetOverride: budgetModule.setBudgetOverride,
++    setSecurityOverride: securityGateModule.setSecurityOverride,
++    recordOverrideAudit: overrideAuditModule.recordOverrideAudit,
++  };
++}
+ 
+ export function registerLifecycleCommands(program: Command) {
+   // ---------------------------------------------------------------------------
+@@ -49,6 +126,23 @@ export function registerLifecycleCommands(program: Command) {
+     .command("create <n>")
+     .description("Scaffold a new component (Greenfield, Instruction Path)")
+     .action(async (name: string) => {
++      const {
++        confirmGated,
++        readManifest,
++        writeManifestWithLimitCheck,
++        linkComponents,
++        buildManifestEntry,
++        writeScaffold,
++        classifyGreenfield,
++        readGlobalMemory,
++        formatMemoryLines,
++        suggestTools,
++        formatSuggestions,
++        assertAuthorizedToApprove,
++        computeSyncHash,
++        setBudgetOverride,
++        setSecurityOverride,
++      } = await loadLifecycleRuntime();
+       const savingsBefore = snapshotSavings();
+       if (readManifest(name)) {
+         console.error(`Component "${name}" already exists in the manifest. Use "purix modify" instead.`);
+@@ -132,6 +226,57 @@ export function registerLifecycleCommands(program: Command) {
+     .description("Modify an existing component via the Instruction Path ( Brownfield )")
+     .option("--override <reason>", "Override gate stops with a reason")
+     .action(async (componentId: string, instruction: string, options: { override?: string }) => {
++      const {
++        confirmGated,
++        readManifest,
++        writeManifestWithLimitCheck,
++        createPendingOperation,
++        completeModification,
++        commitManifestWithRetry,
++        deletePendingOperation,
++        deleteManifestEntry,
++        removeDependent,
++        removeDependencyReference,
++        buildManifestEntry,
++        writeScaffold,
++        refineIntent,
++        classifyModification,
++        scanDiffForInjectionAttempts,
++        scanFilesForInjectionAttempts,
++        scanForInjectionAttempts,
++        checkDrift,
++        applyModificationFiles,
++        rollbackModification,
++        computeSyncHash,
++        compilePatch,
++        verifyInSandbox,
++        getDependents,
++        reVerifyDependents,
++        runSelfHealingLoop,
++        runEscalation,
++        auditSecurityPatterns,
++        suggestTools,
++        formatSuggestions,
++        buildMigrationPlan,
++        stageMigration,
++        assertAuthorizedToApprove,
++        recordEvent,
++        readRelevantMemory,
++        readGlobalMemory,
++        formatMemoryLines,
++        computeRequestKey,
++        findPriorCommit,
++        recordRequestCommit,
++        resolveLanguage,
++        getLanguageProvider,
++        evaluateTrustGate,
++        hasTestCoverage,
++        checkDeterministicOverrideFloor,
++        loadDofPatterns,
++        setBudgetOverride,
++        setSecurityOverride,
++        recordOverrideAudit,
++      } = await loadLifecycleRuntime();
+       if (options.override !== undefined) {
+         setBudgetOverride(options.override);
+         setSecurityOverride(options.override);
+@@ -533,6 +678,60 @@ export function registerLifecycleCommands(program: Command) {
+     .description("Ingest an external diff (PR patch, pre-commit hook output, agent-authored diff) against a tracked component")
+     .option("-a, --agent <name>", "the upstream agent that produced this diff (cursor, claude-code, devin, human, ...)")
+     .action(async (componentId: string, diffFile: string, opts: { agent?: string }) => {
++      const {
++        confirmGated,
++        readManifest,
++        writeManifestWithLimitCheck,
++        createPendingOperation,
++        completeModification,
++        commitManifestWithRetry,
++        deletePendingOperation,
++        deleteManifestEntry,
++        removeDependent,
++        removeDependencyReference,
++        buildManifestEntry,
++        writeScaffold,
++        classifyGreenfield,
++        refineIntent,
++        classifyModification,
++        classifyDiff,
++        scanDiffForInjectionAttempts,
++        scanFilesForInjectionAttempts,
++        scanForInjectionAttempts,
++        checkDrift,
++        applyModificationFiles,
++        rollbackModification,
++        computeSyncHash,
++        compilePatch,
++        verifyInSandbox,
++        getDependents,
++        reVerifyDependents,
++        runSelfHealingLoop,
++        runEscalation,
++        auditSecurityPatterns,
++        suggestTools,
++        formatSuggestions,
++        buildMigrationPlan,
++        stageMigration,
++        assertAuthorizedToApprove,
++        recordEvent,
++        readRelevantMemory,
++        readGlobalMemory,
++        formatMemoryLines,
++        computeRequestKey,
++        findPriorCommit,
++        recordRequestCommit,
++        ingestDiffFromFile,
++        resolveLanguage,
++        getLanguageProvider,
++        evaluateTrustGate,
++        hasTestCoverage,
++        checkDeterministicOverrideFloor,
++        loadDofPatterns,
++        setBudgetOverride,
++        setSecurityOverride,
++        recordOverrideAudit,
++      } = await loadLifecycleRuntime();
+       const sourceAgent = opts.agent ?? null;
+ 
+       // Node 2: State Resolver ΓÇö identical requirement as the Instruction Path.
+@@ -850,6 +1049,14 @@ export function registerLifecycleCommands(program: Command) {
+     .option("--force", "Delete even if other components still depend on it")
+     .option("--files", "Also delete the component's files from disk")
+     .action(async (componentId: string, opts: { force?: boolean; files?: boolean }) => {
++      const {
++        confirmGated,
++        readManifest,
++        deleteManifestEntry,
++        removeDependent,
++        removeDependencyReference,
++        recordEvent,
++      } = await loadLifecycleRuntime();
+       const entry = readManifest(componentId);
+       if (!entry) {
+         console.error(`No manifest entry for "${componentId}". Run "purix library" to see what's tracked.`);
+diff --git a/packages/cli/src/cli/commands/mcp_serve.ts b/packages/cli/src/cli/commands/mcp_serve.ts
+index 410f848..335ce8d 100644
+--- a/packages/cli/src/cli/commands/mcp_serve.ts
++++ b/packages/cli/src/cli/commands/mcp_serve.ts
+@@ -1,12 +1,12 @@
+ // src/cli/commands/mcp_serve.ts
+ import type { Command } from "commander";
+-import { runMcpServer } from "@purix/mcp-server";
+ 
+ export function registerMcpServeCommand(program: Command) {
+   program
+     .command("mcp-serve")
+     .description("Start the local Purix MCP server over stdio transport")
+     .action(async () => {
++      const { runMcpServer } = await import("@purix/mcp-server");
+       try {
+         await runMcpServer();
+       } catch (err) {

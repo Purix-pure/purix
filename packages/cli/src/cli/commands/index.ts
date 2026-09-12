@@ -1,8 +1,18 @@
 // src/cli/commands/index.ts
 import type { Command } from "commander";
-import { runIndex } from "@purix/core/manifest/indexer";
-import { confirmGated } from "@purix/core/cli-io/gated-confirm";
 import { resolve } from "node:path";
+
+async function loadIndexRuntime() {
+  const [indexerModule, gatedConfirmModule] = await Promise.all([
+    import("@purix/core/manifest/indexer"),
+    import("@purix/core/cli-io/gated-confirm"),
+  ]);
+
+  return {
+    runIndex: indexerModule.runIndex,
+    confirmGated: gatedConfirmModule.confirmGated,
+  };
+}
 
 export function registerIndexCommands(program: Command) {
   program
@@ -13,9 +23,10 @@ export function registerIndexCommands(program: Command) {
     .option("--languages <langs>", "comma-separated list of languages to index (e.g. ts,py,go,rust,ruby)")
     .action(async (pathArg: string | undefined, opts: { full?: boolean; incremental?: boolean; languages?: string }) => {
       try {
+        const runtime = await loadIndexRuntime();
         const baseDir = pathArg ? resolve(process.cwd(), pathArg) : process.cwd();
         if (opts.full) {
-          const approved = await confirmGated(
+          const approved = await runtime.confirmGated(
             `Perform full re-index of "${baseDir}"?`,
             "purix_index_full",
             null
@@ -26,7 +37,7 @@ export function registerIndexCommands(program: Command) {
           }
         }
         console.log(`Indexing codebase at "${baseDir}"...`);
-        const result = await runIndex(baseDir, {
+        const result = await runtime.runIndex(baseDir, {
           full: opts.full,
           incremental: opts.incremental,
           languages: opts.languages ? opts.languages.split(",") : undefined,

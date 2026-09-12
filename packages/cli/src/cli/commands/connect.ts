@@ -6,45 +6,15 @@
 // falls back to that agent's global config path for agents that don't
 // (e.g. Antigravity — see connect.global-fallback.test.ts for why that
 // fallback has to be exercised in a separate child process).
+//
+// connectAgent() itself (and the `add-mcp` import it needs) lives in
+// ./connect_agent.js, imported lazily below — see that file's header
+// comment for why. This file only imports `add-mcp`'s types, which are
+// erased at compile time and cost nothing at runtime, so registering this
+// command (loading this file, which happens for `purix connect --help`
+// too) no longer pays to load `add-mcp` itself.
 import type { Command } from "commander";
-import {
-  agents,
-  detectProjectAgents,
-  upsertServer,
-  type AgentInput,
-  type InstallResult,
-} from "add-mcp";
-
-/**
- * Writes (or merges into) `agentType`'s MCP config so it launches Purix's
- * MCP server via `purix mcp-serve`, tagging actions from this agent with
- * `agentId` in the audit trail (PURIX_MCP_AGENT_ID).
- *
- * Project-scoped when the agent supports it (falls back to that agent's
- * global config otherwise) — this mirrors add-mcp's own local-vs-global
- * resolution, not a Purix-specific rule.
- */
-export function connectAgent(
-  agentType: AgentInput,
-  cwd: string,
-  agentId: string,
-): { result: InstallResult } {
-  const known = agents[agentType as keyof typeof agents];
-  const local = known?.localConfigPath !== undefined;
-
-  const result = upsertServer(
-    agentType,
-    "purix",
-    {
-      command: "purix",
-      args: ["mcp-serve"],
-      env: { PURIX_MCP_AGENT_ID: agentId },
-    },
-    { local, cwd },
-  );
-
-  return { result };
-}
+import type { AgentInput } from "add-mcp";
 
 export function registerConnectCommand(program: Command) {
   program
@@ -56,9 +26,14 @@ export function registerConnectCommand(program: Command) {
       "--agent-id <id>",
       "Identity recorded in the audit trail for actions from this agent (defaults to the agent type)",
     )
-    .action((agent: string | undefined, options: { agentId?: string }) => {
+    .action(async (agent: string | undefined, options: { agentId?: string }) => {
+      const [{ connectAgent }, { detectProjectAgents }] = await Promise.all([
+        import("./connect_agent.js"),
+        import("add-mcp"),
+      ]);
+
       const cwd = process.cwd();
-      const targets = agent ? [agent] : detectProjectAgents(cwd);
+      const targets: AgentInput[] = agent ? [agent as AgentInput] : detectProjectAgents(cwd);
 
       if (targets.length === 0) {
         console.log(

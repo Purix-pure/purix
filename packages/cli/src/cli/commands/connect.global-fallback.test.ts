@@ -25,7 +25,7 @@ describe("connectAgent global-scope fallback (child process, isolated HOME)", ()
     const fakeHome = mkdtempSync(join(tmpdir(), "purix-connect-fakehome-"));
     try {
       const script = `
-        import { connectAgent } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "connect.ts")).href)};
+        import { connectAgent } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "connect_agent.ts")).href)};
         const { result } = connectAgent("antigravity", ${JSON.stringify(cwd)}, "antigravity");
         console.log(JSON.stringify(result));
       `;

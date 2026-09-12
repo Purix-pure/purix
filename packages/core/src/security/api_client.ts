@@ -54,7 +54,7 @@ export function createApiClient(loadSessionFn: SessionStore["loadSession"] = def
   async function request<T>(path: string, init: RequestInit = {}, authenticated = false): Promise<T> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
-      "X-Purix-Client-Version": "0.1.0",
+      "X-Purix-Client-Version": "0.2.0-beta.0",
       ...(init.headers as Record<string, string> | undefined),
     };
 

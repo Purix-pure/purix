@@ -4,9 +4,16 @@ import { expect } from "expect";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectAgent } from "./connect";
-import { getAgentTypes } from "add-mcp";
+import { connectAgent } from "./connect_agent";
+import { agents, getAgentTypes } from "add-mcp";
 
+// add-mcp resolves each agent's global configPath from os.homedir() once,
+// at module-evaluation time — so mutating process.env.HOME from inside a
+// beforeEach (after add-mcp is already imported and evaluated) has no
+// effect on it. There's no supported way to redirect that per-test within
+// this process. The antigravity-global-fallback behavior is instead
+// exercised in connect.global-fallback.test.ts, run as a separate child
+// process spawned with HOME pre-set, so add-mcp never sees the real one.
 describe("connectAgent", () => {
   let cwd: string;
 
@@ -78,6 +85,22 @@ describe("connectAgent", () => {
     const after = JSON.parse(readFileSync(afterReconnect.path, "utf-8"));
     expect(after.mcpServers.other).toEqual({ command: "other-tool" });
     expect(after.mcpServers.purix).toBeDefined();
+  });
+
+  test("agents with no project-level config are identified correctly (fallback path covered in connect.global-fallback.test.ts)", () => {
+    // The actual global-scope write for these agents can't be safely
+    // exercised in this file — see the module comment above. This just
+    // pins down which agents connectAgent's fallback branch applies to,
+    // so a future add-mcp upgrade that changes this list is caught here
+    // even though the write behavior is tested elsewhere.
+    expect(agents["antigravity"]?.localConfigPath).toBeUndefined();
+    expect(agents["claude-code"]?.localConfigPath).toBeDefined();
+  });
+
+  test("still prefers project scope for agents that support it, even with the fallback in place", () => {
+    const { result } = connectAgent("claude-code", cwd, "claude-code");
+    expect(result.success).toBe(true);
+    expect(result.path).toBe(join(cwd, ".mcp.json"));
   });
 
   test("every add-mcp-known agent can be targeted without connect.ts crashing on an unknown type", () => {

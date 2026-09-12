@@ -2,7 +2,6 @@
 //
 // CLI surface for the BYOK provider layer (src/llm/providers.ts).
 import type { Command } from "commander";
-import { listProviders, persistProviderChoice, persistCustomProvider, activeProviderId, getProvider } from "@purix/core/llm/providers";
 
 export function registerProviderCommands(program: Command) {
   program
@@ -13,7 +12,8 @@ export function registerProviderCommands(program: Command) {
     .option("--model-low <id>", "required if id is 'custom': model id for the low tier")
     .option("--model-high <id>", "required if id is 'custom': model id for the high tier")
     .option("--label <text>", "optional display label for a custom provider")
-    .action((id: string, opts: { baseUrl?: string; keyEnv?: string; modelLow?: string; modelHigh?: string; label?: string }) => {
+    .action(async (id: string, opts: { baseUrl?: string; keyEnv?: string; modelLow?: string; modelHigh?: string; label?: string }) => {
+      const { listProviders, persistProviderChoice, persistCustomProvider } = await import("@purix/core/llm/providers");
       if (id === "custom") {
         if (!opts.baseUrl || !opts.keyEnv || !opts.modelLow || !opts.modelHigh) {
           console.log(
@@ -45,7 +45,8 @@ export function registerProviderCommands(program: Command) {
   program
     .command("provider-status")
     .description("Show which LLM provider is active and whether a key is configured")
-    .action(() => {
+    .action(async () => {
+      const { listProviders, activeProviderId, getProvider } = await import("@purix/core/llm/providers");
       let id: string;
       try {
         id = activeProviderId();
@@ -68,7 +69,8 @@ export function registerProviderCommands(program: Command) {
   program
     .command("provider-list")
     .description("List every supported LLM provider (registry + the custom escape hatch)")
-    .action(() => {
+    .action(async () => {
+      const { listProviders, activeProviderId } = await import("@purix/core/llm/providers");
       let active: string | null = null;
       try {
         active = activeProviderId();

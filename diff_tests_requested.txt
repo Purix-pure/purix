@@ -1,0 +1,67 @@
+﻿diff --git a/packages/cli/src/cli.integration.test.ts b/packages/cli/src/cli.integration.test.ts
+index 20717b5..99422d9 100644
+--- a/packages/cli/src/cli.integration.test.ts
++++ b/packages/cli/src/cli.integration.test.ts
+@@ -82,8 +82,8 @@ function findCommand(program: ReturnType<typeof buildProgram>, path: string[]):
+   return command;
+ }
+ 
+-function assertCommandTree(specs: CommandSpec[], parentPath: string[] = []): void {
+-  const program = buildProgram();
++async function assertCommandTree(specs: CommandSpec[], parentPath: string[] = []): Promise<void> {
++  const program = await buildProgram();
+   for (const spec of specs) {
+     const path = [...parentPath, spec.name];
+     const command = findCommand(program, path);
+@@ -128,12 +128,12 @@ function runCli(args: string[], cwd: string): { status: number | null; output: s
+ }
+ 
+ describe("Purix CLI integration contract", () => {
+-  it("exposes every public command, subcommand, and declared option", () => {
+-    assertCommandTree(publicCommandTree);
++  it("exposes every public command, subcommand, and declared option", async () => {
++    await assertCommandTree(publicCommandTree);
+   });
+ 
+-  it("does not expose deferred MCP client or internal developer commands", () => {
+-    const names = buildProgram().commands.map((command) => command.name());
++  it("does not expose deferred MCP client or internal developer commands", async () => {
++    const names = (await buildProgram()).commands.map((command) => command.name());
+     expect(names).not.toEqual(expect.arrayContaining(["mcp-add", "mcp-remove", "mcp-list", "mcp-tools", "mcp-call", "dev"]));
+   });
+ 
+diff --git a/packages/cli/src/cli.test.ts b/packages/cli/src/cli.test.ts
+index 6f39ec6..fb6be0a 100644
+--- a/packages/cli/src/cli.test.ts
++++ b/packages/cli/src/cli.test.ts
+@@ -12,8 +12,8 @@ import { expect } from "expect";
+ import { buildProgram } from "./cli";
+ 
+ describe("buildProgram", () => {
+-  test("registers every expected top-level command group", () => {
+-    const program = buildProgram();
++  test("registers every expected top-level command group", async () => {
++    const program = await buildProgram();
+     const names = program.commands.map((c) => c.name());
+ 
+     // One representative command per registered group ΓÇö this is a
+@@ -33,15 +33,15 @@ describe("buildProgram", () => {
+     expect(names).toContain("logout");
+   });
+ 
+-  test("exposes a top-level --quiet flag", () => {
+-    const program = buildProgram();
++  test("exposes a top-level --quiet flag", async () => {
++    const program = await buildProgram();
+     const quietOption = program.options.find((o) => o.long === "--quiet");
+     expect(quietOption).toBeDefined();
+     expect(quietOption?.short).toBe("-q");
+   });
+ 
+-  test("mcp command stays unregistered for v1.0 (see the gating note in cli.ts)", () => {
+-    const program = buildProgram();
++  test("mcp command stays unregistered for v1.0 (see the gating note in cli.ts)", async () => {
++    const program = await buildProgram();
+     const names = program.commands.map((c) => c.name());
+     expect(names).not.toContain("mcp");
+   });

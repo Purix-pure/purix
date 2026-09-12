@@ -1,11 +1,5 @@
 // src/cli/commands/migrations.ts
 import type { Command } from "commander";
-import { confirmGated } from "@purix/core/cli-io/gated-confirm";
-import { readManifest } from "@purix/core/manifest/store";
-import { checkDrift, acceptDrift } from "@purix/core/state/drift";
-import { activateMigration, rollbackMigration } from "@purix/core/state/migration";
-import { listMigrations } from "@purix/core/manifest/migrations";
-import { recordEvent } from "@purix/core/manifest/events";
 
 export function registerMigrationsCommands(program: Command) {
   // ---------------------------------------------------------------------------
@@ -17,6 +11,10 @@ export function registerMigrationsCommands(program: Command) {
     .option("-a, --agent <n>", "the agent believed responsible for the out-of-band edit, if known")
     .action(async (componentId: string, opts: { agent?: string }) => {
       try {
+        const { confirmGated } = await import("@purix/core/cli-io/gated-confirm");
+        const { readManifest } = await import("@purix/core/manifest/store");
+        const { checkDrift, acceptDrift } = await import("@purix/core/state/drift");
+        const { recordEvent } = await import("@purix/core/manifest/events");
         const entry = readManifest(componentId);
         if (!entry) {
           console.error(`No manifest entry for "${componentId}".`);
@@ -51,6 +49,8 @@ export function registerMigrationsCommands(program: Command) {
     .description("Activate a staged migration (§6.5)")
     .action(async (id: string) => {
       try {
+        const { confirmGated } = await import("@purix/core/cli-io/gated-confirm");
+        const { activateMigration } = await import("@purix/core/state/migration");
         const proceed = await confirmGated(`Activate migration ${id} and write it to real files?`, "migration_activate", null);
         if (!proceed) return;
         const result = await activateMigration(id, process.cwd());
@@ -67,6 +67,8 @@ export function registerMigrationsCommands(program: Command) {
     .description("Roll back a migration to its before-snapshot")
     .action(async (id: string) => {
       try {
+        const { confirmGated } = await import("@purix/core/cli-io/gated-confirm");
+        const { rollbackMigration } = await import("@purix/core/state/migration");
         const proceed = await confirmGated(`Roll back migration ${id}?`, "migration_rollback", null);
         if (!proceed) return;
         const result = await rollbackMigration(id, process.cwd());
@@ -81,7 +83,8 @@ export function registerMigrationsCommands(program: Command) {
   program
     .command("migrations [componentId]")
     .description("List migration records")
-    .action((componentId?: string) => {
+    .action(async (componentId?: string) => {
+      const { listMigrations } = await import("@purix/core/manifest/migrations");
       const records = listMigrations(componentId);
       if (records.length === 0) {
         console.log("No migration records.");

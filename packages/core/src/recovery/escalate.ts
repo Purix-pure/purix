@@ -171,10 +171,11 @@ export async function runEscalation(
 
       const lang = resolveLanguage(componentId, targetDir);
       const provider = getLanguageProvider(lang);
-      const testFilesBefore = originalFiles.filter((f) => provider?.testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
-      const testFilesAfter = candidateFiles.map((f) => ({ path: f.path, content: f.new_content })).filter((f) => provider?.testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
-      const testIntegrity = provider?.testIntegrityChecker
-        ? provider.testIntegrityChecker.check(testFilesBefore, testFilesAfter)
+      const testIntegrityChecker = await provider?.getTestIntegrityChecker?.();
+      const testFilesBefore = originalFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
+      const testFilesAfter = candidateFiles.map((f) => ({ path: f.path, content: f.new_content })).filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
+      const testIntegrity = testIntegrityChecker
+        ? testIntegrityChecker.check(testFilesBefore, testFilesAfter)
         : { flagged: true, findings: [{ path: "unknown", reason: `no test integrity checker registered for language ${lang} — failing closed` }] };
       if (testIntegrity.flagged) {
         console.log(`   🛑 Refusing operation library promotion: test integrity check flagged test assertion weakening or skip additions.`);

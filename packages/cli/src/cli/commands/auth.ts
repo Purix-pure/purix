@@ -5,12 +5,30 @@
 // over SSH exactly like the rest of the CLI.
 import type { Command } from "commander";
 import * as readline from "node:readline/promises";
-import { apiClient, ApiUnreachableError, ApiRequestError } from "@purix/core/security/api_client";
-import { saveSession, clearSession, loadSession } from "@purix/core/security/session";
-import { refreshEntitlements, clearEntitlementsCache } from "@purix/core/licensing/tier";
-import { getProjectId } from "@purix/core/state/project_id";
-import { getMachineId } from "@purix/core/state/machine_id";
-import { getSavingsSummary } from "@purix/core/llm/budget";
+
+async function loadAuthRuntime() {
+  const [apiClientModule, sessionModule, licensingModule, projectIdModule, machineIdModule, budgetModule] = await Promise.all([
+    import("@purix/core/security/api_client"),
+    import("@purix/core/security/session"),
+    import("@purix/core/licensing/tier"),
+    import("@purix/core/state/project_id"),
+    import("@purix/core/state/machine_id"),
+    import("@purix/core/llm/budget"),
+  ]);
+
+  return {
+    apiClient: apiClientModule.apiClient,
+    ApiUnreachableError: apiClientModule.ApiUnreachableError,
+    saveSession: sessionModule.saveSession,
+    clearSession: sessionModule.clearSession,
+    loadSession: sessionModule.loadSession,
+    refreshEntitlements: licensingModule.refreshEntitlements,
+    clearEntitlementsCache: licensingModule.clearEntitlementsCache,
+    getProjectId: projectIdModule.getProjectId,
+    getMachineId: machineIdModule.getMachineId,
+    getSavingsSummary: budgetModule.getSavingsSummary,
+  };
+}
 
 async function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -26,7 +44,8 @@ export function registerAuthCommands(program: Command) {
     .command("login")
     .description("Log in to sync savings history and unlock your web dashboard")
     .action(async () => {
-      const existing = loadSession();
+      const runtime = await loadAuthRuntime();
+      const existing = runtime.loadSession();
       if (existing) {
         console.log(`Already logged in as ${existing.email}. Run "purix logout" first to switch accounts.`);
         return;
@@ -40,7 +59,7 @@ export function registerAuthCommands(program: Command) {
       }
 
       try {
-        await apiClient.requestCode(email);
+        await runtime.apiClient.requestCode(email);
       } catch (err) {
         // Part 3: "if email delivery fails, return a real error to the
         // CLI, never a silent 'check your email'" — surfaced verbatim
@@ -55,7 +74,7 @@ export function registerAuthCommands(program: Command) {
 
       let token: string;
       try {
-        const result = await apiClient.verifyCode(email, code);
+        const result = await runtime.apiClient.verifyCode(email, code);
         token = result.token;
       } catch (err) {
         console.error(`Login failed: ${err instanceof Error ? err.message : err}`);
@@ -63,7 +82,7 @@ export function registerAuthCommands(program: Command) {
         return;
       }
 
-      saveSession(token, email);
+      runtime.saveSession(token, email);
       console.log(`✅ Logged in as ${email}.`);
 
       // Part 4: "On first successful login, call /sync/savings with the
@@ -79,12 +98,12 @@ export function registerAuthCommands(program: Command) {
       // as the user works in them, so the end state converges to "every
       // project synced" over time rather than instantly at login.
       try {
-        const summary = getSavingsSummary(3650); // ~10 years — effectively "all time" for this project
+        const summary = runtime.getSavingsSummary(3650); // ~10 years — effectively "all time" for this project
         if (summary.callCount > 0) {
-          await apiClient.syncSavings([
+          await runtime.apiClient.syncSavings([
             {
-              projectId: getProjectId(),
-              machineId: getMachineId(),
+              projectId: runtime.getProjectId(),
+              machineId: runtime.getMachineId(),
               windowStart: new Date(0).toISOString(),
               totalSavingsUsd: summary.totalSavingsUsd,
               callCount: summary.callCount,
@@ -100,9 +119,9 @@ export function registerAuthCommands(program: Command) {
       }
 
       try {
-        await refreshEntitlements();
+        await runtime.refreshEntitlements();
       } catch (err) {
-        if (!(err instanceof ApiUnreachableError)) {
+        if (!(err instanceof runtime.ApiUnreachableError)) {
           console.warn(`  (couldn't fetch entitlements yet: ${err instanceof Error ? err.message : err})`);
         }
       }
@@ -112,30 +131,31 @@ export function registerAuthCommands(program: Command) {
     .command("logout")
     .description("Log out and clear the local session")
     .action(async () => {
-      if (!loadSession()) {
+      const runtime = await loadAuthRuntime();
+      if (!runtime.loadSession()) {
         console.log("Not logged in.");
         return;
       }
 
       try {
-        await apiClient.logout();
+        await runtime.apiClient.logout();
       } catch (err) {
         // Best-effort server-side invalidation — local logout must
         // succeed even offline, or a user with no connectivity could
         // never log out of a machine.
-        if (!(err instanceof ApiUnreachableError)) {
+        if (!(err instanceof runtime.ApiUnreachableError)) {
           console.warn(`  (server logout didn't complete: ${err instanceof Error ? err.message : err})`);
         }
       }
 
-      clearSession();
+      runtime.clearSession();
       // This must happen immediately, not on the next TTL expiry — see
       // the design note in tier.ts / the offline-grace interaction this
       // exists to close: without it, logging out, then losing
       // connectivity, then running a Pro-gated command would read the
       // stale cached tier under the 72-hour grace window and let a
       // logged-out session through as Pro for up to three days.
-      clearEntitlementsCache();
+      runtime.clearEntitlementsCache();
       console.log("✅ Logged out.");
     });
 }

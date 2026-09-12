@@ -1,6 +1,5 @@
 // src/cli/commands/tools.ts
 import type { Command } from "commander";
-import { suggestTools, formatSuggestions } from "@purix/core/tools/matchmaker";
 
 export function registerToolsCommands(program: Command) {
   program
@@ -8,6 +7,7 @@ export function registerToolsCommands(program: Command) {
     .description("Tool Matchmaker: suggest vetted npm packages for a purpose (advisory only, never installs)")
     .action(async (purpose: string) => {
       try {
+        const { suggestTools, formatSuggestions } = await import("@purix/core/tools/matchmaker");
         console.log(`Searching npm for vetted packages: "${purpose}"...`);
         const suggestions = await suggestTools(purpose);
         console.log(formatSuggestions(suggestions));

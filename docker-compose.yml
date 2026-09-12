@@ -1,0 +1,26 @@
+services:
+  purix:
+    build: .
+    image: purix:0.2.0-beta.0
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    # Overridden per-invocation, e.g.:
+    #   docker compose run --rm purix status
+    #   docker compose run --rm purix mcp-serve
+    command: ["--help"]
+
+  # `purix mcp-serve` speaks MCP over stdio, so an agent connecting to it
+  # needs stdin/stdout attached rather than a detached service — this
+  # profile exists so `docker compose run --rm mcp-serve` (not `up`)
+  # attaches a real interactive stdio pipe.
+  mcp-serve:
+    build: .
+    image: purix:0.2.0-beta.0
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: false
+    entrypoint: ["node", "/app/packages/cli/dist/cli.js", "mcp-serve"]
+    profiles: ["mcp"]

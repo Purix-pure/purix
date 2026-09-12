@@ -1,10 +1,16 @@
-// src/cli/commands/connect.test.ts
+// src/cli/commands/config.test.ts
+//
+// NOTE: this file is a duplicate of connect.test.ts's "connectAgent" suite
+// (same tests, same describe block) — flagged separately, not something
+// this pass changes beyond fixing the import so it doesn't crash the test
+// run. Worth deciding whether to delete this file or give it real
+// config.ts-specific tests of its own.
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectAgent } from "./connect";
+import { connectAgent } from "./connect_agent";
 import { agents, getAgentTypes } from "add-mcp";
 
 // add-mcp resolves each agent's global configPath from os.homedir() once,

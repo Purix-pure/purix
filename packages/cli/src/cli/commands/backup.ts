@@ -1,8 +1,6 @@
 // src/cli/commands/backup.ts
 import type { Command } from "commander";
-import { confirmGated } from "@purix/core/cli-io/gated-confirm";
-import { exportManifestData, importManifestData, type ManifestBackup } from "@purix/core/manifest/store";
-import { reconcilePendingOperations } from "@purix/core/state/reconcile";
+import type { ManifestBackup } from "@purix/core/manifest/store";
 import { readFile, writeFile } from "node:fs/promises";
 
 export function registerBackupCommands(program: Command) {
@@ -11,6 +9,7 @@ export function registerBackupCommands(program: Command) {
     .description("Export the manifest + pending operations to a JSON file")
     .action(async (outFile: string) => {
       try {
+        const { exportManifestData } = await import("@purix/core/manifest/store");
         const data = exportManifestData();
         await writeFile(outFile, JSON.stringify(data, null, 2), "utf-8");
         console.log(`✅ Backed up ${data.manifest.length} component(s) to ${outFile}.`);
@@ -25,6 +24,8 @@ export function registerBackupCommands(program: Command) {
     .description("Restore the manifest from a backup file — DESTRUCTIVE, replaces current state")
     .action(async (inFile: string) => {
       try {
+        const { confirmGated } = await import("@purix/core/cli-io/gated-confirm");
+        const { importManifestData } = await import("@purix/core/manifest/store");
         const proceed = await confirmGated(`This will WIPE and replace the current manifest with the contents of ${inFile}. Continue?`, "restore", null);
         if (!proceed) return;
         const raw = JSON.parse(await readFile(inFile, "utf-8")) as ManifestBackup;
@@ -44,6 +45,7 @@ export function registerBackupCommands(program: Command) {
     .description("Force a reconciliation pass for crash-interrupted operations")
     .action(async () => {
       try {
+        const { reconcilePendingOperations } = await import("@purix/core/state/reconcile");
         await reconcilePendingOperations();
         console.log("Reconciliation check complete.");
       } catch (err) {

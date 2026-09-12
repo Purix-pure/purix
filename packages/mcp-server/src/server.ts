@@ -166,7 +166,7 @@ export function createPurixMcpServer(): Server {
   const server = new Server(
     {
       name: "purix-mcp-server",
-      version: "0.2.0",
+      version: "0.2.0-beta.0",
     },
     {
       capabilities: {

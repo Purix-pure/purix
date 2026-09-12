@@ -27,11 +27,11 @@ async function connect(name: string): Promise<Client> {
 
   const baseUrl = new URL(server.url);
   try {
-    const client = new Client({ name: "purix", version: "0.1.0" });
+    const client = new Client({ name: "purix", version: "0.2.0-beta.0" });
     await client.connect(new StreamableHTTPClientTransport(baseUrl));
     return client;
   } catch {
-    const client = new Client({ name: "purix", version: "0.1.0" });
+    const client = new Client({ name: "purix", version: "0.2.0-beta.0" });
     await client.connect(new SSEClientTransport(baseUrl));
     return client;
   }

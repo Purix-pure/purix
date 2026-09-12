@@ -1,1 +1,13 @@
-{ "$schema": "https://opencode.ai/config.json", "mcp": { "purix": { "type": "local", "command": ["node", "packages/cli/dist/cli.js", "mcp-serve"], "enabled": true } } }
+{ "$schema": "https://opencode.ai/config.json", "mcp": {
+    "purix": {
+      "type": "local",
+      "command": [
+        "purix",
+        "mcp-serve"
+      ],
+      "environment": {
+        "PURIX_MCP_AGENT_ID": "opencode"
+      },
+      "enabled": true
+    }
+  } }

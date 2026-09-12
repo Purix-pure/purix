@@ -39,10 +39,11 @@ describe("Python Provider", () => {
     expect(fingerprint).toEqual({ flask: "2.0.0", numpy: "1.21.0" });
   });
 
-  it("testIntegrityChecker works", () => {
+  it("testIntegrityChecker works", async () => {
     const before = [{ path: "test.py", content: "assert 1 == 1\nassert 2 == 2" }];
     const after = [{ path: "test.py", content: "assert 1 == 1" }];
-    const res = pythonProvider.testIntegrityChecker!.check(before, after);
+    const checker = (await pythonProvider.getTestIntegrityChecker!())!;
+    const res = checker.check(before, after);
     expect(res.flagged).toBe(true);
     expect(res.findings.length).toBe(1);
   });

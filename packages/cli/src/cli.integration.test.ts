@@ -72,9 +72,7 @@ const publicCommandTree: CommandSpec[] = [
   { name: "connect", syntax: "connect [agent]", options: ["--agent-id"] },
 ];
 
-function findCommand(program: ReturnType<typeof buildProgram>, path: string[]): ReturnType<typeof buildProgram> extends infer T
-  ? T extends { commands: infer _ } ? any : never
-  : never {
+function findCommand(program: Awaited<ReturnType<typeof buildProgram>>, path: string[]): any {
   let command: any = program;
   for (const name of path) {
     command = command.commands.find((candidate: any) => candidate.name() === name);
@@ -82,8 +80,8 @@ function findCommand(program: ReturnType<typeof buildProgram>, path: string[]): 
   return command;
 }
 
-function assertCommandTree(specs: CommandSpec[], parentPath: string[] = []): void {
-  const program = buildProgram();
+async function assertCommandTree(specs: CommandSpec[], parentPath: string[] = []): Promise<void> {
+  const program = await buildProgram();
   for (const spec of specs) {
     const path = [...parentPath, spec.name];
     const command = findCommand(program, path);
@@ -128,12 +126,12 @@ function runCli(args: string[], cwd: string): { status: number | null; output: s
 }
 
 describe("Purix CLI integration contract", () => {
-  it("exposes every public command, subcommand, and declared option", () => {
-    assertCommandTree(publicCommandTree);
+  it("exposes every public command, subcommand, and declared option", async () => {
+    await assertCommandTree(publicCommandTree);
   });
 
-  it("does not expose deferred MCP client or internal developer commands", () => {
-    const names = buildProgram().commands.map((command) => command.name());
+  it("does not expose deferred MCP client or internal developer commands", async () => {
+    const names = (await buildProgram()).commands.map((command) => command.name());
     expect(names).not.toEqual(expect.arrayContaining(["mcp-add", "mcp-remove", "mcp-list", "mcp-tools", "mcp-call", "dev"]));
   });
 
@@ -153,6 +151,33 @@ describe("Purix CLI integration contract", () => {
         if (result.status !== 0) throw new Error(`${args.join(" ")} failed:\n${result.output}`);
         expect(result.status).toBe(0);
       }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  // Regression test for a real bug found by running the built binary
+  // directly: buildProgram()-based tests above never touch the
+  // isDirectlyExecuted() startup fast-path in cli.ts, since importing this
+  // module for testing is exactly the case that guard is designed to skip.
+  // `--help` and a bare invocation (no argv at all) used to be routed into
+  // the same zero-commands "minimalProgram" as `--version`, so the two
+  // things a brand-new user is most likely to run first showed no commands
+  // at all. Spawning a real process is required to exercise this path.
+  it("lists the full command set on --help and on a bare invocation", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "purix-cli-help-"));
+    try {
+      for (const args of [["--help"], []]) {
+        const result = runCli(args, cwd);
+        expect(result.output).toContain("Commands:");
+        expect(result.output).toContain("create <n>");
+        expect(result.output).toContain("mcp-serve");
+      }
+      // --version must still take the fast path: no "Commands:" section,
+      // and no reconcile/lock/scheduler side effects from full registration.
+      const versionResult = runCli(["--version"], cwd);
+      expect(versionResult.output).not.toContain("Commands:");
+      expect(versionResult.output.trim()).toBe("0.2.0-beta.0");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

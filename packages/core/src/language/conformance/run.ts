@@ -105,7 +105,8 @@ export async function runConformanceSuite(baseDir: string = process.cwd()): Prom
 
     // 3. testIntegrityChecker
     try {
-      if (provider.testIntegrityChecker) {
+      const testIntegrityChecker = await provider.getTestIntegrityChecker?.();
+      if (testIntegrityChecker) {
         const integrityDir = resolve(fixtureDir, scenarios.integrityBefore.subdir);
         const beforePath = resolve(integrityDir, scenarios.integrityBefore.file);
         const afterPath = resolve(integrityDir, scenarios.integrityAfter.file);
@@ -116,7 +117,7 @@ export async function runConformanceSuite(baseDir: string = process.cwd()): Prom
         const suffix = scenarios.integrityAfter.file.slice(scenarios.integrityAfter.file.lastIndexOf('_'));
         const syntheticPath = `conformance_fixture${suffix}`;
         
-        const res = provider.testIntegrityChecker.check(
+        const res = testIntegrityChecker.check(
           [{ path: syntheticPath, content: beforeContent }],
           [{ path: syntheticPath, content: afterContent }]
         );

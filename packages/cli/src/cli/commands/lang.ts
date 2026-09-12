@@ -1,9 +1,5 @@
 // packages/cli/src/cli/commands/lang.ts
 import type { Command } from "commander";
-import { getLanguageProvider, getLanguagePack } from "@purix/core/language/registry";
-import { requireLanguage, getEntitlements } from "@purix/core/licensing/tier";
-import { confirm } from "@purix/core/cli-io/confirm";
-import { runConformanceSuite } from "@purix/core/language/conformance/run";
 
 export function registerLangCommands(program: Command) {
   const langCmd = program.command("lang").description("Manage language packs and verification tooling");
@@ -11,7 +7,9 @@ export function registerLangCommands(program: Command) {
   langCmd
     .command("list")
     .description("List registered language providers and pack install status")
-    .action(() => {
+    .action(async () => {
+      const { getLanguageProvider, getLanguagePack } = await import("@purix/core/language/registry");
+      const { getEntitlements } = await import("@purix/core/licensing/tier");
       const baseDir = process.cwd();
       const ent = getEntitlements(baseDir);
       const languages = ["typescript", "python", "rust", "go", "ruby"];
@@ -31,7 +29,8 @@ export function registerLangCommands(program: Command) {
   langCmd
     .command("status <id>")
     .description("Show detailed per-tool status and capabilities for a language pack")
-    .action((id: string) => {
+    .action(async (id: string) => {
+      const { getLanguageProvider, getLanguagePack } = await import("@purix/core/language/registry");
       const baseDir = process.cwd();
       const pack = getLanguagePack(id);
       const prov = getLanguageProvider(id);
@@ -61,6 +60,7 @@ export function registerLangCommands(program: Command) {
     .command("verify <id>")
     .description("Run conformance suite and gate-parity verification for a language")
     .action(async (id: string) => {
+      const { runConformanceSuite } = await import("@purix/core/language/conformance/run");
       const baseDir = process.cwd();
       console.log(`Running gate-parity conformance suite for "${id}"...`);
       const { certified, report } = await runConformanceSuite(baseDir);
@@ -89,6 +89,9 @@ export function registerLangCommands(program: Command) {
     .command("install <id>")
     .description("Install tooling for a language pack in strict sequence")
     .action(async (id: string) => {
+      const { getLanguagePack } = await import("@purix/core/language/registry");
+      const { requireLanguage } = await import("@purix/core/licensing/tier");
+      const { confirm } = await import("@purix/core/cli-io/confirm");
       const baseDir = process.cwd();
 
       const pack = getLanguagePack(id);
@@ -176,6 +179,8 @@ export function registerLangCommands(program: Command) {
     .command("uninstall <id>")
     .description("Uninstall tools for a language pack")
     .action(async (id: string) => {
+      const { getLanguagePack } = await import("@purix/core/language/registry");
+      const { confirm } = await import("@purix/core/cli-io/confirm");
       const baseDir = process.cwd();
       const pack = getLanguagePack(id);
       if (!pack) {

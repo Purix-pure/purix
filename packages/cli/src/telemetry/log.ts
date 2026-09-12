@@ -27,7 +27,7 @@ export function logError(err: unknown, context?: string): void {
       context: context ?? "cli",
       message: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
-      version: "0.1.0",
+      version: "0.2.0-beta.0",
     };
     appendFileSync(p, JSON.stringify(entry) + "\n", "utf-8");
 

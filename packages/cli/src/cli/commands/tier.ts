@@ -9,13 +9,13 @@
 // *format* of. `tier-status` stays, and now does a live refresh rather
 // than only reading whatever's cached.
 import type { Command } from "commander";
-import { getEntitlements, refreshEntitlements } from "@purix/core/licensing/tier";
 
 export function registerTierCommands(program: Command) {
   program
     .command("tier-status")
     .description("Show current tier and what it unlocks (refreshes from the server if logged in)")
     .action(async () => {
+      const { getEntitlements, refreshEntitlements } = await import("@purix/core/licensing/tier");
       try {
         await refreshEntitlements();
       } catch (err) {

@@ -7,7 +7,7 @@ import type { TestRunResult } from "../../verify/tests.js";
 import type { IdiomCheckResult, IdiomFinding } from "../../verify/idiom.js";
 import type { PinningFinding, VulnFinding } from "../../security/deps_audit.js";
 import { parseLockfileFingerprint, providerKitHooks, runIsolatedOrNotInstalled } from "../provider-kit.js";
-import { pythonTestIntegrityChecker } from "../../verify/python_test_integrity.js";
+import type { TestIntegrityChecker } from "../../verify/test_integrity.js";
 import { resolveToolchainTmp, toolchainSubdir } from "../../platform/toolchain_tmp.js";
 
 function getVenvBinPath(baseDir: string, binName: string): string {
@@ -46,7 +46,11 @@ function checkToolAvailable(baseDir: string, binName: string): boolean {
 export const pythonProvider: LanguageProvider = {
   id: "python",
   minSupportedVersion: "3.10.0",
-  testIntegrityChecker: pythonTestIntegrityChecker,
+
+  async getTestIntegrityChecker(): Promise<TestIntegrityChecker> {
+    const { pythonTestIntegrityChecker } = await import("../../verify/python_test_integrity.js");
+    return pythonTestIntegrityChecker;
+  },
 
   detect(baseDir: string = process.cwd()): boolean {
     return (

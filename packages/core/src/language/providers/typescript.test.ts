@@ -33,10 +33,11 @@ describe("TypeScript Provider", () => {
     expect(fingerprint).toEqual({ "lodash": "4.0.0" });
   });
 
-  it("testIntegrityChecker works", () => {
+  it("testIntegrityChecker works", async () => {
     const before = [{ path: "test.test.ts", content: "expect(1).toBe(1);\nexpect(2).toBe(2);" }];
     const after = [{ path: "test.test.ts", content: "expect(1).toBe(1);" }];
-    const res = typescriptProvider.testIntegrityChecker!.check(before, after);
+    const checker = (await typescriptProvider.getTestIntegrityChecker!())!;
+    const res = checker.check(before, after);
     expect(res.flagged).toBe(true);
     expect(res.findings.length).toBe(1);
   });

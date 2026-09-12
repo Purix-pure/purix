@@ -1,45 +1,196 @@
 // src/cli/commands/lifecycle.ts
 import type { Command } from "commander";
-import { confirmGated } from "@purix/core/cli-io/gated-confirm";
-import {
-  readManifest,
-  writeManifestWithLimitCheck,
-  linkComponents,
-  createPendingOperation,
-  completeModification,
-  commitManifestWithRetry,
-  deletePendingOperation,
-  deleteManifestEntry,
-  removeDependent,
-  removeDependencyReference,
-} from "@purix/core/manifest/store";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { buildManifestEntry, writeScaffold } from "@purix/core/entrypoints/scaffold";
 import { snapshotSavings, printRunSummary } from "../savings_output.js";
-import { classifyGreenfield, refineIntent, classifyModification, classifyDiff, scanDiffForInjectionAttempts, scanFilesForInjectionAttempts } from "@purix/core/llm/classify";
-import { scanForInjectionAttempts } from "@purix/core/llm/injection";
-import { checkDrift } from "@purix/core/state/drift";
-import { applyModificationFiles, rollbackModification } from "@purix/core/entrypoints/modify";
-import { computeSyncHash } from "@purix/core/state/hash";
-import { compilePatch } from "@purix/core/verify/compile";
-import { verifyInSandbox } from "@purix/core/sandbox/sandbox";
-import { getDependents, reVerifyDependents } from "@purix/core/verify/impact";
-import { runSelfHealingLoop } from "@purix/core/recovery/heal";
-import { runEscalation } from "@purix/core/recovery/escalate";
-import { auditSecurityPatterns } from "@purix/core/security/security_audit";
-import { suggestTools, formatSuggestions } from "@purix/core/tools/matchmaker";
-import { buildMigrationPlan, stageMigration } from "@purix/core/state/migration";
-import { assertAuthorizedToApprove } from "@purix/core/security/auth";
-import { recordEvent } from "@purix/core/manifest/events";
-import { readRelevantMemory, readGlobalMemory, formatMemoryLines } from "@purix/core/manifest/memory";
-import { computeRequestKey, findPriorCommit, recordRequestCommit } from "@purix/core/state/idempotency";
-import { ingestDiffFromFile } from "@purix/core/entrypoints/ingest";
-import { resolveLanguage, getLanguageProvider } from "@purix/core/language/registry";
-import { evaluateTrustGate, hasTestCoverage, checkDeterministicOverrideFloor, loadDofPatterns } from "@purix/core/gates/trustgate";
-import { setBudgetOverride } from "@purix/core/llm/budget";
-import { setSecurityOverride } from "@purix/core/gates/security_gate";
-import { recordOverrideAudit } from "@purix/core/security/override_audit";
+
+async function loadLifecycleRuntime() {
+  const [
+    gatedConfirmModule,
+    manifestStoreModule,
+    scaffoldModule,
+    classifyModule,
+    injectionModule,
+    driftModule,
+    modifyModule,
+    hashModule,
+    compileModule,
+    sandboxModule,
+    impactModule,
+    healModule,
+    escalateModule,
+    securityAuditModule,
+    matchmakerModule,
+    migrationModule,
+    authModule,
+    eventsModule,
+    memoryModule,
+    idempotencyModule,
+    ingestModule,
+    registryModule,
+    trustgateModule,
+    budgetModule,
+    securityGateModule,
+    overrideAuditModule,
+  ] = await Promise.all([
+    import("@purix/core/cli-io/gated-confirm"),
+    import("@purix/core/manifest/store"),
+    import("@purix/core/entrypoints/scaffold"),
+    import("@purix/core/llm/classify"),
+    import("@purix/core/llm/injection"),
+    import("@purix/core/state/drift"),
+    import("@purix/core/entrypoints/modify"),
+    import("@purix/core/state/hash"),
+    import("@purix/core/verify/compile"),
+    import("@purix/core/sandbox/sandbox"),
+    import("@purix/core/verify/impact"),
+    import("@purix/core/recovery/heal"),
+    import("@purix/core/recovery/escalate"),
+    import("@purix/core/security/security_audit"),
+    import("@purix/core/tools/matchmaker"),
+    import("@purix/core/state/migration"),
+    import("@purix/core/security/auth"),
+    import("@purix/core/manifest/events"),
+    import("@purix/core/manifest/memory"),
+    import("@purix/core/state/idempotency"),
+    import("@purix/core/entrypoints/ingest"),
+    import("@purix/core/language/registry"),
+    import("@purix/core/gates/trustgate"),
+    import("@purix/core/llm/budget"),
+    import("@purix/core/gates/security_gate"),
+    import("@purix/core/security/override_audit"),
+  ]);
+
+  return {
+    confirmGated: gatedConfirmModule.confirmGated,
+    readManifest: manifestStoreModule.readManifest,
+    writeManifestWithLimitCheck: manifestStoreModule.writeManifestWithLimitCheck,
+    linkComponents: manifestStoreModule.linkComponents,
+    createPendingOperation: manifestStoreModule.createPendingOperation,
+    completeModification: manifestStoreModule.completeModification,
+    commitManifestWithRetry: manifestStoreModule.commitManifestWithRetry,
+    deletePendingOperation: manifestStoreModule.deletePendingOperation,
+    deleteManifestEntry: manifestStoreModule.deleteManifestEntry,
+    removeDependent: manifestStoreModule.removeDependent,
+    removeDependencyReference: manifestStoreModule.removeDependencyReference,
+    buildManifestEntry: scaffoldModule.buildManifestEntry,
+    writeScaffold: scaffoldModule.writeScaffold,
+    classifyGreenfield: classifyModule.classifyGreenfield,
+    refineIntent: classifyModule.refineIntent,
+    classifyModification: classifyModule.classifyModification,
+    classifyDiff: classifyModule.classifyDiff,
+    scanDiffForInjectionAttempts: classifyModule.scanDiffForInjectionAttempts,
+    scanFilesForInjectionAttempts: classifyModule.scanFilesForInjectionAttempts,
+    scanForInjectionAttempts: injectionModule.scanForInjectionAttempts,
+    checkDrift: driftModule.checkDrift,
+    applyModificationFiles: modifyModule.applyModificationFiles,
+    rollbackModification: modifyModule.rollbackModification,
+    computeSyncHash: hashModule.computeSyncHash,
+    compilePatch: compileModule.compilePatch,
+    verifyInSandbox: sandboxModule.verifyInSandbox,
+    getDependents: impactModule.getDependents,
+    reVerifyDependents: impactModule.reVerifyDependents,
+    runSelfHealingLoop: healModule.runSelfHealingLoop,
+    runEscalation: escalateModule.runEscalation,
+    auditSecurityPatterns: securityAuditModule.auditSecurityPatterns,
+    suggestTools: matchmakerModule.suggestTools,
+    formatSuggestions: matchmakerModule.formatSuggestions,
+    buildMigrationPlan: migrationModule.buildMigrationPlan,
+    stageMigration: migrationModule.stageMigration,
+    assertAuthorizedToApprove: authModule.assertAuthorizedToApprove,
+    recordEvent: eventsModule.recordEvent,
+    readRelevantMemory: memoryModule.readRelevantMemory,
+    readGlobalMemory: memoryModule.readGlobalMemory,
+    formatMemoryLines: memoryModule.formatMemoryLines,
+    computeRequestKey: idempotencyModule.computeRequestKey,
+    findPriorCommit: idempotencyModule.findPriorCommit,
+    recordRequestCommit: idempotencyModule.recordRequestCommit,
+    ingestDiffFromFile: ingestModule.ingestDiffFromFile,
+    resolveLanguage: registryModule.resolveLanguage,
+    getLanguageProvider: registryModule.getLanguageProvider,
+    evaluateTrustGate: trustgateModule.evaluateTrustGate,
+    hasTestCoverage: trustgateModule.hasTestCoverage,
+    checkDeterministicOverrideFloor: trustgateModule.checkDeterministicOverrideFloor,
+    loadDofPatterns: trustgateModule.loadDofPatterns,
+    setBudgetOverride: budgetModule.setBudgetOverride,
+    setSecurityOverride: securityGateModule.setSecurityOverride,
+    recordOverrideAudit: overrideAuditModule.recordOverrideAudit,
+  };
+}
+
+// delete is far cheaper than create/modify/ingest — it never touches the
+// classifier, sandbox verifier, escalation LLM, or language registry. It
+// was previously routed through loadLifecycleRuntime() above, which
+// imports all 26 lifecycle modules (including escalate.js, which pulls in
+// the @google/genai SDK) on every call — measured at ~5.8s of pure import
+// cost for a `delete` that only needed 3 of those modules. This loader
+// imports only what the delete action actually destructures below.
+async function loadDeleteRuntime() {
+  const [gatedConfirmModule, manifestStoreModule, eventsModule] = await Promise.all([
+    import("@purix/core/cli-io/gated-confirm"),
+    import("@purix/core/manifest/store"),
+    import("@purix/core/manifest/events"),
+  ]);
+
+  return {
+    confirmGated: gatedConfirmModule.confirmGated,
+    readManifest: manifestStoreModule.readManifest,
+    deleteManifestEntry: manifestStoreModule.deleteManifestEntry,
+    removeDependent: manifestStoreModule.removeDependent,
+    removeDependencyReference: manifestStoreModule.removeDependencyReference,
+    recordEvent: eventsModule.recordEvent,
+  };
+}
+
+// create needs the classifier (and therefore the LLM provider SDK — that
+// cost is real, unavoidable work for this command) but never touches
+// escalation, self-healing, the sandbox verifier, drift detection, diff
+// ingestion, the language registry, or the trust gate — those only matter
+// once a component already exists. Splitting this out saves ~16 of the 26
+// modules loadLifecycleRuntime() would otherwise pull in for every create.
+async function loadCreateRuntime() {
+  const [
+    gatedConfirmModule,
+    manifestStoreModule,
+    scaffoldModule,
+    classifyModule,
+    memoryModule,
+    matchmakerModule,
+    authModule,
+    hashModule,
+    budgetModule,
+    securityGateModule,
+  ] = await Promise.all([
+    import("@purix/core/cli-io/gated-confirm"),
+    import("@purix/core/manifest/store"),
+    import("@purix/core/entrypoints/scaffold"),
+    import("@purix/core/llm/classify"),
+    import("@purix/core/manifest/memory"),
+    import("@purix/core/tools/matchmaker"),
+    import("@purix/core/security/auth"),
+    import("@purix/core/state/hash"),
+    import("@purix/core/llm/budget"),
+    import("@purix/core/gates/security_gate"),
+  ]);
+
+  return {
+    confirmGated: gatedConfirmModule.confirmGated,
+    readManifest: manifestStoreModule.readManifest,
+    writeManifestWithLimitCheck: manifestStoreModule.writeManifestWithLimitCheck,
+    linkComponents: manifestStoreModule.linkComponents,
+    buildManifestEntry: scaffoldModule.buildManifestEntry,
+    writeScaffold: scaffoldModule.writeScaffold,
+    classifyGreenfield: classifyModule.classifyGreenfield,
+    readGlobalMemory: memoryModule.readGlobalMemory,
+    formatMemoryLines: memoryModule.formatMemoryLines,
+    suggestTools: matchmakerModule.suggestTools,
+    formatSuggestions: matchmakerModule.formatSuggestions,
+    assertAuthorizedToApprove: authModule.assertAuthorizedToApprove,
+    computeSyncHash: hashModule.computeSyncHash,
+    setBudgetOverride: budgetModule.setBudgetOverride,
+    setSecurityOverride: securityGateModule.setSecurityOverride,
+  };
+}
 
 export function registerLifecycleCommands(program: Command) {
   // ---------------------------------------------------------------------------
@@ -49,6 +200,23 @@ export function registerLifecycleCommands(program: Command) {
     .command("create <n>")
     .description("Scaffold a new component (Greenfield, Instruction Path)")
     .action(async (name: string) => {
+      const {
+        confirmGated,
+        readManifest,
+        writeManifestWithLimitCheck,
+        linkComponents,
+        buildManifestEntry,
+        writeScaffold,
+        classifyGreenfield,
+        readGlobalMemory,
+        formatMemoryLines,
+        suggestTools,
+        formatSuggestions,
+        assertAuthorizedToApprove,
+        computeSyncHash,
+        setBudgetOverride,
+        setSecurityOverride,
+      } = await loadCreateRuntime();
       const savingsBefore = snapshotSavings();
       if (readManifest(name)) {
         console.error(`Component "${name}" already exists in the manifest. Use "purix modify" instead.`);
@@ -132,6 +300,57 @@ export function registerLifecycleCommands(program: Command) {
     .description("Modify an existing component via the Instruction Path ( Brownfield )")
     .option("--override <reason>", "Override gate stops with a reason")
     .action(async (componentId: string, instruction: string, options: { override?: string }) => {
+      const {
+        confirmGated,
+        readManifest,
+        writeManifestWithLimitCheck,
+        createPendingOperation,
+        completeModification,
+        commitManifestWithRetry,
+        deletePendingOperation,
+        deleteManifestEntry,
+        removeDependent,
+        removeDependencyReference,
+        buildManifestEntry,
+        writeScaffold,
+        refineIntent,
+        classifyModification,
+        scanDiffForInjectionAttempts,
+        scanFilesForInjectionAttempts,
+        scanForInjectionAttempts,
+        checkDrift,
+        applyModificationFiles,
+        rollbackModification,
+        computeSyncHash,
+        compilePatch,
+        verifyInSandbox,
+        getDependents,
+        reVerifyDependents,
+        runSelfHealingLoop,
+        runEscalation,
+        auditSecurityPatterns,
+        suggestTools,
+        formatSuggestions,
+        buildMigrationPlan,
+        stageMigration,
+        assertAuthorizedToApprove,
+        recordEvent,
+        readRelevantMemory,
+        readGlobalMemory,
+        formatMemoryLines,
+        computeRequestKey,
+        findPriorCommit,
+        recordRequestCommit,
+        resolveLanguage,
+        getLanguageProvider,
+        evaluateTrustGate,
+        hasTestCoverage,
+        checkDeterministicOverrideFloor,
+        loadDofPatterns,
+        setBudgetOverride,
+        setSecurityOverride,
+        recordOverrideAudit,
+      } = await loadLifecycleRuntime();
       if (options.override !== undefined) {
         setBudgetOverride(options.override);
         setSecurityOverride(options.override);
@@ -362,10 +581,11 @@ export function registerLifecycleCommands(program: Command) {
       });
       const lang = resolveLanguage(componentId, process.cwd());
       const provider = getLanguageProvider(lang);
-      const testFilesBefore = originalFiles.filter((f) => provider?.testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
-      const testFilesAfter = finalFiles.filter((f) => provider?.testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test.")).map((f) => ({ path: f.path, content: f.new_content }));
-      const testIntegrity = provider?.testIntegrityChecker
-        ? provider.testIntegrityChecker.check(testFilesBefore, testFilesAfter)
+      const testIntegrityChecker = await provider?.getTestIntegrityChecker?.();
+      const testFilesBefore = originalFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
+      const testFilesAfter = finalFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test.")).map((f) => ({ path: f.path, content: f.new_content }));
+      const testIntegrity = testIntegrityChecker
+        ? testIntegrityChecker.check(testFilesBefore, testFilesAfter)
         : { flagged: true, findings: [{ path: "unknown", reason: `no test integrity checker registered for language ${lang} — failing closed` }] };
       if (testIntegrity.flagged) {
         recordEvent("test_integrity_flag", { component_id: componentId, operation: verdict.operation, detail: { findings: testIntegrity.findings } });
@@ -533,6 +753,60 @@ export function registerLifecycleCommands(program: Command) {
     .description("Ingest an external diff (PR patch, pre-commit hook output, agent-authored diff) against a tracked component")
     .option("-a, --agent <name>", "the upstream agent that produced this diff (cursor, claude-code, devin, human, ...)")
     .action(async (componentId: string, diffFile: string, opts: { agent?: string }) => {
+      const {
+        confirmGated,
+        readManifest,
+        writeManifestWithLimitCheck,
+        createPendingOperation,
+        completeModification,
+        commitManifestWithRetry,
+        deletePendingOperation,
+        deleteManifestEntry,
+        removeDependent,
+        removeDependencyReference,
+        buildManifestEntry,
+        writeScaffold,
+        classifyGreenfield,
+        refineIntent,
+        classifyModification,
+        classifyDiff,
+        scanDiffForInjectionAttempts,
+        scanFilesForInjectionAttempts,
+        scanForInjectionAttempts,
+        checkDrift,
+        applyModificationFiles,
+        rollbackModification,
+        computeSyncHash,
+        compilePatch,
+        verifyInSandbox,
+        getDependents,
+        reVerifyDependents,
+        runSelfHealingLoop,
+        runEscalation,
+        auditSecurityPatterns,
+        suggestTools,
+        formatSuggestions,
+        buildMigrationPlan,
+        stageMigration,
+        assertAuthorizedToApprove,
+        recordEvent,
+        readRelevantMemory,
+        readGlobalMemory,
+        formatMemoryLines,
+        computeRequestKey,
+        findPriorCommit,
+        recordRequestCommit,
+        ingestDiffFromFile,
+        resolveLanguage,
+        getLanguageProvider,
+        evaluateTrustGate,
+        hasTestCoverage,
+        checkDeterministicOverrideFloor,
+        loadDofPatterns,
+        setBudgetOverride,
+        setSecurityOverride,
+        recordOverrideAudit,
+      } = await loadLifecycleRuntime();
       const sourceAgent = opts.agent ?? null;
 
       // Node 2: State Resolver — identical requirement as the Instruction Path.
@@ -700,10 +974,11 @@ export function registerLifecycleCommands(program: Command) {
       });
       const lang = resolveLanguage(componentId, process.cwd());
       const provider = getLanguageProvider(lang);
-      const testFilesBefore = originalFiles.filter((f) => provider?.testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
-      const testFilesAfter = workingFiles.filter((f) => provider?.testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test.")).map((f) => ({ path: f.path, content: f.new_content }));
-      const testIntegrity = provider?.testIntegrityChecker
-        ? provider.testIntegrityChecker.check(testFilesBefore, testFilesAfter)
+      const testIntegrityChecker = await provider?.getTestIntegrityChecker?.();
+      const testFilesBefore = originalFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
+      const testFilesAfter = workingFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test.")).map((f) => ({ path: f.path, content: f.new_content }));
+      const testIntegrity = testIntegrityChecker
+        ? testIntegrityChecker.check(testFilesBefore, testFilesAfter)
         : { flagged: true, findings: [{ path: "unknown", reason: `no test integrity checker registered for language ${lang} — failing closed` }] };
       if (testIntegrity.flagged) {
         recordEvent("test_integrity_flag", { component_id: componentId, operation: "diff_ingest", detail: { findings: testIntegrity.findings } });
@@ -850,6 +1125,14 @@ export function registerLifecycleCommands(program: Command) {
     .option("--force", "Delete even if other components still depend on it")
     .option("--files", "Also delete the component's files from disk")
     .action(async (componentId: string, opts: { force?: boolean; files?: boolean }) => {
+      const {
+        confirmGated,
+        readManifest,
+        deleteManifestEntry,
+        removeDependent,
+        removeDependencyReference,
+        recordEvent,
+      } = await loadDeleteRuntime();
       const entry = readManifest(componentId);
       if (!entry) {
         console.error(`No manifest entry for "${componentId}". Run "purix library" to see what's tracked.`);
@@ -907,4 +1190,3 @@ export function registerLifecycleCommands(program: Command) {
       console.log(`\n🗑️  Deleted "${componentId}"${opts.files ? " (files removed)" : " (manifest entry only — files left on disk)"}.`);
     });
 }
-

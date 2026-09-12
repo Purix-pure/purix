@@ -1,13 +1,5 @@
 // src/cli/commands/observability.ts
 import type { Command } from "commander";
-import { listManifest } from "@purix/core/manifest/store";
-import { buildAuditTrail, formatAuditTrailJson, formatAuditTrailMarkdown } from "@purix/core/manifest/audit_export";
-import { checkIdioms } from "@purix/core/verify/idiom";
-import { getLanguageProvider } from "@purix/core/language/registry";
-import { checkVersionPinning, runVulnScan, formatVulnScan } from "@purix/core/security/deps_audit";
-import { verifyAuditChain } from "@purix/core/security/audit_tamper_evidence";
-import { listLibrary } from "@purix/core/manifest/library";
-import { buildObservabilityReport, formatObservabilityReport } from "@purix/core/manifest/observability";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getRecentLogs, redactLogContent } from "../../telemetry/log.js";
@@ -19,7 +11,8 @@ export function registerObservabilityCommands(program: Command) {
   program
     .command("status")
     .description("List all manifest components")
-    .action(() => {
+    .action(async () => {
+      const { listManifest } = await import("@purix/core/manifest/store");
       const all = listManifest();
       if (all.length === 0) {
         console.log("No components registered yet. Run \"purix create <n>\".");
@@ -34,7 +27,8 @@ export function registerObservabilityCommands(program: Command) {
   program
     .command("library")
     .description("Show the self-extending local operation library")
-    .action(() => {
+    .action(async () => {
+      const { listLibrary } = await import("@purix/core/manifest/library");
       const entries = listLibrary();
       if (entries.length === 0) {
         console.log("Library is empty — nothing has been promoted from escalation yet.");
@@ -48,7 +42,8 @@ export function registerObservabilityCommands(program: Command) {
   program
     .command("stats")
     .description("§10 Observability: measured metrics (escalation rate, confidence trend, failure clustering, test-integrity/coverage flag rates, approval fatigue, library growth)")
-    .action(() => {
+    .action(async () => {
+      const { buildObservabilityReport, formatObservabilityReport } = await import("@purix/core/manifest/observability");
       const report = buildObservabilityReport();
       console.log(formatObservabilityReport(report));
     });
@@ -58,6 +53,11 @@ export function registerObservabilityCommands(program: Command) {
     .description("Dependency pinning + vuln scan + idiom check")
     .action(async () => {
       try {
+        const { checkVersionPinning, runVulnScan, formatVulnScan } = await import("@purix/core/security/deps_audit");
+        const { listManifest } = await import("@purix/core/manifest/store");
+        const { getLanguageProvider } = await import("@purix/core/language/registry");
+        const { checkIdioms } = await import("@purix/core/verify/idiom");
+
         const pinning = await checkVersionPinning(process.cwd());
         console.log(`Version pinning:`);
         if (pinning.length === 0) console.log("  all dependencies exactly pinned.");
@@ -98,6 +98,7 @@ export function registerObservabilityCommands(program: Command) {
     .action(async (opts: { component?: string; since?: string; format?: string; out?: string }) => {
       try {
         const { requireEntitlement } = await import("@purix/core/licensing/tier");
+        const { buildAuditTrail, formatAuditTrailJson, formatAuditTrailMarkdown } = await import("@purix/core/manifest/audit_export");
         requireEntitlement("auditExport");
         const format = opts.format === "json" ? "json" : "markdown";
         const report = buildAuditTrail({ componentId: opts.component, since: opts.since });
@@ -117,7 +118,8 @@ export function registerObservabilityCommands(program: Command) {
   program
     .command("audit-verify")
     .description("Verify local tamper-evident audit chain integrity")
-    .action(() => {
+    .action(async () => {
+      const { verifyAuditChain } = await import("@purix/core/security/audit_tamper_evidence");
       const result = verifyAuditChain();
       if (!result.valid) {
         console.error(`🛑 Audit chain verification failed at record index ${result.compromisedIndex ?? "unknown"}: ${result.reason}`);

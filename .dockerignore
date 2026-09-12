@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.turbo
+**/.turbo
+.purix-tmp
+**/.purix-tmp
+*.log
+.env
+.env.*
+!.env.example

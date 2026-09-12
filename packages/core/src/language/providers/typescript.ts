@@ -10,13 +10,21 @@ import type { IdiomCheckResult } from "../../verify/idiom.js";
 import { checkIdioms } from "../../verify/idiom.js";
 import type { PinningFinding, VulnFinding } from "../../security/deps_audit.js";
 import { checkVersionPinning, runVulnScan } from "../../security/deps_audit.js";
-import { typescriptTestIntegrityChecker } from "../../verify/test_integrity.js";
+import type { TestIntegrityChecker } from "../../verify/test_integrity.js";
 import { providerKitHooks, runIsolatedOrNotInstalled } from "../provider-kit.js";
 
 export const typescriptProvider: LanguageProvider = {
   id: "typescript",
   minSupportedVersion: "5.0.0",
-  testIntegrityChecker: typescriptTestIntegrityChecker,
+
+  // See the getTestIntegrityChecker doc comment on LanguageProvider for why
+  // this is dynamic-import-on-first-use rather than a top-level import:
+  // ts-morph bundles the full TypeScript compiler and costs ~500ms to
+  // load, which every command was paying even for `--version`.
+  async getTestIntegrityChecker(): Promise<TestIntegrityChecker> {
+    const { typescriptTestIntegrityChecker } = await import("../../verify/test_integrity.js");
+    return typescriptTestIntegrityChecker;
+  },
 
   detect(baseDir: string = process.cwd()): boolean {
     const tsconfigPath = resolve(baseDir, "tsconfig.json");

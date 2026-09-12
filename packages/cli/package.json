@@ -1,6 +1,6 @@
 {
   "name": "@purix/cli",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.0",
   "description": "Governance-first AI coding agent CLI: classifies and verifies AI-driven code changes in a sandbox, against your test suite, before they land. Also runs as an MCP server for other coding agents.",
   "keywords": [
     "ai",
@@ -16,7 +16,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/purix-ai/purix.git",
+    "url": "git+https://github.com/purix-pure/purix.git",
     "directory": "packages/cli"
   },
   "files": [
@@ -27,17 +27,23 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:bundled": "node ../../build-bundled.mjs",
     "purix": "tsx src/cli.ts",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@purix/core": "workspace:^0.1.0",
-    "@purix/mcp-server": "workspace:^0.1.0",
+    "@google/genai": "^2.13.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@purix/core": "workspace:^0.2.0-beta.0",
+    "@purix/mcp-server": "workspace:^0.2.0-beta.0",
     "add-mcp": "^2.4.0",
     "commander": "^15.0.0",
-    "dotenv": "^17.4.2"
+    "cross-spawn": "^7.0.6",
+    "dotenv": "^17.4.2",
+    "ts-morph": "^28.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "22.13.0",

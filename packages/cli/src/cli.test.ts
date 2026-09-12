@@ -12,8 +12,8 @@ import { expect } from "expect";
 import { buildProgram } from "./cli";
 
 describe("buildProgram", () => {
-  test("registers every expected top-level command group", () => {
-    const program = buildProgram();
+  test("registers every expected top-level command group", async () => {
+    const program = await buildProgram();
     const names = program.commands.map((c) => c.name());
 
     // One representative command per registered group — this is a
@@ -33,15 +33,15 @@ describe("buildProgram", () => {
     expect(names).toContain("logout");
   });
 
-  test("exposes a top-level --quiet flag", () => {
-    const program = buildProgram();
+  test("exposes a top-level --quiet flag", async () => {
+    const program = await buildProgram();
     const quietOption = program.options.find((o) => o.long === "--quiet");
     expect(quietOption).toBeDefined();
     expect(quietOption?.short).toBe("-q");
   });
 
-  test("mcp command stays unregistered for v1.0 (see the gating note in cli.ts)", () => {
-    const program = buildProgram();
+  test("mcp command stays unregistered for v1.0 (see the gating note in cli.ts)", async () => {
+    const program = await buildProgram();
     const names = program.commands.map((c) => c.name());
     expect(names).not.toContain("mcp");
   });

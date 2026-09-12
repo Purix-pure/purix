@@ -1,11 +1,11 @@
 {
   "name": "@purix/mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.0",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/purix-ai/purix.git",
+    "url": "git+https://github.com/purix-pure/purix.git",
     "directory": "packages/mcp-server"
   },
   "files": [
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@purix/core": "workspace:^0.1.0"
+    "@purix/core": "workspace:^0.2.0-beta.0"
   },
   "devDependencies": {
     "@types/node": "22.13.0",
