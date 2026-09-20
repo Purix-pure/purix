@@ -216,7 +216,33 @@ export async function refreshEntitlements(baseDir: string = process.cwd()): Prom
       mcpHardened: Boolean(response.flags.mcpHardened),
       orgId: (response.flags.orgId as string | null) ?? null,
       seatLimit: (response.flags.seatLimit as number | null) ?? null,
-      allowedLanguages: (response.flags.allowedLanguages as unknown as string[]) ?? (response.tier === "free" ? ["typescript"] : ["typescript", "python"]),
+      // SECURITY: the server's allowedLanguages is never trusted verbatim.
+      // A stale flag, a premature "Rust is back" entitlement change, or a
+      // server-side misconfiguration naming a language with no
+      // client-side provider must not re-open the indexer's synthetic-ID
+      // false-positive path (manifest/indexer.ts) — intersect with what's
+      // actually registered client-side (getLanguageProvider()) so an
+      // unsupported language can never be "entitled" here, fail-closed
+      // rather than trusting an external input for a security-relevant
+      // default.
+      //
+      // Dynamic import, not a static one: registry.ts imports
+      // requireLanguage from this file, so a static top-level import here
+      // would make this module's own evaluation part of that same cycle —
+      // registry.ts's top-level `[typescriptProvider, pythonProvider]`
+      // array would then run before this file (reached via
+      // manifest/store.ts, which registry.ts's providers transitively
+      // import) finishes initializing, a genuine TDZ failure, not a
+      // theoretical one (confirmed by the test suite). Deferring the
+      // import to call time, well after both modules' top-level code has
+      // already run, avoids that entirely.
+      allowedLanguages: await (async () => {
+        const rawAllowedLanguages =
+          (response.flags.allowedLanguages as unknown as string[]) ??
+          (response.tier === "free" ? ["typescript"] : ["typescript", "python"]);
+        const { getLanguageProvider } = await import("../language/registry.js");
+        return rawAllowedLanguages.filter((lang) => getLanguageProvider(lang) !== undefined);
+      })(),
     };
     writeCache(baseDir, {
       entitlements,

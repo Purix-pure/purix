@@ -86,15 +86,26 @@ function readGitRemoteUrl(baseDir: string): string | null {
 /**
  * Stable per-project identifier used to key savings_history on the server
  * (paired with machine_id — see state/machine_id.ts and Part 3's schema).
- * Computed once, never recomputed: a remote URL gets hashed directly
- * (deterministic — the same remote always yields the same id, so a
- * re-clone doesn't fragment history, and every worktree of that repo
- * already resolves the same remote URL so they naturally share this id
- * too). No remote falls back to a random UUID cached in the repository's
- * shared state directory (git-common-dir-resolved — see
- * git_common_dir.ts), so it's stable across runs AND shared across every
- * worktree of the SAME repository, while an unrelated re-clone (different
- * git-common-dir) still mints its own.
+ * Computed once, never recomputed.
+ *
+ * BUG FIX (GAPS-REPORT-2 §8 — doc comment only, no logic change): this
+ * comment used to describe remote-URL hashing as the primary/default
+ * mechanism. It isn't — by default, `shareIdentity` below is false for
+ * every project regardless of whether it has a real git remote, so
+ * EVERY project defaults to the random-UUID path, not the hash path.
+ * Remote-URL hashing only runs when a project has explicitly opted in
+ * via `purix.shareProjectId = true` (or the legacy `isolateBudget =
+ * false`) — a real git remote URL can identify a person's or org's
+ * repository to Purix's server-side savings aggregation, and this
+ * requires explicit consent rather than hashing it by default. When
+ * opted in, hashing IS deterministic (the same remote always yields the
+ * same id, so a re-clone doesn't fragment history, and every worktree of
+ * that repo already resolves the same remote URL so they naturally
+ * share this id too). Either way — hashed or random — the id is cached
+ * in the repository's shared state directory (git-common-dir-resolved —
+ * see git_common_dir.ts), so it's stable across runs AND shared across
+ * every worktree of the SAME repository, while an unrelated re-clone
+ * (different git-common-dir) still mints its own.
  */
 export function getProjectId(baseDir: string = process.cwd()): string {
   // Cache lookups/writes for the no-remote fallback path live in the

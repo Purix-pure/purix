@@ -13,7 +13,7 @@ import { confirm } from "../cli-io/confirm.js";
 import { applyEdits, mergeFileChanges, type CompiledFileChange } from "../verify/compile.js";
 import { resolveLanguage, getLanguageProvider } from "../language/registry.js";
 import { recordEvent } from "../manifest/events.js";
-import { OscillationGuard } from "./oscillation_guard.js";
+import { OscillationGuard, applyEditsAndCheckOscillation } from "./oscillation_guard.js";
 
 const ESCALATION_MAX_ATTEMPTS = 2; // separate from heal.ts's 3 — §6.1's "three distinct retry caps"
 
@@ -61,7 +61,24 @@ export async function runEscalation(
 
   const taskSignature = computeTaskSignature(componentId, operation, instruction);
 
-  const cached = findLibraryMatch(taskSignature);
+  // BUG FIX: findLibraryMatch() defaults to "typescript" when no language is
+  // passed, and this was the one production caller not passing one —
+  // promoteOperation() below already resolves the component's real language
+  // before writing (library.ts's own default: entry.language ??
+  // resolveLanguage(entry.component_id)). Without this, a non-TypeScript
+  // component's fix gets written under its real language partition but
+  // every future lookup here searches only "typescript" and never finds
+  // it — every such escalation silently pays full LLM cost forever.
+  let libraryLanguage: string | undefined;
+  try {
+    libraryLanguage = resolveLanguage(componentId, targetDir);
+  } catch {
+    // Ambiguous/undetectable language: fall through to findLibraryMatch's
+    // own "typescript" default rather than failing the whole escalation
+    // over a lookup that's allowed to simply miss.
+  }
+
+  const cached = findLibraryMatch(taskSignature, libraryLanguage);
   if (cached) {
     console.log(`  Match found in the local operation library — reapplying with no LLM call (§5.2).`);
     const replay = applyEdits(cached.edits, originalFiles);
@@ -146,10 +163,7 @@ export async function runEscalation(
       continue;
     }
 
-    for (const f of applied.files) currentByPath.set(f.path, f.new_content);
-    const candidateFiles = [...currentByPath.entries()].map(([path, new_content]) => ({ path, new_content }));
-
-    const oscillation = oscillationGuard.check(candidateFiles.map((f) => ({ path: f.path, content: f.new_content })));
+    const { candidateFiles, oscillation } = applyEditsAndCheckOscillation(currentByPath, applied.files, oscillationGuard);
     if (oscillation.hit) {
       lastReason = oscillation.reason!;
       console.log(`   🔁 ${lastReason}`);

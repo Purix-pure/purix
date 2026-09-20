@@ -8,7 +8,7 @@ export function registerMigrationsCommands(program: Command) {
   program
     .command("accept-drift <componentId>")
     .description("Accept current on-disk state as the new baseline")
-    .option("-a, --agent <n>", "the agent believed responsible for the out-of-band edit, if known")
+    .option("-a, --agent <name>", "the agent believed responsible for the out-of-band edit, if known")
     .action(async (componentId: string, opts: { agent?: string }) => {
       try {
         const { confirmGated } = await import("@purix/core/cli-io/gated-confirm");

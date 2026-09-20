@@ -1,7 +1,22 @@
 packages:
   - "packages/*"
 
-onlyBuiltDependencies:
-  - esbuild
-  - protobufjs
-  - "@google/genai"
+# pnpm 11 removed onlyBuiltDependencies/neverBuiltDependencies/
+# ignoredBuiltDependencies entirely, replacing all three with one
+# allowBuilds map — this is the same setting that was already in this
+# file before the version bump, just renamed and reshaped (list -> map
+# of name: true/false). I missed this the first time I touched this
+# file (only moved "overrides" over, left this one as the old shape),
+# which is exactly why `pnpm install` started rejecting these build
+# scripts instead of silently ignoring a setting like the overrides did.
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+  "@google/genai": true
+
+# Moved from package.json's "pnpm" field — pnpm 11 stopped reading that
+# field entirely (confirmed by the "pnpm.overrides ignored" warning in
+# the build log). These were silently not being applied until this move.
+overrides:
+  qs: ">=6.16.0"
+  fast-uri: ">=3.1.6"

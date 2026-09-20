@@ -7,7 +7,7 @@ import { CURRENT_SCHEMA_VERSION } from "../manifest/schema_migrations.js";
 import { findUnsafePaths } from "../gates/path_guard.js";
 import { scanForSecrets } from "../security/secrets.js";
 import { verifyComponent } from "../verify/verify.js";
-import { getLanguageProvider } from "../language/registry.js";
+import { getLanguageProvider, resolveLanguage } from "../language/registry.js";
 
 export async function writeScaffold(
   plan: TopologyPlan,
@@ -72,7 +72,38 @@ export async function writeScaffold(
   // real files on disk with real imports resolvable between them; on
   // failure, roll back the same way the existing catch block above
   // already does for I/O errors.
-  const lang = plan.files.length > 0 && plan.files[0]!.path.endsWith(".py") ? "python" : "typescript";
+  //
+  // BUG FIX (GAPS-REPORT-2 §4, the third instance of the same fallback
+  // bug already fixed in sandbox.ts/indexer.ts and reconcile.ts): this
+  // used to check only `plan.files[0]` against ".py" and default
+  // everything else — including .rs/.go/.rb — straight to "typescript".
+  // A brand-new component has no manifest entry yet (buildManifestEntry
+  // below runs AFTER this, once writeScaffold returns), so
+  // resolveLanguage()'s own manifest lookup would miss here exactly the
+  // way it does for the indexer's synthetic IDs — checking every file's
+  // real extension first, the same way indexer.ts does, avoids relying
+  // on that miss-then-fallback path at all for the languages that
+  // actually have a provider today. resolveLanguage() is still used as
+  // the final fallback for TS/JS-style extensions, where its whole-repo
+  // marker-file detection is a reasonable default for what NEW files
+  // should follow, not a guess about what an EXISTING file already is.
+  const lang = (() => {
+    try {
+      return detectScaffoldLanguage(plan.files, plan.component_id, targetDir);
+    } catch (err) {
+      // resolveLanguage() throws when whole-repo detection is genuinely
+      // ambiguous (e.g. both a tsconfig.json and a pyproject.toml
+      // present) — fail closed and roll back here rather than let an
+      // uncaught throw skip the cleanup the verification-failure branch
+      // below already does.
+      for (const p of writtenPaths) {
+        if (existsSync(p)) rmSync(p);
+      }
+      throw new Error(
+        `Scaffold failed — could not determine a language for "${plan.component_id}", rolled back what was written: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  })();
   const provider = getLanguageProvider(lang);
   const verification = provider ? provider.verify(writtenPaths, targetDir) : verifyComponent(writtenPaths, targetDir);
   if (verification.status !== "pass") {
@@ -83,6 +114,33 @@ export async function writeScaffold(
   }
 
   return writtenPaths;
+}
+
+// Only TypeScript/JS and Python are supported in this beta (see
+// BETA_SCOPE.md); Rust/Go/Ruby extensions were removed. A file with one of
+// those extensions now falls through to resolveLanguage() below, which
+// fails closed rather than silently mis-tagging it (see audit finding 3.1).
+export const SCAFFOLD_EXTENSION_LANGUAGES: [string, string][] = [
+  [".py", "python"],
+  [".rs", "rust"],
+  [".go", "go"],
+  [".rb", "ruby"],
+];
+
+export function detectScaffoldLanguage(files: { path: string }[], componentId: string, targetDir: string): string {
+  for (const file of files) {
+    for (const [ext, lang] of SCAFFOLD_EXTENSION_LANGUAGES) {
+      if (file.path.endsWith(ext)) return lang;
+    }
+  }
+  // None of this plan's files have a recognized non-TS/JS extension —
+  // fall back to real whole-repo detection rather than a blind
+  // "typescript" default. Can throw if detection is genuinely ambiguous
+  // (see registry.ts) — the caller above handles that by rolling back
+  // and failing closed, same as any other verification failure; there's
+  // no existing manifest entry to fall back to for a component that
+  // doesn't exist yet.
+  return resolveLanguage(componentId, targetDir);
 }
 
 /**

@@ -84,6 +84,6 @@ export function registerProviderCommands(program: Command) {
         console.log(`\n(No provider configured yet — pick one above and run "purix provider-set <id>".)`);
       }
       console.log(`\nDon't see your provider? Nearly every LLM vendor exposes an OpenAI-compatible endpoint —`);
-      console.log(`use "purix provider-set custom --base-url <url> --key-env <n> --model-low <id> --model-high <id>".`);
+      console.log(`use "purix provider-set custom --base-url <url> --key-env <name> --model-low <id> --model-high <id>".`);
     });
 }

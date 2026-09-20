@@ -2,9 +2,10 @@
 import { spawnSync } from "../platform/spawn_sync.js";
 import { existsSync, rmSync } from "fs";
 import { resolve } from "path";
+import type { IsolationLevel } from "../sandbox/sandbox_exec.js";
 
 export type VerificationResult =
-  | { status: "pass" }
+  | { status: "pass"; isolation: IsolationLevel }
   | { status: "fail"; reason: string }
   | { status: "not_installed"; reason: string; actionHint?: string };
 
@@ -93,7 +94,16 @@ export function verifyComponent(filePaths: string[], baseDir: string = process.c
         { cwd: baseDir, stdout: "pipe", stderr: "pipe" }
       );
 
-  if (result.exitCode === 0) return { status: "pass" };
+  if (result.exitCode === 0) {
+    // BUG FIX (GAPS-REPORT §2.3): this check runs `tsc` directly via
+    // spawnSync — never through runIsolated() — so it genuinely has no
+    // sandbox isolation at all, on any platform. Reporting that honestly
+    // as "none" (rather than silently omitting it, which is what let a
+    // "pass" here look identical to a real-isolation "pass" everywhere
+    // downstream) is the whole point of this field: it's not a
+    // downgrade, it's the check finally saying what it's always done.
+    return { status: "pass", isolation: "none" };
+  }
 
   const stderr = result.stderr.toString().trim();
   const stdout = result.stdout.toString().trim();

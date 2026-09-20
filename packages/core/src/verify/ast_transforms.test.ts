@@ -63,6 +63,16 @@ const fetchData = async () => {
     if (!result.ok) expect(result.reason).toMatch(/no top-level function/);
   });
 
+  it("gives an honest 'unsupported file type' reason for a non-TS/JS file instead of a misleading 'not found' (GAPS-REPORT §2.7)", () => {
+    const pySrc = `\nasync def fetch_data():\n    return await fetch("https://example.com")\n`;
+    const result = applyErrorHandlingTransform(pySrc, "a.py", "fetch_data", 3);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/only support TypeScript\/JavaScript/);
+      expect(result.reason).not.toMatch(/no top-level function/);
+    }
+  });
+
   it("rejects targeting a non-async function", () => {
     const src = `function syncFn() { return 1; }`;
     const result = applyErrorHandlingTransform(src, "a.ts", "syncFn", 3);

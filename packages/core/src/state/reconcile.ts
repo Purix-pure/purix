@@ -10,8 +10,8 @@ import {
   type FileSnapshot,
 } from "../manifest/store.js";
 import { CURRENT_SCHEMA_VERSION } from "../manifest/schema_migrations.js";
-import { verifyComponent, rollbackFiles } from "../verify/verify.js";
-import { getLanguageProvider } from "../language/registry.js";
+import { verifyComponent, rollbackFiles, type VerificationResult } from "../verify/verify.js";
+import { getLanguageProvider, resolveLanguage } from "../language/registry.js";
 import { computeSyncHash } from "./hash.js";
 import { getDependents, reVerifyDependents } from "../verify/impact.js";
 import { findUnsafePaths } from "../gates/path_guard.js";
@@ -40,9 +40,28 @@ export async function reconcilePendingOperations(targetDir: string = process.cwd
 
     if (landedAfter) {
       const paths = op.after_snapshot.map((f) => join(targetDir, f.path));
-      const lang = op.after_snapshot.length > 0 && op.after_snapshot[0]!.path.endsWith(".py") ? "python" : "typescript";
-      const provider = getLanguageProvider(lang);
-      const result = provider ? provider.verify(paths, targetDir) : verifyComponent(paths, targetDir);
+      // BUG FIX (was the exact pre-fix pattern from sandbox.ts, reintroduced
+      // here): silently treating every non-".py" file as "typescript" meant
+      // a Rust/Go component recovering from a crash-interrupted commit would
+      // be verified against the wrong toolchain's rules — in the one path
+      // explicitly meant to be trustworthy when nothing else is. Use the
+      // real resolveLanguage() against this operation's actual component_id
+      // (a real, resolvable manifest identity, unlike the indexer's
+      // synthetic IDs — see manifest/indexer.ts) and fail closed instead of
+      // guessing when it can't be determined, matching sandbox.ts's pattern.
+      let result: VerificationResult;
+      try {
+        const lang = op.after_snapshot.length > 0 && op.after_snapshot[0]!.path.endsWith(".py")
+          ? "python"
+          : resolveLanguage(op.component_id, targetDir);
+        const provider = getLanguageProvider(lang);
+        result = provider ? provider.verify(paths, targetDir) : verifyComponent(paths, targetDir);
+      } catch (err) {
+        result = {
+          status: "fail",
+          reason: `could not determine the language for ${op.component_id}: ${err instanceof Error ? err.message : String(err)} — refusing to guess "typescript"; set an explicit language in .purix/config.json`,
+        };
+      }
       let entry = readManifest(op.component_id);
       const syncHash = computeSyncHash(op.after_snapshot);
 

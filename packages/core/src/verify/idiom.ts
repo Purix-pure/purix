@@ -30,12 +30,26 @@ export interface IdiomCheckResult {
  */
 export function checkIdioms(filePaths: string[], baseDir: string = process.cwd()): IdiomCheckResult {
   const localEslint = resolve(baseDir, "node_modules/.bin/eslint");
+  // Full list of config file names ESLint 9+ actually resolves (flat config)
+  // plus the legacy formats it still accepts, per ESLint's own documented
+  // config-file resolution. Previously only 5 of these 12 were recognized —
+  // a project using, say, eslint.config.mts or .eslintrc.yml was fully
+  // configured but got `ran: false` here, indistinguishable from "no
+  // ESLint at all," which is exactly the false-negative this function's
+  // own soft-fail design is meant to avoid.
   const hasConfig = [
     "eslint.config.js",
     "eslint.config.mjs",
+    "eslint.config.cjs",
     "eslint.config.ts",
+    "eslint.config.mts",
+    "eslint.config.cts",
     ".eslintrc.json",
     ".eslintrc.js",
+    ".eslintrc.cjs",
+    ".eslintrc.yml",
+    ".eslintrc.yaml",
+    ".eslintrc",
   ].some((f) => existsSync(resolve(baseDir, f)));
 
   if (!existsSync(localEslint) || !hasConfig) {

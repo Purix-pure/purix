@@ -6,7 +6,7 @@
 // rest of its life, without restarting. Stays alive for a fixed duration
 // so the parent test can make config changes partway through and observe
 // the effect on THIS SAME process/PID.
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, writeSync } from "node:fs";
 import { createConfigStore } from "./config.js";
 import { registerScheduledTask, startScheduler } from "./scheduler.js";
 
@@ -14,8 +14,12 @@ const baseDir = process.argv[2];
 const totalDurationMs = Number(process.argv[3]);
 const logPath = process.argv[4];
 
+// LIFECYCLE FIX (parity with budget_race_worker.ts): a synchronous write to
+// fd 2 instead of console.error, ahead of process.exit(), so a usage-error
+// message on this path can't be dropped by an async stdio flush racing the
+// exit — same fix applied throughout this worker for the same reason.
 if (!baseDir || !totalDurationMs || !logPath) {
-  console.error("usage: scheduler_process_worker.ts <baseDir> <totalDurationMs> <logPath>");
+  writeSync(2, "usage: scheduler_process_worker.ts <baseDir> <totalDurationMs> <logPath>\n");
   process.exit(1);
 }
 
@@ -40,6 +44,6 @@ startScheduler();
 setTimeout(() => process.exit(0), totalDurationMs);
 
 if (!existsSync(baseDir)) {
-  console.error(`baseDir vanished: ${baseDir}`);
+  writeSync(2, `baseDir vanished: ${baseDir}\n`);
   process.exit(1);
 }

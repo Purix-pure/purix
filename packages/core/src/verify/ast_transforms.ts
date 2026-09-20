@@ -70,11 +70,39 @@ function getAsyncBlockBody(fnNode: FnLikeNode, functionName: string): { ok: true
   return { ok: true, body };
 }
 
+// Extensions ts-morph/TypeScript can meaningfully parse for this
+// transform. Anything else (.py, .rs, .go, .rb, ...) will still "parse"
+// without throwing (ts-morph treats unrecognized extensions as plain
+// text and finds zero functions — see the empirical note below), so
+// the honest signal has to come from an explicit extension check, not
+// from parse failure.
+const AST_TRANSFORM_SUPPORTED_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+function hasSupportedAstExtension(path: string): boolean {
+  return AST_TRANSFORM_SUPPORTED_EXTENSIONS.some((ext) => path.endsWith(ext));
+}
+
 function findTarget(
   content: string,
   path: string,
   functionName: string
 ): { ok: true; sourceFile: SourceFile; body: Block } | { ok: false; reason: string } {
+  // BUG FIX (GAPS-REPORT §2.7): ts-morph does not throw or corrupt
+  // content when fed a non-TypeScript/JavaScript file — it emits internal
+  // diagnostics, finds zero functions, and returns the original text
+  // unchanged. Before this check, that meant a Python (or Rust/Go/Ruby)
+  // user asking for add_error_handling on a real, existing async function
+  // was told the function "wasn't found" — reading as a targeting mistake
+  // on their part, when the actual limitation is that this transform only
+  // supports TypeScript/JavaScript today. Fail closed with an honest
+  // reason instead of the misleading "not found" message.
+  if (!hasSupportedAstExtension(path)) {
+    return {
+      ok: false,
+      reason: `AST-based transforms (add_error_handling, change_control_flow) only support TypeScript/JavaScript files today — "${path}" isn't one, not that "${functionName}" wasn't found`,
+    };
+  }
+
   const sourceFile = parseInMemory(content, path);
   if (!sourceFile) return { ok: false, reason: `AST parse failed for "${path}"` };
 

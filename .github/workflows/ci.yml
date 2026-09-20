@@ -13,9 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      # pnpm/action-setup only supports pnpm v10 and older. pnpm's own docs
+      # (as of pnpm 11) point installers at the successor action, pnpm/setup,
+      # for v11+ — using the old action here would either fail outright or
+      # silently upgrade pnpm mid-run in a way that doesn't match this
+      # repo's pinned version. version is explicit here (not omitted) even
+      # though pnpm/setup can read it from packageManager, so CI can never
+      # silently drift from what package.json declares.
+      - uses: pnpm/setup@v1
         with:
-          version: 9.15.0
+          version: 12.4.1
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
@@ -30,14 +37,34 @@ jobs:
         run: pnpm run typecheck
       - name: Run Test Suite
         run: pnpm run test
+      # BUG FIX (GAPS-REPORT §1, carried forward from Document 4 §1.3): this
+      # script has existed and been real (a genuine 90% line/branch/function
+      # threshold over the security-relevant llm/licensing/gates/sandbox/
+      # verify directories) since before this fix, but was never invoked
+      # anywhere in CI — a defined-but-unenforced gate that reads as a live
+      # guarantee it isn't, the same failure class this pass already named
+      # for `setSecurityOverride()`'s now-removed orphaned bypass. Wiring it
+      # in here is what actually makes it a check, not a second inert one.
+      #
+      # NOTE for whoever next touches this: as of this fix, actual coverage
+      # on these directories is below the 90% threshold (measured locally:
+      # ~88.8% lines / ~84.3% branches / ~81.6% functions), concentrated in
+      # llm/providers.ts, verify/tests.ts, verify/compile.ts, and
+      # sandbox/sandbox_exec.ts. This step is expected to fail until those
+      # files get real additional test coverage — that failure is the
+      # correct, honest signal this gate exists to produce, not a reason to
+      # lower the threshold or narrow --test-coverage-include to make it
+      # pass artificially.
+      - name: Run Coverage Gate
+        run: pnpm run coverage
 
   conformance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/setup@v1
         with:
-          version: 9.15.0
+          version: 12.4.1
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0

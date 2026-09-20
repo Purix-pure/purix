@@ -9,17 +9,26 @@
 // in-process state itself. cwd and PURIX_COST_CEILING_USD are set by the
 // parent via child_process spawn options / env — this file reads neither
 // argv nor hardcodes anything repo-specific.
+import { writeSync } from "node:fs";
 import { assertBudgetAvailable } from "./budget.js";
 
 const estimatedCost = Number(process.argv[2] ?? "0.08");
 
+// LIFECYCLE FIX: process.stdout.write() followed immediately by
+// process.exit() is a documented Node.js footgun — when stdout is a pipe
+// (which it always is here: the parent spawns this as a child and reads its
+// stdout), writes can be asynchronous, and process.exit() does not wait for
+// them to actually flush before tearing the process down. The parent test
+// JSON.parses this exact line, so a truncated/dropped write here reads as
+// an intermittent, unreproducible test failure rather than an obvious bug.
+// fs.writeSync(1, ...) is a real synchronous syscall on fd 1 — it returns
+// only once the write has actually completed, so the exit() right after it
+// is safe.
 try {
   assertBudgetAvailable(estimatedCost);
-  process.stdout.write(JSON.stringify({ result: "success" }) + "\n");
+  writeSync(1, JSON.stringify({ result: "success" }) + "\n");
   process.exit(0);
 } catch (err) {
-  process.stdout.write(
-    JSON.stringify({ result: "fail", message: err instanceof Error ? err.message : String(err) }) + "\n"
-  );
+  writeSync(1, JSON.stringify({ result: "fail", message: err instanceof Error ? err.message : String(err) }) + "\n");
   process.exit(0); // exit 0 even on a budget-denied result — this is an expected outcome, not a worker crash
 }

@@ -1,0 +1,9 @@
+Files present in the original packages.zip that this changeset deletes.
+Since a zip can only add/replace files, apply these deletions manually
+after extracting the rest of this archive over your working copy:
+
+packages/core/src/language/conformance/provenance.ts
+  - Orphaned module: its only importer (run.ts) never actually used
+    its export, and nothing else in the codebase imports it. Also
+    still listed Rust/Go/Ruby fixture entries after those languages
+    were removed per BETA_SCOPE.md (see CHANGES.md finding 3.1).

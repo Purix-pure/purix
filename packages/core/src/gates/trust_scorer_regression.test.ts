@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { evaluateTrustGate, type TrustGateInput } from "./trustgate";
 
-describe("ADR-031 Trust Scorer Regression Harness", () => {
+describe("ADR-007 Trust Scorer Regression Harness", () => {
   it("runs trust scorer against golden-set fixtures and verifies actions within stated threshold (delta <= 0.05)", () => {
     const goldenDir = join(import.meta.dirname, "__golden__");
     const files = readdirSync(goldenDir).filter((f) => f.endsWith(".json"));

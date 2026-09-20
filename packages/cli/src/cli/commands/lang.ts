@@ -12,7 +12,12 @@ export function registerLangCommands(program: Command) {
       const { getEntitlements } = await import("@purix/core/licensing/tier");
       const baseDir = process.cwd();
       const ent = getEntitlements(baseDir);
-      const languages = ["typescript", "python", "rust", "go", "ruby"];
+      // Only languages with a registered provider are ever shown (the loop
+      // below skips anything getLanguageProvider() doesn't resolve), but
+      // this list should still only name what's actually supported in this
+      // beta rather than languages removed per BETA_SCOPE.md — otherwise
+      // it's misleading to read even though it doesn't misbehave.
+      const languages = ["typescript", "python"];
 
       console.log("Language Providers & Packs:");
       for (const langId of languages) {

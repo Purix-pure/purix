@@ -37,7 +37,7 @@ describe("MCP Server Live Protocol Test across Languages", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "purix-mcp-live-"));
     oldCwd = process.cwd();
     process.chdir(tmpDir);
-    process.env.AUTO_CONFIRM = "1";
+    process.env.PURIX_MCP_AUTO_APPROVE = "1";
     process.env.PURIX_LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "test_openai_key";
     originalFetch = globalThis.fetch;
@@ -69,7 +69,7 @@ describe("MCP Server Live Protocol Test across Languages", () => {
     closeDb();
     process.chdir(oldCwd);
     rmSync(tmpDir, { recursive: true, force: true });
-    delete process.env.AUTO_CONFIRM;
+    delete process.env.PURIX_MCP_AUTO_APPROVE;
     globalThis.fetch = originalFetch;
     delete process.env.PURIX_LLM_PROVIDER;
     delete process.env.OPENAI_API_KEY;

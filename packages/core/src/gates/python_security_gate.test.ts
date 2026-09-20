@@ -11,7 +11,7 @@ export const PYTHON_GOLDEN_CORPUS = [
   { name: "insecure pickle load", code: 'data = pickle.loads(payload)\n', shouldBlock: true },
 ];
 
-describe("ADR-036 Python Security Gate Corpus (ADR-036 Amendment)", () => {
+describe("ADR-009 Python Security Gate Corpus (ADR-009 Amendment)", () => {
   it("python golden-set corpus regression check runs successfully and blocks vulnerabilities", () => {
     for (const item of PYTHON_GOLDEN_CORPUS) {
       const res = runSecurityGate([{ path: "src/main.py", content: item.code }]);

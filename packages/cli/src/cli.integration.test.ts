@@ -19,7 +19,7 @@ type CommandSpec = {
 };
 
 const publicCommandTree: CommandSpec[] = [
-  { name: "create", syntax: "create <n>" },
+  { name: "create", syntax: "create <name>" },
   { name: "modify", syntax: "modify <componentId> <instruction>", options: ["--override"] },
   { name: "ingest", syntax: "ingest <componentId> <diffFile>", options: ["--agent"] },
   { name: "delete", syntax: "delete <componentId>", options: ["--force", "--files"] },
@@ -34,9 +34,9 @@ const publicCommandTree: CommandSpec[] = [
   { name: "audit-trail", options: ["--component", "--since", "--format", "--out"] },
   { name: "audit-verify" },
   { name: "diagnostics" },
-  { name: "secret-set", syntax: "secret-set <n> <value>" },
-  { name: "secret-rotate", syntax: "secret-rotate <n> <newValue>" },
-  { name: "secret-remove", syntax: "secret-remove <n>" },
+  { name: "secret-set", syntax: "secret-set <name> <value>" },
+  { name: "secret-rotate", syntax: "secret-rotate <name> <newValue>" },
+  { name: "secret-remove", syntax: "secret-remove <name>" },
   { name: "secrets-status" },
   { name: "provider-set", syntax: "provider-set <id>", options: ["--base-url", "--key-env", "--model-low", "--model-high", "--label"] },
   { name: "provider-status" },
@@ -170,7 +170,7 @@ describe("Purix CLI integration contract", () => {
       for (const args of [["--help"], []]) {
         const result = runCli(args, cwd);
         expect(result.output).toContain("Commands:");
-        expect(result.output).toContain("create <n>");
+        expect(result.output).toContain("create <name>");
         expect(result.output).toContain("mcp-serve");
       }
       // --version must still take the fast path: no "Commands:" section,

@@ -13,6 +13,7 @@ import {
   classifyRepair,
 } from "./classify";
 import { recordCircuitSuccess } from "./circuit";
+import { getBudgetSnapshot } from "./budget";
 import { getDbCompat as getDb } from "../manifest/store";
 import { createConfigStore } from "../state/config";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -100,14 +101,40 @@ describe("LLM Classify & Call Pipeline", () => {
     expect(res).toBe("Hello world");
   });
 
-  it("callLlm throws immediately on non-transient errors", async () => {
+  it("callLlm throws immediately on non-transient errors, and releases its budget reservation (GAPS-REPORT-2 §2)", async () => {
     globalThis.fetch = (async () => {
       const err: any = new Error("Unauthorized");
       err.status = 401;
       throw err;
     }) as typeof fetch;
 
+    const before = getBudgetSnapshot();
     await expect(callLlm("prompt", "low")).rejects.toThrow(/Unauthorized/);
+    const after = getBudgetSnapshot();
+
+    // Before the fix, assertBudgetAvailable()'s $0.05 reservation was
+    // never released on this path — total_spent_usd would have gone up
+    // by the reservation with zero dollars of real spend behind it.
+    expect(after?.totalSpentUsd).toBeCloseTo(before?.totalSpentUsd ?? 0, 6);
+  });
+
+  it("callLlm releases its reservation on the final exhausted retry attempt too, not just an immediate non-transient failure", async () => {
+    globalThis.fetch = (async () => {
+      const err: any = new Error("Service Unavailable");
+      err.status = 503;
+      throw err;
+    }) as typeof fetch;
+
+    const before = getBudgetSnapshot();
+    // Starting at attempt 5 exercises the same "give up, don't retry
+    // again" branch (attempt <= 4 is false) that a fully exhausted
+    // transient-error retry chain reaches, without needing to actually
+    // wait out the real 1s/2s/4s/8s backoff between the 5 attempts that
+    // would get there.
+    await expect(callLlm("prompt", "low", 5, undefined)).rejects.toThrow(/Service Unavailable/);
+    const after = getBudgetSnapshot();
+
+    expect(after?.totalSpentUsd).toBeCloseTo(before?.totalSpentUsd ?? 0, 6);
   });
 
   it("classifyGreenfield parses valid topology plan with markdown fences", async () => {

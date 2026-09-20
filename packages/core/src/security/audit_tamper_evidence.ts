@@ -100,7 +100,22 @@ export function pruneAuditChain(olderThanMs: number): void {
   db.run(`DELETE FROM audit_chain WHERE id <= ?`, [lastPruned.id]);
 }
 
-export function exportAuditChainJson(secret = "audit-export-secret"): string {
+// BUG FIX: this used to default `secret` to the hardcoded literal
+// "audit-export-secret" — every export from every install would produce
+// an HMAC signature computable by anyone who read this source file,
+// which is a signature that provides zero actual tamper-evidence
+// guarantee (indistinguishable from having no signature at all, except
+// that it looks like one). There are still zero production callers of
+// this function today, so there's no live caller to break — but a
+// security-relevant default like this must fail closed the moment it's
+// wired up, not silently work with a public secret until someone
+// notices. Callers now MUST supply a real, install-specific secret.
+export function exportAuditChainJson(secret: string): string {
+  if (!secret || secret.trim() === "") {
+    throw new Error(
+      "exportAuditChainJson() requires a real, install-specific secret — refusing to sign with an empty or default value."
+    );
+  }
   ensureTable();
   const db = getDb();
   const rows = db.query(`SELECT id, payload, timestamp, prev_hash, hash FROM audit_chain ORDER BY id ASC`).all();

@@ -7,13 +7,19 @@
 import { existsSync, realpathSync, readFileSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { recordTestResult, isFlaky, sampleCount, FLAKY_MIN_SAMPLES } from "../manifest/test_history.js";
-import { runIsolated } from "../sandbox/sandbox_exec.js";
+import { runIsolated, type IsolationLevel } from "../sandbox/sandbox_exec.js";
 
 export interface TestRunResult {
   status: "pass" | "fail" | "no_tests" | "not_installed";
   reason?: string;
   actionHint?: string;
   quarantinedFailures: string[];
+  // Set only on the pass/fail outcomes that actually ran through
+  // runIsolated() below — "no_tests" (nothing to run) and the
+  // "no supported framework" fail case (never got as far as invoking
+  // anything) genuinely have no isolation level to report, and leaving
+  // this undefined there is the honest reflection of that, not a gap.
+  isolation?: IsolationLevel;
 }
 
 /**
@@ -258,11 +264,12 @@ export function runTestsWithQuarantine(
   else if (framework === "mocha") parsedTests = parseMochaJson(isolated.stdout);
   else parsedTests = parseTapOutput(isolated.stdout);
   if (parsedTests.length === 0) {
-    if (isolated.exitCode === 0) return { status: "pass", quarantinedFailures: [] };
+    if (isolated.exitCode === 0) return { status: "pass", quarantinedFailures: [], isolation: isolated.isolation };
     return {
       status: "fail",
       reason: isolated.stderr.trim() || isolated.stdout.trim() || "test run failed with no parseable TAP output — quarantine skipped for this run",
       quarantinedFailures: [],
+      isolation: isolated.isolation,
     };
   }
 
@@ -314,10 +321,10 @@ export function runTestsWithQuarantine(
   }
 
   if (real.length > 0) {
-    return { status: "fail", reason: `Test failure(s) with a consistent (non-flaky) history: ${real.join(", ")}`, quarantinedFailures: quarantined };
+    return { status: "fail", reason: `Test failure(s) with a consistent (non-flaky) history: ${real.join(", ")}`, quarantinedFailures: quarantined, isolation: isolated.isolation };
   }
   if (quarantined.length > 0) {
     console.log(`  ⚠ quarantined flaky test(s), not blocking: ${quarantined.join(", ")}`);
   }
-  return { status: "pass", quarantinedFailures: quarantined };
+  return { status: "pass", quarantinedFailures: quarantined, isolation: isolated.isolation };
 }

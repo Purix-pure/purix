@@ -79,6 +79,34 @@ function walkDir(dir: string, baseDir: string, ignorePatterns: string[], fileLis
   return fileList;
 }
 
+// Builds one ComponentRecord with the fields shared by every extraction
+// branch below. Only symbol_name/signature/reusable vary per call site;
+// factoring this out keeps the per-language regexes from having to repeat
+// the other 5 fields verbatim each time (see audit finding 2.7).
+function makeRecord(
+  symbolName: string,
+  relPath: string,
+  signature: string,
+  lang: string,
+  reusable: boolean
+): ComponentRecord {
+  return {
+    symbol_name: symbolName,
+    file_location: relPath,
+    signature,
+    language: lang,
+    verification_status: "pass",
+    last_verified_commit_hash: null,
+    reusable,
+    rationale: null,
+  };
+}
+
+// NOTE: Rust/Go/Ruby extraction was intentionally removed for this beta
+// (see BETA_SCOPE.md) — only TypeScript and Python are supported. If a
+// language is reintroduced, add its extraction branch here AND register
+// its provider in core/src/language/registry.ts so the two stay in sync
+// (see audit finding 3.1, where the two had drifted).
 function extractSymbols(filePath: string, content: string, lang: string): ComponentRecord[] {
   const records: ComponentRecord[] = [];
   const relPath = relative(process.cwd(), filePath);
@@ -86,17 +114,7 @@ function extractSymbols(filePath: string, content: string, lang: string): Compon
   const exportRegex = /export\s+(?:async\s+)?(?:function|class|const|let|interface|type)\s+(\w+)/g;
   let match;
   while ((match = exportRegex.exec(content)) !== null) {
-    const symbolName = match[1]!;
-    records.push({
-      symbol_name: symbolName,
-      file_location: relPath,
-      signature: match[0],
-      language: lang,
-      verification_status: "pass",
-      last_verified_commit_hash: null,
-      reusable: true,
-      rationale: null,
-    });
+    records.push(makeRecord(match[1]!, relPath, match[0], lang, true));
   }
 
   if (lang === "python") {
@@ -104,79 +122,13 @@ function extractSymbols(filePath: string, content: string, lang: string): Compon
     while ((match = pyRegex.exec(content)) !== null) {
       const symbolName = match[2]!;
       if (!symbolName.startsWith("_")) {
-        records.push({
-          symbol_name: symbolName,
-          file_location: relPath,
-          signature: match[0],
-          language: lang,
-          verification_status: "pass",
-          last_verified_commit_hash: null,
-          reusable: true,
-          rationale: null,
-        });
+        records.push(makeRecord(symbolName, relPath, match[0], lang, true));
       }
     }
   }
 
-  if (lang === "rust") {
-    const rustRegex = /^(?:pub\s+)?(fn|struct|impl|trait|enum)\s+(\w+)/gm;
-    while ((match = rustRegex.exec(content)) !== null) {
-      records.push({
-        symbol_name: match[2]!,
-        file_location: relPath,
-        signature: match[0],
-        language: lang,
-        verification_status: "pass",
-        last_verified_commit_hash: null,
-        reusable: true,
-        rationale: null,
-      });
-    }
-  }
-
-  if (lang === "go") {
-    const goRegex = /^(?:func|type)\s+(\w+)/gm;
-    while ((match = goRegex.exec(content)) !== null) {
-      records.push({
-        symbol_name: match[1]!,
-        file_location: relPath,
-        signature: match[0],
-        language: lang,
-        verification_status: "pass",
-        last_verified_commit_hash: null,
-        reusable: true,
-        rationale: null,
-      });
-    }
-  }
-
-  if (lang === "ruby") {
-    const rbRegex = /^(def|class|module)\s+(\w+)/gm;
-    while ((match = rbRegex.exec(content)) !== null) {
-      records.push({
-        symbol_name: match[2]!,
-        file_location: relPath,
-        signature: match[0],
-        language: lang,
-        verification_status: "pass",
-        last_verified_commit_hash: null,
-        reusable: true,
-        rationale: null,
-      });
-    }
-  }
-
   if (records.length === 0) {
-    records.push({
-      symbol_name: relPath,
-      file_location: relPath,
-      signature: `file:${relPath}`,
-      language: lang,
-      verification_status: "pass",
-      last_verified_commit_hash: null,
-      reusable: false,
-      rationale: null,
-    });
+    records.push(makeRecord(relPath, relPath, `file:${relPath}`, lang, false));
   }
 
   return records;
@@ -193,9 +145,6 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
     const relPath = relative(baseDir, absPath);
     let lang = "typescript";
     if (relPath.endsWith(".py")) lang = "python";
-    else if (relPath.endsWith(".rs")) lang = "rust";
-    else if (relPath.endsWith(".go")) lang = "go";
-    else if (relPath.endsWith(".rb")) lang = "ruby";
     else {
       try {
         lang = resolveLanguage(undefined, baseDir);
@@ -216,7 +165,16 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
     const content = readFileSync(absPath, "utf-8");
 
     // Verification dispatch trace: CLI -> runIndex -> verifyInSandbox -> provider.verify -> runTests -> checkIdiom
-    const verification = verifyInSandbox(`comp-${fileCount}`, [{ path: relPath, new_content: content }], baseDir);
+    // BUG FIX: `comp-${fileCount}` is a synthetic ID that can never match a
+    // real manifest entry, so verifyInSandbox's internal language resolution
+    // (which looks the componentId up in the manifest) always misses and
+    // falls back to whole-repository auto-detection — verifying, say, a
+    // .rs file against the TypeScript provider whenever the repo as a whole
+    // looks like a TypeScript project, and recording a false "pass" that
+    // never actually type-checked, compiled, or tested that file. Pass the
+    // language this loop already determined per-file as an explicit
+    // override so dispatch can't silently go through the wrong toolchain.
+    const verification = verifyInSandbox(`comp-${fileCount}`, [{ path: relPath, new_content: content }], baseDir, lang);
     const verificationStatus = verification.status === "pass" ? "pass" : "fail";
 
     const symbols = extractSymbols(absPath, content, lang);

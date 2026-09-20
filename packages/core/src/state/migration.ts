@@ -2,7 +2,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FileSnapshot } from "../manifest/store.js";
-import { recordMigration, setMigrationStatus, getMigration, type MigrationRecord } from "../manifest/migrations.js";
+import { recordMigration, setMigrationStatus, getMigration } from "../manifest/migrations.js";
 import { scanForSecrets } from "../security/secrets.js";
 import { findUnsafePaths } from "../gates/path_guard.js";
 import { verifyInSandbox } from "../sandbox/sandbox.js";

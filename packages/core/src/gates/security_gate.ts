@@ -1,6 +1,5 @@
 // src/gates/security_gate.ts
 import { scanForSecrets } from "../security/secrets.js";
-import type { SecretFinding } from "../security/secrets.js";
 import { recordOverrideAudit } from "../security/override_audit.js";
 
 export type SecuritySeverity = "Critical" | "High" | "Medium" | "Low";

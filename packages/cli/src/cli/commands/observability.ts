@@ -15,7 +15,7 @@ export function registerObservabilityCommands(program: Command) {
       const { listManifest } = await import("@purix/core/manifest/store");
       const all = listManifest();
       if (all.length === 0) {
-        console.log("No components registered yet. Run \"purix create <n>\".");
+        console.log("No components registered yet. Run \"purix create <name>\".");
         return;
       }
       for (const e of all) {
@@ -53,35 +53,17 @@ export function registerObservabilityCommands(program: Command) {
     .description("Dependency pinning + vuln scan + idiom check")
     .action(async () => {
       try {
-        const { checkVersionPinning, runVulnScan, formatVulnScan } = await import("@purix/core/security/deps_audit");
-        const { listManifest } = await import("@purix/core/manifest/store");
-        const { getLanguageProvider } = await import("@purix/core/language/registry");
-        const { checkIdioms } = await import("@purix/core/verify/idiom");
-
-        const pinning = await checkVersionPinning(process.cwd());
-        console.log(`Version pinning:`);
-        if (pinning.length === 0) console.log("  all dependencies exactly pinned.");
-        for (const f of pinning) console.log(`  ${f.section}: ${f.name}@${f.declaredRange} — ${f.reason}`);
-
-        console.log(`\nVuln scan:`);
-        console.log(formatVulnScan(runVulnScan(process.cwd())));
-
-        console.log(`\nIdiom check (soft-fail — flags for cleanup, never blocks):`);
-        const trackedPaths = Array.from(new Set(listManifest().flatMap((e) => e.files))).map((f) => join(process.cwd(), f));
-        if (trackedPaths.length === 0) {
-          console.log("  no manifest-tracked files yet.");
-        } else {
-          const lang = trackedPaths.length > 0 && trackedPaths[0]!.endsWith(".py") ? "python" : "typescript";
-          const provider = getLanguageProvider(lang);
-          const idiom = provider ? provider.checkIdiom(trackedPaths, process.cwd()) : checkIdioms(trackedPaths, process.cwd());
-          if (!idiom.ran) {
-            console.log("  skipped — no local ESLint binary + config found in this project.");
-          } else if (idiom.findings.length === 0) {
-            console.log("  clean — no idiom findings across all tracked components.");
-          } else {
-            for (const f of idiom.findings) console.log(`  ${f.path}:${f.line} [${f.rule}] ${f.message}`);
-          }
-        }
+        // DUPLICATION FIX (audit finding 2.3, finalized here — the
+        // duplication-finder pass had extracted resolveVerification()/
+        // requireGatedApproval() but left this one as "not done"): the
+        // whole version-pinning + vuln-scan + idiom-check sequence, not
+        // just the idiom part, was duplicated verbatim against
+        // mcp-server/server.ts's purix_audit tool. Both now call the same
+        // runFullAudit()/formatFullAuditLines() — only the sink differs
+        // (console.log per line here; a joined string over there).
+        const { runFullAudit, formatFullAuditLines } = await import("@purix/core/security/full_audit");
+        const result = await runFullAudit(process.cwd());
+        for (const line of formatFullAuditLines(result)) console.log(line);
       } catch (err) {
         console.error(`\n🛑 Audit failed: ${err instanceof Error ? err.message : err}`);
         process.exitCode = 1;

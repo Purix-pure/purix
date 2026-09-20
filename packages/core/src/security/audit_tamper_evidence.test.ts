@@ -46,9 +46,14 @@ describe("ADR-042 Audit Log Tamper-Evidence & Retention", () => {
 
   it("produces valid export format", () => {
     appendAuditRecord({ event: "test" });
-    const jsonStr = exportAuditChainJson();
+    const jsonStr = exportAuditChainJson("a-real-install-specific-test-secret");
     const parsed = JSON.parse(jsonStr);
     expect(parsed.data.records.length).toBe(1);
     expect(parsed.data.records[0].payload).toContain("test");
+  });
+
+  it("refuses to sign with an empty secret rather than falling back to a default (GAPS-REPORT §1)", () => {
+    appendAuditRecord({ event: "test" });
+    expect(() => exportAuditChainJson("")).toThrow(/requires a real, install-specific secret/);
   });
 });

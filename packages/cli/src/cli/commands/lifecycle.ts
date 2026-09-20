@@ -4,6 +4,21 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { snapshotSavings, printRunSummary } from "../savings_output.js";
 
+// BUG FIX (GAPS-REPORT §2.3): verifyInSandbox() now reports the real
+// isolation level a "pass" ran under, and a "pass" reached with
+// isolation: "none" (no bwrap/sandbox-exec available, or — always, for
+// TypeScript's tsc step specifically — a check that never runs through
+// the sandbox layer at all) is a materially weaker guarantee than one
+// reached under real containment. Surfacing it here, at the one place
+// both "direct patch" and "diff ingest" verification passes print their
+// result, is what makes that difference visible to a person instead of
+// silently identical either way.
+function warnIfUnisolated(isolation: string | undefined): void {
+  if (isolation === "none") {
+    console.log(`  ⚠ verification passed with no sandbox isolation (isolation: none) — see .purix docs on execution isolation`);
+  }
+}
+
 async function loadLifecycleRuntime() {
   const [
     gatedConfirmModule,
@@ -15,9 +30,7 @@ async function loadLifecycleRuntime() {
     modifyModule,
     hashModule,
     compileModule,
-    sandboxModule,
     impactModule,
-    healModule,
     escalateModule,
     securityAuditModule,
     matchmakerModule,
@@ -26,12 +39,13 @@ async function loadLifecycleRuntime() {
     eventsModule,
     memoryModule,
     idempotencyModule,
-    ingestModule,
     registryModule,
     trustgateModule,
     budgetModule,
     securityGateModule,
     overrideAuditModule,
+    resolveVerificationModule,
+    commitCascadeModule,
   ] = await Promise.all([
     import("@purix/core/cli-io/gated-confirm"),
     import("@purix/core/manifest/store"),
@@ -42,9 +56,7 @@ async function loadLifecycleRuntime() {
     import("@purix/core/entrypoints/modify"),
     import("@purix/core/state/hash"),
     import("@purix/core/verify/compile"),
-    import("@purix/core/sandbox/sandbox"),
     import("@purix/core/verify/impact"),
-    import("@purix/core/recovery/heal"),
     import("@purix/core/recovery/escalate"),
     import("@purix/core/security/security_audit"),
     import("@purix/core/tools/matchmaker"),
@@ -53,12 +65,13 @@ async function loadLifecycleRuntime() {
     import("@purix/core/manifest/events"),
     import("@purix/core/manifest/memory"),
     import("@purix/core/state/idempotency"),
-    import("@purix/core/entrypoints/ingest"),
     import("@purix/core/language/registry"),
     import("@purix/core/gates/trustgate"),
     import("@purix/core/llm/budget"),
     import("@purix/core/gates/security_gate"),
     import("@purix/core/security/override_audit"),
+    import("@purix/core/recovery/resolve_verification"),
+    import("@purix/core/manifest/commit_and_cascade"),
   ]);
 
   return {
@@ -66,10 +79,6 @@ async function loadLifecycleRuntime() {
     readManifest: manifestStoreModule.readManifest,
     writeManifestWithLimitCheck: manifestStoreModule.writeManifestWithLimitCheck,
     linkComponents: manifestStoreModule.linkComponents,
-    createPendingOperation: manifestStoreModule.createPendingOperation,
-    completeModification: manifestStoreModule.completeModification,
-    commitManifestWithRetry: manifestStoreModule.commitManifestWithRetry,
-    deletePendingOperation: manifestStoreModule.deletePendingOperation,
     deleteManifestEntry: manifestStoreModule.deleteManifestEntry,
     removeDependent: manifestStoreModule.removeDependent,
     removeDependencyReference: manifestStoreModule.removeDependencyReference,
@@ -79,18 +88,11 @@ async function loadLifecycleRuntime() {
     refineIntent: classifyModule.refineIntent,
     classifyModification: classifyModule.classifyModification,
     classifyDiff: classifyModule.classifyDiff,
-    scanDiffForInjectionAttempts: classifyModule.scanDiffForInjectionAttempts,
     scanFilesForInjectionAttempts: classifyModule.scanFilesForInjectionAttempts,
     scanForInjectionAttempts: injectionModule.scanForInjectionAttempts,
     checkDrift: driftModule.checkDrift,
-    applyModificationFiles: modifyModule.applyModificationFiles,
-    rollbackModification: modifyModule.rollbackModification,
-    computeSyncHash: hashModule.computeSyncHash,
     compilePatch: compileModule.compilePatch,
-    verifyInSandbox: sandboxModule.verifyInSandbox,
     getDependents: impactModule.getDependents,
-    reVerifyDependents: impactModule.reVerifyDependents,
-    runSelfHealingLoop: healModule.runSelfHealingLoop,
     runEscalation: escalateModule.runEscalation,
     auditSecurityPatterns: securityAuditModule.auditSecurityPatterns,
     suggestTools: matchmakerModule.suggestTools,
@@ -105,7 +107,6 @@ async function loadLifecycleRuntime() {
     computeRequestKey: idempotencyModule.computeRequestKey,
     findPriorCommit: idempotencyModule.findPriorCommit,
     recordRequestCommit: idempotencyModule.recordRequestCommit,
-    ingestDiffFromFile: ingestModule.ingestDiffFromFile,
     resolveLanguage: registryModule.resolveLanguage,
     getLanguageProvider: registryModule.getLanguageProvider,
     evaluateTrustGate: trustgateModule.evaluateTrustGate,
@@ -115,6 +116,15 @@ async function loadLifecycleRuntime() {
     setBudgetOverride: budgetModule.setBudgetOverride,
     setSecurityOverride: securityGateModule.setSecurityOverride,
     recordOverrideAudit: overrideAuditModule.recordOverrideAudit,
+    resolveVerification: resolveVerificationModule.resolveVerification,
+    // DUPLICATION FIX (residual lifecycle.ts finding, finalized): the
+    // Node 5 commit sequence and the dependent re-verification cascade —
+    // previously duplicated verbatim between `modify` and `ingest` below —
+    // now live in commit_and_cascade.ts. Migration staging
+    // (buildMigrationPlan/stageMigration above) deliberately stays
+    // separate — see that file's header comment for why.
+    commitVersionedChange: commitCascadeModule.commitVersionedChange,
+    reVerifyCascadeDependents: commitCascadeModule.reVerifyCascadeDependents,
   };
 }
 
@@ -192,12 +202,71 @@ async function loadCreateRuntime() {
   };
 }
 
+// ingest never touches the classifier's intent-refinement/greenfield
+// modes, scaffolding, self-healing, escalation, the LLM budget/security
+// override gates (it has no --override flag and wraps nothing in a
+// try/finally that would need them reset), migration staging, the tool
+// matchmaker, repository memory, or idempotency (a diff has no
+// re-runnable "same instruction" key the way a developer instruction
+// does) — of the 26 modules loadLifecycleRuntime() pulls in, ingest's
+// action only ever calls into 10 of them. Split out the same way
+// loadCreateRuntime()/loadDeleteRuntime() already were, for the same
+// reason: avoid paying import cost (including pulling in the LLM
+// provider SDKs transitively required by classify.js and trustgate.js)
+// for modules this command's own body never references.
+async function loadIngestRuntime() {
+  const [
+    gatedConfirmModule,
+    manifestStoreModule,
+    classifyModule,
+    driftModule,
+    eventsModule,
+    ingestModule,
+    registryModule,
+    trustgateModule,
+    authModule,
+    resolveVerificationModule,
+    commitCascadeModule,
+  ] = await Promise.all([
+    import("@purix/core/cli-io/gated-confirm"),
+    import("@purix/core/manifest/store"),
+    import("@purix/core/llm/classify"),
+    import("@purix/core/state/drift"),
+    import("@purix/core/manifest/events"),
+    import("@purix/core/entrypoints/ingest"),
+    import("@purix/core/language/registry"),
+    import("@purix/core/gates/trustgate"),
+    import("@purix/core/security/auth"),
+    import("@purix/core/recovery/resolve_verification"),
+    import("@purix/core/manifest/commit_and_cascade"),
+  ]);
+
+  return {
+    confirmGated: gatedConfirmModule.confirmGated,
+    readManifest: manifestStoreModule.readManifest,
+    classifyDiff: classifyModule.classifyDiff,
+    scanDiffForInjectionAttempts: classifyModule.scanDiffForInjectionAttempts,
+    checkDrift: driftModule.checkDrift,
+    recordEvent: eventsModule.recordEvent,
+    ingestDiffFromFile: ingestModule.ingestDiffFromFile,
+    resolveLanguage: registryModule.resolveLanguage,
+    getLanguageProvider: registryModule.getLanguageProvider,
+    evaluateTrustGate: trustgateModule.evaluateTrustGate,
+    hasTestCoverage: trustgateModule.hasTestCoverage,
+    assertAuthorizedToApprove: authModule.assertAuthorizedToApprove,
+    resolveVerification: resolveVerificationModule.resolveVerification,
+    // DUPLICATION FIX — see loadLifecycleRuntime()'s matching comment above.
+    commitVersionedChange: commitCascadeModule.commitVersionedChange,
+    reVerifyCascadeDependents: commitCascadeModule.reVerifyCascadeDependents,
+  };
+}
+
 export function registerLifecycleCommands(program: Command) {
   // ---------------------------------------------------------------------------
   // create (§3.3 Greenfield)
   // ---------------------------------------------------------------------------
   program
-    .command("create <n>")
+    .command("create <name>")
     .description("Scaffold a new component (Greenfield, Instruction Path)")
     .action(async (name: string) => {
       const {
@@ -304,10 +373,6 @@ export function registerLifecycleCommands(program: Command) {
         confirmGated,
         readManifest,
         writeManifestWithLimitCheck,
-        createPendingOperation,
-        completeModification,
-        commitManifestWithRetry,
-        deletePendingOperation,
         deleteManifestEntry,
         removeDependent,
         removeDependencyReference,
@@ -315,18 +380,11 @@ export function registerLifecycleCommands(program: Command) {
         writeScaffold,
         refineIntent,
         classifyModification,
-        scanDiffForInjectionAttempts,
         scanFilesForInjectionAttempts,
         scanForInjectionAttempts,
         checkDrift,
-        applyModificationFiles,
-        rollbackModification,
-        computeSyncHash,
         compilePatch,
-        verifyInSandbox,
         getDependents,
-        reVerifyDependents,
-        runSelfHealingLoop,
         runEscalation,
         auditSecurityPatterns,
         suggestTools,
@@ -350,6 +408,9 @@ export function registerLifecycleCommands(program: Command) {
         setBudgetOverride,
         setSecurityOverride,
         recordOverrideAudit,
+        resolveVerification,
+        commitVersionedChange,
+        reVerifyCascadeDependents,
       } = await loadLifecycleRuntime();
       if (options.override !== undefined) {
         setBudgetOverride(options.override);
@@ -501,7 +562,7 @@ export function registerLifecycleCommands(program: Command) {
         for (const f of secFindings) console.log(`    ${f.path}:${f.line} [${f.category}] ${f.message}`);
       }
 
-      let dependents = getDependents(entry);
+      const dependents = getDependents(entry);
       if (verdict.contract_changing && dependents.length > 0) {
         console.log(`\n  This is contract-changing — ${dependents.length} dependent(s) will be re-verified after commit.`);
       }
@@ -532,47 +593,32 @@ export function registerLifecycleCommands(program: Command) {
           return { path: f.path, new_content: changed ? changed.new_content : f.content };
         });
 
-        const verification = verifyInSandbox(componentId, candidateFiles, process.cwd());
-        if (verification.status === "pass") {
-          finalFiles = candidateFiles;
-          recordEvent("verification_pass", { component_id: componentId, operation: verdict.operation, detail: { stage: "direct_patch" } });
-          recordEvent("idiom_findings", { component_id: componentId, operation: verdict.operation, detail: { count: verification.idiomFindings.length } });
-          if (verification.idiomFindings.length > 0) {
+        const resolved = await resolveVerification(
+          componentId,
+          verdict.operation,
+          originalFiles,
+          candidateFiles,
+          "direct_patch",
+          refined.explicit_instruction,
+          process.cwd()
+        );
+        if (!("finalFiles" in resolved)) {
+          console.error(`\n🛑 Escalation failed: ${resolved.reason}`);
+          process.exitCode = 1;
+          return;
+        }
+        finalFiles = resolved.finalFiles;
+        fromEscalation = resolved.fromEscalation;
+        if (resolved.verification.status === "pass") {
+          warnIfUnisolated(resolved.verification.isolation);
+          recordEvent("idiom_findings", { component_id: componentId, operation: verdict.operation, detail: { count: resolved.verification.idiomFindings.length } });
+          if (resolved.verification.idiomFindings.length > 0) {
             console.log(`\n  Idiom findings (soft, non-blocking):`);
-            for (const f of verification.idiomFindings) console.log(`    ${f.path}:${f.line} [${f.rule}] ${f.message}`);
-          }
-        } else {
-          // Node 6: first failure -> capped self-healing (§6.1).
-          console.log(`\n  ❌ Verification failed: ${verification.reason}`);
-          recordEvent("verification_failure", {
-            component_id: componentId,
-            operation: verdict.operation,
-            detail: { stage: "direct_patch", reason: verification.reason },
-          });
-          const healed = await runSelfHealingLoop(
-            componentId,
-            verdict.operation,
-            originalFiles,
-            compiled.files,
-            verification.reason,
-            process.cwd()
-          );
-          if (healed.ok) {
-            finalFiles = healed.files!.map((f) => ({ path: f.path, new_content: f.new_content }));
-          } else {
-            // Second consecutive failure (self-healing exhausted) -> §6.3.
-            const lastReason = healed.attempts[healed.attempts.length - 1]?.reason ?? "self-healing exhausted";
-            const esc = await runEscalation(componentId, verdict.operation, refined.explicit_instruction, originalFiles, lastReason, process.cwd());
-            if (!esc.ok) {
-              console.error(`\n🛑 Escalation failed: ${esc.reason}`);
-              process.exitCode = 1;
-              return;
-            }
-            finalFiles = esc.files!.map((f) => ({ path: f.path, new_content: f.new_content }));
-            fromEscalation = true;
+            for (const f of resolved.verification.idiomFindings) console.log(`    ${f.path}:${f.line} [${f.rule}] ${f.message}`);
           }
         }
       }
+
 
       // Node 3c: Test-Integrity Check (§6.4) — deterministic, runs before TrustGate.
       const changedFiles = finalFiles.filter((f) => {
@@ -673,70 +719,32 @@ export function registerLifecycleCommands(program: Command) {
 
       // Node 5: Executor + atomic manifest commit (§7.3/§7.4)
       const beforeSnapshot = originalFiles.map((f) => ({ path: f.path, content: f.content }));
-      const newVersion = entry.current_version + 1;
-      const pendingId = createPendingOperation({
-        component_id: componentId,
-        before_snapshot: beforeSnapshot,
-        after_snapshot: finalFiles.map((f) => ({ path: f.path, content: f.new_content })),
-        new_version: newVersion,
+      const result = await commitVersionedChange({
+        componentId,
+        entry,
+        beforeSnapshot,
+        finalFiles,
         operation: verdict.operation,
-        contract_changed: verdict.contract_changing,
+        patchRef: `v${entry.current_version + 1}-${verdict.operation}`,
+        contractChanged: verdict.contract_changing,
         provenance: { source_type: "instruction", source_agent: null },
+        targetDir: process.cwd(),
+        reRunCommandHint: `"purix modify"`,
       });
-
-      let backups;
-      try {
-        backups = await applyModificationFiles(finalFiles, process.cwd());
-      } catch (err) {
-        console.error(`\n🛑 File write failed, rolled back: ${err instanceof Error ? err.message : err}`);
-        process.exitCode = 1;
-        return;
-      }
-
-      entry.current_version = newVersion;
-      entry.verification_status = "pass";
-      entry.last_synced_hash = computeSyncHash(finalFiles.map((f) => ({ path: f.path, content: f.new_content })));
-      entry.version_history.push({
-        version: newVersion,
-        operation: verdict.operation,
-        patch_ref: `v${newVersion}-${verdict.operation}`,
-        contract_changed: verdict.contract_changing,
-        timestamp: new Date().toISOString(),
-        provenance: { source_type: "instruction", source_agent: null },
-      });
-
-      const committed = await commitManifestWithRetry(entry, newVersion - 1);
-      if (!committed) {
-        // Real conflict: another process committed a newer version between
-        // our State Resolver read and now. Roll back the files we just wrote
-        // and hand back to the human rather than clobbering the other write.
-        await rollbackModification(backups);
-        deletePendingOperation(pendingId);
-        console.error(
-          `\n🛑 Manifest write conflict — "${componentId}" changed underneath this run. Rolled back file writes. Re-run "purix modify" against current state.`
-        );
-        process.exitCode = 1;
-        return;
-      }
-      completeModification(entry, pendingId, newVersion);
+      if (!result.ok) return;
+      const newVersion = result.newVersion;
       recordRequestCommit(requestKey, componentId, newVersion);
 
       console.log(`\n✅ "${componentId}" now at v${newVersion}.`);
 
-      // §6.5: cascade re-verification, only on contract-changing.
+      // §6.5: cascade re-verification, only on contract-changing. Migration
+      // staging is modify-specific — see commit_and_cascade.ts's header for
+      // why it isn't folded into the shared helper.
       if (verdict.contract_changing) {
         const plan = buildMigrationPlan(componentId, verdict.operation, beforeSnapshot, finalFiles.map((f) => ({ path: f.path, content: f.new_content })));
         const migrationId = stageMigration(componentId, verdict.operation, newVersion - 1, newVersion, beforeSnapshot, finalFiles.map((f) => ({ path: f.path, content: f.new_content })));
         console.log(`  Migration record staged: ${migrationId} (${plan.summary})`);
-
-        dependents = getDependents(entry);
-        if (dependents.length > 0) {
-          console.log(`  Re-verifying ${dependents.length} dependent(s)...`);
-          const cascade = reVerifyDependents(dependents, process.cwd());
-          for (const c of cascade) {
-            console.log(c.status === "pass" ? `    ✅ ${c.component_id}` : `    ❌ ${c.component_id}: ${c.reason}`);
-          }
-        }
+        reVerifyCascadeDependents(entry, process.cwd());
       }
       printRunSummary(savingsBefore);
     } finally {
@@ -756,57 +764,20 @@ export function registerLifecycleCommands(program: Command) {
       const {
         confirmGated,
         readManifest,
-        writeManifestWithLimitCheck,
-        createPendingOperation,
-        completeModification,
-        commitManifestWithRetry,
-        deletePendingOperation,
-        deleteManifestEntry,
-        removeDependent,
-        removeDependencyReference,
-        buildManifestEntry,
-        writeScaffold,
-        classifyGreenfield,
-        refineIntent,
-        classifyModification,
         classifyDiff,
         scanDiffForInjectionAttempts,
-        scanFilesForInjectionAttempts,
-        scanForInjectionAttempts,
         checkDrift,
-        applyModificationFiles,
-        rollbackModification,
-        computeSyncHash,
-        compilePatch,
-        verifyInSandbox,
-        getDependents,
-        reVerifyDependents,
-        runSelfHealingLoop,
-        runEscalation,
-        auditSecurityPatterns,
-        suggestTools,
-        formatSuggestions,
-        buildMigrationPlan,
-        stageMigration,
-        assertAuthorizedToApprove,
         recordEvent,
-        readRelevantMemory,
-        readGlobalMemory,
-        formatMemoryLines,
-        computeRequestKey,
-        findPriorCommit,
-        recordRequestCommit,
         ingestDiffFromFile,
         resolveLanguage,
         getLanguageProvider,
         evaluateTrustGate,
         hasTestCoverage,
-        checkDeterministicOverrideFloor,
-        loadDofPatterns,
-        setBudgetOverride,
-        setSecurityOverride,
-        recordOverrideAudit,
-      } = await loadLifecycleRuntime();
+        assertAuthorizedToApprove,
+        resolveVerification,
+        commitVersionedChange,
+        reVerifyCascadeDependents,
+      } = await loadIngestRuntime();
       const sourceAgent = opts.agent ?? null;
 
       // Node 2: State Resolver — identical requirement as the Instruction Path.
@@ -923,47 +894,27 @@ export function registerLifecycleCommands(program: Command) {
       ];
 
       // §3.2 Node 6: identical Verifier every path converges on.
-      let verification = verifyInSandbox(componentId, finalFiles, process.cwd());
-      let workingFiles = finalFiles;
-      let fromEscalation = false;
-
-      if (verification.status !== "pass") {
-        console.log(`\n  ❌ Verification failed: ${verification.reason}`);
-        recordEvent("verification_failure", { component_id: componentId, operation: "diff_ingest", detail: { stage: "direct_ingest", reason: verification.reason } });
-
-        const healed = await runSelfHealingLoop(
-          componentId,
-          "diff_ingest",
-          originalFiles,
-          workingFiles,
-          verification.reason,
-          process.cwd()
-        );
-        if (healed.ok) {
-          workingFiles = healed.files!.map((f) => ({ path: f.path, new_content: f.new_content }));
-        } else {
-          const lastReason = healed.attempts[healed.attempts.length - 1]?.reason ?? "self-healing exhausted";
-          const esc = await runEscalation(
-            componentId,
-            "diff_ingest",
-            `apply ingested diff from ${sourceAgent ?? "unknown source"}`,
-            originalFiles,
-            lastReason,
-            process.cwd()
-          );
-          if (!esc.ok) {
-            console.error(`\n🛑 Escalation failed: ${esc.reason}`);
-            process.exitCode = 1;
-            return;
-          }
-          workingFiles = esc.files!.map((f) => ({ path: f.path, new_content: f.new_content }));
-          fromEscalation = true;
-        }
-      } else {
-        recordEvent("verification_pass", { component_id: componentId, operation: "diff_ingest", detail: { stage: "direct_ingest" } });
-        if (verification.idiomFindings.length > 0) {
+      const resolved = await resolveVerification(
+        componentId,
+        "diff_ingest",
+        originalFiles,
+        finalFiles,
+        "direct_ingest",
+        `apply ingested diff from ${sourceAgent ?? "unknown source"}`,
+        process.cwd()
+      );
+      if (!("finalFiles" in resolved)) {
+        console.error(`\n🛑 Escalation failed: ${resolved.reason}`);
+        process.exitCode = 1;
+        return;
+      }
+      const workingFiles = resolved.finalFiles;
+      const fromEscalation = resolved.fromEscalation;
+      if (resolved.verification.status === "pass") {
+        warnIfUnisolated(resolved.verification.isolation);
+        if (resolved.verification.idiomFindings.length > 0) {
           console.log(`\n  Idiom findings (soft, non-blocking):`);
-          for (const f of verification.idiomFindings) console.log(`    ${f.path}:${f.line} [${f.rule}] ${f.message}`);
+          for (const f of resolved.verification.idiomFindings) console.log(`    ${f.path}:${f.line} [${f.rule}] ${f.message}`);
         }
       }
 
@@ -1045,7 +996,6 @@ export function registerLifecycleCommands(program: Command) {
 
       // Node 5: Executor + atomic manifest commit
       const beforeSnapshot = originalFiles.map((f) => ({ path: f.path, content: f.content }));
-      const newVersion = entry.current_version + 1;
       // Previously always hardcoded to true — the conservative worst-case
       // default drift.ts's acceptDrift still uses for the same reason
       // (genuinely unknown, so don't guess "safe"). diff-classify (Node
@@ -1053,59 +1003,26 @@ export function registerLifecycleCommands(program: Command) {
       // so this uses that instead of guessing.
       const contractChanged = diffVerdict.contract_changing;
 
-      const pendingId = createPendingOperation({
-        component_id: componentId,
-        before_snapshot: beforeSnapshot,
-        after_snapshot: workingFiles.map((f) => ({ path: f.path, content: f.new_content })),
-        new_version: newVersion,
+      const result = await commitVersionedChange({
+        componentId,
+        entry,
+        beforeSnapshot,
+        finalFiles: workingFiles,
         operation: "diff_ingest",
-        contract_changed: contractChanged,
+        patchRef: `v${entry.current_version + 1}-diff-ingest`,
+        contractChanged,
         provenance: { source_type: "external_diff", source_agent: sourceAgent },
+        targetDir: process.cwd(),
+        reRunCommandHint: `"purix ingest"`,
+        newFilePaths: newPaths,
       });
-
-      let backups;
-      try {
-        backups = await applyModificationFiles(workingFiles, process.cwd());
-      } catch (err) {
-        console.error(`\n🛑 File write failed, rolled back: ${err instanceof Error ? err.message : err}`);
-        process.exitCode = 1;
-        return;
-      }
-
-      if (newPaths.length > 0) {
-        entry.files = Array.from(new Set([...entry.files, ...newPaths]));
-      }
-      entry.current_version = newVersion;
-      entry.verification_status = "pass";
-      entry.last_synced_hash = computeSyncHash(workingFiles.map((f) => ({ path: f.path, content: f.new_content })));
-      entry.version_history.push({
-        version: newVersion,
-        operation: "diff_ingest",
-        patch_ref: `v${newVersion}-diff-ingest`,
-        contract_changed: contractChanged,
-        timestamp: new Date().toISOString(),
-        provenance: { source_type: "external_diff", source_agent: sourceAgent },
-      });
-
-      const committed = await commitManifestWithRetry(entry, newVersion - 1);
-      if (!committed) {
-        await rollbackModification(backups);
-        deletePendingOperation(pendingId);
-        console.error(`\n🛑 Manifest write conflict — "${componentId}" changed underneath this run. Rolled back file writes. Re-run "purix ingest" against current state.`);
-        process.exitCode = 1;
-        return;
-      }
-      completeModification(entry, pendingId, newVersion);
+      if (!result.ok) return;
+      const newVersion = result.newVersion;
 
       console.log(`\n✅ "${componentId}" now at v${newVersion} (ingested from ${sourceAgent ?? "unknown source"}).`);
 
-      const dependents = getDependents(entry);
-      if (contractChanged && dependents.length > 0) {
-        console.log(`  Re-verifying ${dependents.length} dependent(s) — diff-classify flagged this as contract-changing.`);
-        const cascade = reVerifyDependents(dependents, process.cwd());
-        for (const c of cascade) {
-          console.log(c.status === "pass" ? `    ✅ ${c.component_id}` : `    ❌ ${c.component_id}: ${c.reason}`);
-        }
+      if (contractChanged) {
+        reVerifyCascadeDependents(entry, process.cwd(), " — diff-classify flagged this as contract-changing.");
       }
     });
 

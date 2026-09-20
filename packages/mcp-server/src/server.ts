@@ -14,7 +14,116 @@ import {
   exportManifestData,
 } from "@purix/core/manifest/store";
 import { recordEvent } from "@purix/core/manifest/events";
-import { confirmGated } from "@purix/core/cli-io/gated-confirm";
+
+/**
+ * Fix (2026-09-13): confirmGated()/confirm() opens its own readline
+ * reader on process.stdin to prompt a human interactively. Over MCP's
+ * StdioServerTransport, that stdin is already carrying incoming
+ * JSON-RPC frames from the connected agent, not typed keystrokes — so
+ * the old code path either hung forever waiting on a stream that will
+ * never produce "y\n", or (with AUTO_CONFIRM=1) skipped the prompt
+ * entirely and rubber-stamped every gated action with no real
+ * human-in-the-loop check.
+ *
+ * There is no MCP elicitation wiring here yet (the protocol capability
+ * built for exactly this: server asks host for a human answer mid-call).
+ * Until that exists, this wrapper makes the safe choice explicit instead
+ * of implicit: if the operator has deliberately set
+ * PURIX_MCP_AUTO_APPROVE=1 when launching `purix mcp-serve`, that's a
+ * knowing trust decision and this auto-approves. If it is not set, this
+ * never touches confirm.ts/stdin at all — instead it rejects the action
+ * immediately with a message telling the agent (and whoever is reading
+ * its output) exactly why, and what to do about it. A clear, fast
+ * rejection is always safer than a silent hang or a silent rubber-stamp.
+ *
+ * BUG FIX (GAPS-REPORT-2 §1): this used to reuse the CLI's shared
+ * AUTO_CONFIRM=1 flag by delegating to confirmGated()/confirm(). That
+ * flag is now restricted, in confirm.ts, to NODE_ENV === "test" —
+ * necessarily, because it was reachable from a real interactive `purix`
+ * CLI invocation too (a shell profile, a base Docker image, or a CI
+ * pipeline's global environment could all plausibly set a variable this
+ * common for an unrelated reason, silently rubber-stamping every
+ * TrustGate escalation and drift-acceptance checkpoint). Delegating
+ * through that restricted check here would silently turn this
+ * legitimate, documented, operator-explicit MCP-server-only opt-in into
+ * exactly the old hang this comment already describes (confirmGated
+ * falling through to confirm()'s readline prompt on a stdin stream that
+ * never produces a human keystroke). This now uses its own,
+ * specifically-named variable and records the approval directly,
+ * keeping its scope — an operator's explicit choice when launching
+ * `purix mcp-serve` — entirely separate from the CLI's own bypass.
+ */
+async function mcpConfirmGated(
+  message: string,
+  checkpointKind: string,
+  componentId: string | null
+): Promise<boolean> {
+  if (process.env.PURIX_MCP_AUTO_APPROVE === "1") {
+    recordEvent("confirm_response", {
+      component_id: componentId,
+      detail: { checkpoint_kind: checkpointKind, approved: true, auto_confirmed: true, reason: "mcp_auto_approve_session" },
+    });
+    return true;
+  }
+  recordEvent("confirm_response", {
+    component_id: componentId,
+    detail: { checkpoint_kind: checkpointKind, approved: false, reason: "mcp_no_elicitation_support" },
+  });
+  return false;
+}
+
+type GatedActionBudget = ReturnType<typeof createGatedActionBudget>;
+
+/**
+ * The budget-check-then-confirm preamble every gated MCP tool ran before
+ * doing its actual work — same two-step shape and the same "reached its
+ * limit" wording, repeated at 7 call sites (purix_create, purix_modify,
+ * purix_delete, purix_index --full, purix_accept_drift,
+ * purix_migration_activate, purix_migration_rollback — see audit finding
+ * 2.5). The confirm-rejection message's verb and CLI-equivalent command
+ * differ per tool ("Modification rejected: ... run \"purix modify ...\"" vs
+ * "Deletion rejected: ... run \"purix delete ...\"", etc.) — those stay
+ * parameters rather than being flattened into one generic string, so this
+ * extraction doesn't change what any tool actually says.
+ *
+ * This doesn't wrap each tool's entire body: what each tool does once
+ * approved differs too much per-tool to force through one generic shape
+ * without just moving the same-sized closure somewhere else — only the
+ * preamble itself is shared here.
+ *
+ * `extraContext`, when given, is appended to both rejection messages the
+ * same way each call site previously did (e.g. purix_create appending its
+ * noteLines so an agent hitting the session cap still sees the plan it
+ * wasn't able to act on).
+ */
+async function requireGatedApproval(
+  gatedActionBudget: GatedActionBudget,
+  checkpointKind: string,
+  componentId: string | null,
+  confirmMessage: string,
+  cliEquivalent: string,
+  rejectionVerb: string,
+  extraContext?: string
+): Promise<{ approved: true } | { approved: false; rejectionMessage: string }> {
+  if (!gatedActionBudget.tryConsume(checkpointKind, componentId)) {
+    const suffix = extraContext ? `\n\n${extraContext}` : "";
+    return {
+      approved: false,
+      rejectionMessage: `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.${suffix}`,
+    };
+  }
+
+  const approved = await mcpConfirmGated(confirmMessage, checkpointKind, componentId);
+  if (!approved) {
+    const suffix = extraContext ? `\n\n${extraContext}` : "";
+    return {
+      approved: false,
+      rejectionMessage: `${rejectionVerb} rejected: this MCP session has no working human-confirmation channel yet (no MCP elicitation support wired in). Run ${cliEquivalent} interactively, or relaunch purix mcp-serve with PURIX_MCP_AUTO_APPROVE=1 if you want gated MCP actions to auto-approve for this session.${suffix}`,
+    };
+  }
+
+  return { approved: true };
+}
 import { runIndex } from "@purix/core/manifest/indexer";
 import { verifyInSandbox } from "@purix/core/sandbox/sandbox";
 import { readComponentFiles } from "@purix/core/entrypoints/modify";
@@ -30,9 +139,7 @@ import { listMigrations } from "@purix/core/manifest/migrations";
 import { listLibrary } from "@purix/core/manifest/library";
 import { buildObservabilityReport, formatObservabilityReport } from "@purix/core/manifest/observability";
 import { buildAuditTrail, formatAuditTrailJson, formatAuditTrailMarkdown } from "@purix/core/manifest/audit_export";
-import { checkIdioms } from "@purix/core/verify/idiom";
-import { getLanguageProvider } from "@purix/core/language/registry";
-import { checkVersionPinning, runVulnScan, formatVulnScan } from "@purix/core/security/deps_audit";
+import { runFullAudit, formatFullAuditLines } from "@purix/core/security/full_audit";
 import { verifyAuditChain } from "@purix/core/security/audit_tamper_evidence";
 import { recordMemory, readGlobalMemory, formatMemoryLines, GLOBAL_SCOPE } from "@purix/core/manifest/memory";
 import { suggestTools, formatSuggestions } from "@purix/core/tools/matchmaker";
@@ -452,19 +559,17 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           return textContent(`Rejected: ${err instanceof Error ? err.message : err}`);
         }
 
-        if (!gatedActionBudget.tryConsume("mcp_create", componentName)) {
-          return textContent(
-            `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.\n\n${noteLines.join("\n")}`
-          );
-        }
-
-        const approved = await confirmGated(
-          `MCP Agent "${agentId}" requests creation of "${componentName}":\n${noteLines.join("\n")}\nWrite these files and register the component?`,
+        const gate = await requireGatedApproval(
+          gatedActionBudget,
           "mcp_create",
-          componentName
+          componentName,
+          `MCP Agent "${agentId}" requests creation of "${componentName}":\n${noteLines.join("\n")}\nWrite these files and register the component?`,
+          `the equivalent "purix create" command`,
+          "Creation",
+          noteLines.join("\n")
         );
-        if (!approved) {
-          return textContent(`Creation rejected by human confirmation checkpoint.\n\n${noteLines.join("\n")}`);
+        if (!gate.approved) {
+          return textContent(gate.rejectionMessage);
         }
 
         await writeScaffold(plan, process.cwd());
@@ -510,20 +615,16 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         // stream §10's observability report is built from. Mirror it here.
         recordEvent("request", { component_id: componentId, detail: { instruction, source: "mcp", agent_id: agentId } });
 
-        if (!gatedActionBudget.tryConsume("mcp_modify", componentId)) {
-          return textContent(
-            `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.`
-          );
-        }
-
-        const approved = await confirmGated(
-          `MCP Agent "${agentId}" requests modification on "${componentId}": "${instruction}". Approve?`,
+        const gate = await requireGatedApproval(
+          gatedActionBudget,
           "mcp_modify",
-          componentId
+          componentId,
+          `MCP Agent "${agentId}" requests modification on "${componentId}": "${instruction}". Approve?`,
+          `"purix modify ${componentId} <instruction>"`,
+          "Modification"
         );
-
-        if (!approved) {
-          return textContent("Modification rejected by human confirmation checkpoint.");
+        if (!gate.approved) {
+          return textContent(gate.rejectionMessage);
         }
 
         const files = await readComponentFiles(entry, process.cwd());
@@ -565,7 +666,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         recordEvent("verification_pass", {
           component_id: componentId,
           operation: verdict.operation,
-          detail: { stage: "mcp_modify", source: "mcp", agent_id: agentId },
+          detail: { stage: "mcp_modify", source: "mcp", agent_id: agentId, isolation: sandboxResult.isolation },
         });
 
         entry.current_version += 1;
@@ -579,8 +680,17 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         });
         writeManifest(entry);
 
+        // BUG FIX (GAPS-REPORT §2.3): a "pass" reached with no sandbox
+        // isolation (isolation: "none" — no bwrap/sandbox-exec available,
+        // or, for TypeScript's tsc step specifically, a check that never
+        // runs through the sandbox layer at all) is a materially weaker
+        // guarantee than one reached under real containment, and an
+        // agent reading this response has no other way to tell the
+        // difference between the two.
+        const isolationNote =
+          sandboxResult.isolation === "none" ? " (⚠ isolation: none — this check ran without sandbox containment)" : "";
         return textContent(
-          `Modification verified and committed for "${componentId}" (v${entry.current_version}, contract_changed: ${contractChanged}). Sandbox execution passed successfully.`
+          `Modification verified and committed for "${componentId}" (v${entry.current_version}, contract_changed: ${contractChanged}). Sandbox execution passed successfully.${isolationNote}`
         );
       }
 
@@ -607,19 +717,16 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
 
         const agentId = getAgentId();
 
-        if (!gatedActionBudget.tryConsume("mcp_delete", componentId)) {
-          return textContent(
-            `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.`
-          );
-        }
-
-        const approved = await confirmGated(
-          `MCP Agent "${agentId}" requests permanent deletion of "${componentId}" from the manifest${deleteFiles ? " and its files from disk" : ""}. This cannot be undone. Approve?`,
+        const gate = await requireGatedApproval(
+          gatedActionBudget,
           "mcp_delete",
-          componentId
+          componentId,
+          `MCP Agent "${agentId}" requests permanent deletion of "${componentId}" from the manifest${deleteFiles ? " and its files from disk" : ""}. This cannot be undone. Approve?`,
+          `"purix delete ${componentId}"`,
+          "Deletion"
         );
-        if (!approved) {
-          return textContent("Deletion rejected by human confirmation checkpoint.");
+        if (!gate.approved) {
+          return textContent(gate.rejectionMessage);
         }
 
         // Clean up both directions of the dependency graph before the row
@@ -661,14 +768,16 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         const full = Boolean((args as any)?.full);
         const agentId = getAgentId();
         if (full) {
-          if (!gatedActionBudget.tryConsume("mcp_index_full", null)) {
-            return textContent(
-              `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.`
-            );
-          }
-          const approved = await confirmGated(`MCP Agent "${agentId}" requests full codebase re-index. Approve?`, "mcp_index_full", null);
-          if (!approved) {
-            return textContent("Full indexing rejected by human confirmation checkpoint.");
+          const gate = await requireGatedApproval(
+            gatedActionBudget,
+            "mcp_index_full",
+            null,
+            `MCP Agent "${agentId}" requests full codebase re-index. Approve?`,
+            `"purix index --full"`,
+            "Full indexing"
+          );
+          if (!gate.approved) {
+            return textContent(gate.rejectionMessage);
           }
         }
         const baseDir = (args as any)?.path ? resolve(process.cwd(), (args as any).path) : process.cwd();
@@ -730,10 +839,15 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         recordEvent("verification_pass", {
           component_id: "ingested-diff",
           operation: "diff_ingest",
-          detail: { stage: "mcp_ingest", file_count: ingestRes.files.length, source: "mcp", agent_id: agentId },
+          detail: { stage: "mcp_ingest", file_count: ingestRes.files.length, source: "mcp", agent_id: agentId, isolation: sandboxResult.isolation },
         });
 
-        return textContent(`Successfully ingested and verified diff across ${ingestRes.files.length} files.`);
+        // BUG FIX (GAPS-REPORT §2.3): see the identical note on the
+        // purix_modify pass response above — isolation: "none" is a
+        // materially weaker guarantee and needs to be visible here too.
+        const isolationNote =
+          sandboxResult.isolation === "none" ? " (⚠ isolation: none — this check ran without sandbox containment)" : "";
+        return textContent(`Successfully ingested and verified diff across ${ingestRes.files.length} files.${isolationNote}`);
       }
 
       if (name === "purix_accept_drift") {
@@ -755,19 +869,16 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
 
         const agentId = getAgentId();
 
-        if (!gatedActionBudget.tryConsume("mcp_accept_drift", componentId)) {
-          return textContent(
-            `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.`
-          );
-        }
-
-        const approved = await confirmGated(
-          `MCP Agent "${agentId}" requests accepting current on-disk state of "${componentId}" as the new baseline. Approve?`,
+        const gate = await requireGatedApproval(
+          gatedActionBudget,
           "mcp_accept_drift",
-          componentId
+          componentId,
+          `MCP Agent "${agentId}" requests accepting current on-disk state of "${componentId}" as the new baseline. Approve?`,
+          `"purix accept-drift ${componentId}"`,
+          "Accept-drift"
         );
-        if (!approved) {
-          return textContent("Accept-drift rejected by human confirmation checkpoint.");
+        if (!gate.approved) {
+          return textContent(gate.rejectionMessage);
         }
 
         const result = await acceptDrift(entry, drift.liveFiles, drift.liveHash, process.cwd(), driftAgent ?? agentId);
@@ -791,15 +902,16 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         }
         const agentId = getAgentId();
 
-        if (!gatedActionBudget.tryConsume("mcp_migration_activate", null)) {
-          return textContent(
-            `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.`
-          );
-        }
-
-        const approved = await confirmGated(`MCP Agent "${agentId}" requests activating migration ${id} and writing it to real files. Approve?`, "mcp_migration_activate", null);
-        if (!approved) {
-          return textContent("Migration activation rejected by human confirmation checkpoint.");
+        const gate = await requireGatedApproval(
+          gatedActionBudget,
+          "mcp_migration_activate",
+          null,
+          `MCP Agent "${agentId}" requests activating migration ${id} and writing it to real files. Approve?`,
+          `"purix migration-activate"`,
+          "Migration activation"
+        );
+        if (!gate.approved) {
+          return textContent(gate.rejectionMessage);
         }
 
         const result = await activateMigration(id, process.cwd());
@@ -813,15 +925,16 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
         }
         const agentId = getAgentId();
 
-        if (!gatedActionBudget.tryConsume("mcp_migration_rollback", null)) {
-          return textContent(
-            `Rejected: this MCP session has reached its limit of ${maxGatedActionsPerSession()} gated-action attempts (PURIX_MCP_MAX_GATED_ACTIONS). Restart the server to continue.`
-          );
-        }
-
-        const approved = await confirmGated(`MCP Agent "${agentId}" requests rolling back migration ${id}. Approve?`, "mcp_migration_rollback", null);
-        if (!approved) {
-          return textContent("Migration rollback rejected by human confirmation checkpoint.");
+        const gate = await requireGatedApproval(
+          gatedActionBudget,
+          "mcp_migration_rollback",
+          null,
+          `MCP Agent "${agentId}" requests rolling back migration ${id}. Approve?`,
+          `"purix migration-rollback"`,
+          "Migration rollback"
+        );
+        if (!gate.approved) {
+          return textContent(gate.rejectionMessage);
         }
 
         const result = await rollbackMigration(id, process.cwd());
@@ -839,34 +952,14 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_audit") {
-        const lines: string[] = [];
-
-        const pinning = await checkVersionPinning(process.cwd());
-        lines.push(`Version pinning:`);
-        if (pinning.length === 0) lines.push("  all dependencies exactly pinned.");
-        for (const f of pinning) lines.push(`  ${f.section}: ${f.name}@${f.declaredRange} — ${f.reason}`);
-
-        lines.push(``, `Vuln scan:`);
-        lines.push(formatVulnScan(runVulnScan(process.cwd())));
-
-        lines.push(``, `Idiom check (soft-fail — flags for cleanup, never blocks):`);
-        const trackedPaths = Array.from(new Set(listManifest().flatMap((e) => e.files))).map((f) => join(process.cwd(), f));
-        if (trackedPaths.length === 0) {
-          lines.push("  no manifest-tracked files yet.");
-        } else {
-          const lang = trackedPaths.length > 0 && trackedPaths[0]!.endsWith(".py") ? "python" : "typescript";
-          const provider = getLanguageProvider(lang);
-          const idiom = provider ? provider.checkIdiom(trackedPaths, process.cwd()) : checkIdioms(trackedPaths, process.cwd());
-          if (!idiom.ran) {
-            lines.push("  skipped — no local ESLint binary + config found in this project.");
-          } else if (idiom.findings.length === 0) {
-            lines.push("  clean — no idiom findings across all tracked components.");
-          } else {
-            for (const f of idiom.findings) lines.push(`  ${f.path}:${f.line} [${f.rule}] ${f.message}`);
-          }
-        }
-
-        return textContent(lines.join("\n"));
+        // DUPLICATION FIX (audit finding 2.3, finalized — see
+        // full_audit.ts's header comment): this used to duplicate the CLI's
+        // `purix audit` command verbatim (version pinning + vuln scan +
+        // idiom check, including the exact same messages). Both now call
+        // the same runFullAudit(); only the sink differs (joined string
+        // here vs console.log per line in observability.ts).
+        const result = await runFullAudit(process.cwd());
+        return textContent(formatFullAuditLines(result).join("\n"));
       }
 
       if (name === "purix_audit_trail") {

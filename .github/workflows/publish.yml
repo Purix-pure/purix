@@ -29,9 +29,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      # pnpm/action-setup only supports pnpm v10 and older — see the same
+      # note in ci.yml. Using it here would break the release pipeline
+      # specifically, which is the one workflow with zero room for a silent
+      # failure (it publishes to the real npm registry on a tag push).
+      - uses: pnpm/setup@v1
         with:
-          version: 9.15.0
+          version: 12.4.1
 
       - uses: actions/setup-node@v4
         with:

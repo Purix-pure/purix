@@ -154,19 +154,14 @@ const PRICE_PER_1M_USD: Record<"low" | "high", { input: number; output: number }
   high: { input: 1.25, output: 5.00 },
 };
 
-export function recordUsage(
-  usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined,
-  tier: "low" | "high" = "low",
-  reservedCost = 0
-): void {
-  ensureBudgetTable();
-  const inputTokens = usage?.promptTokenCount ?? 0;
-  const outputTokens = usage?.candidatesTokenCount ?? 0;
-  const price = PRICE_PER_1M_USD[tier];
-  const actualCost = (inputTokens / 1_000_000) * price.input + (outputTokens / 1_000_000) * price.output;
+// Applies a cost delta to the current repo's budget_state row and returns
+// the new running total. Shared by recordUsage/recordProviderUsage, which
+// previously duplicated this whole read-modify-write block (see audit
+// finding 2.6) — only how `actualCost` itself gets computed differs
+// between them, which each caller still does on its own before calling in.
+function applyCostDelta(actualCost: number, reservedCost: number): number {
   const delta = actualCost - reservedCost;
-
-  const newTotal = withSqliteRetry(() => {
+  return withSqliteRetry(() => {
     const db = getDb();
     const repoId = getProjectId();
     if (reservedCost > 0) {
@@ -189,6 +184,20 @@ export function recordUsage(
       | null;
     return row?.total_spent_usd ?? actualCost;
   }, "budget");
+}
+
+export function recordUsage(
+  usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined,
+  tier: "low" | "high" = "low",
+  reservedCost = 0
+): void {
+  ensureBudgetTable();
+  const inputTokens = usage?.promptTokenCount ?? 0;
+  const outputTokens = usage?.candidatesTokenCount ?? 0;
+  const price = PRICE_PER_1M_USD[tier];
+  const actualCost = (inputTokens / 1_000_000) * price.input + (outputTokens / 1_000_000) * price.output;
+
+  const newTotal = applyCostDelta(actualCost, reservedCost);
 
   const ceiling = getCeiling();
   console.log(
@@ -206,31 +215,8 @@ export function recordProviderUsage(
   const { priceFor } = require("./providers") as typeof import("./providers.js");
   const price = priceFor(provider, tier);
   const actualCost = (usage.inputTokens / 1_000_000) * price.input + (usage.outputTokens / 1_000_000) * price.output;
-  const delta = actualCost - reservedCost;
 
-  const newTotal = withSqliteRetry(() => {
-    const db = getDb();
-    const repoId = getProjectId();
-    if (reservedCost > 0) {
-      db.run(
-        `UPDATE budget_state
-         SET total_spent_usd = total_spent_usd + ?, updated_at = ?
-         WHERE repo_id = ?`,
-        [delta, new Date().toISOString(), repoId]
-      );
-    } else {
-      db.run(
-        `UPDATE budget_state
-         SET total_spent_usd = total_spent_usd + ?, calls = calls + 1, updated_at = ?
-         WHERE repo_id = ?`,
-        [actualCost, new Date().toISOString(), repoId]
-      );
-    }
-    const row = db.query(`SELECT total_spent_usd FROM budget_state WHERE repo_id = ?`).get(repoId) as
-      | { total_spent_usd: number }
-      | null;
-    return row?.total_spent_usd ?? actualCost;
-  }, "budget");
+  const newTotal = applyCostDelta(actualCost, reservedCost);
 
   const ceiling = getCeiling();
   console.log(

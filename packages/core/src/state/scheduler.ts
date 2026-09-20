@@ -112,7 +112,17 @@ export function registerScheduledTask(name: string, getIntervalMs: () => number,
   tasks.push({ name, getIntervalMs, run, lastRunAt: 0 });
 }
 
-export function startScheduler(): void {
+/**
+ * @param announce Whether to log the startup line. Defaults to `true` so
+ * existing callers (the MCP server, the scheduler test worker) keep their
+ * current behavior unchanged. Short-lived, one-shot CLI commands — which
+ * call this once as part of routine setup and then exit almost
+ * immediately, well before the first poll interval ever elapses — should
+ * pass `false`: "Started, polling every 30000ms" is misleading noise for
+ * a process that won't be alive in 30 seconds, and it printed on every
+ * single mutating command invocation with no way to opt out.
+ */
+export function startScheduler(announce: boolean = true): void {
   if (schedulerInterval) return; // already running
 
   // "scheduler.enabled" (checked live in schedulerTick, not here) governs
@@ -125,7 +135,9 @@ export function startScheduler(): void {
   // Don't keep the process alive just for the scheduler
   if (schedulerInterval.unref) schedulerInterval.unref();
 
-  console.error(`[scheduler] Started, polling every ${POLL_INTERVAL_MS}ms for due tasks`);
+  if (announce) {
+    console.error(`[scheduler] Started, polling every ${POLL_INTERVAL_MS}ms for due tasks`);
+  }
 }
 
 export function stopScheduler(): void {

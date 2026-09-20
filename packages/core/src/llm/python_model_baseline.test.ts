@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { expect } from "expect";
 import { PYTHON_MODEL_BASELINES, evaluateModelBaseline } from "./python_model_baseline";
 
-describe("ADR-044 Python Model Escalation Baseline (ADR-044 Amendment)", () => {
+describe("ADR-013 Python Model Escalation Baseline (ADR-013 Amendment)", () => {
   it("evaluates python baseline fixtures successfully", () => {
     for (const fixture of PYTHON_MODEL_BASELINES) {
       const sampleResponse = '{"reasoning": "Fixed python bug", "edits": [], "python": true}';

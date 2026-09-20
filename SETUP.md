@@ -2,24 +2,25 @@
 
 ## Prerequisites
 - Node.js >= 22.13.0
-- npm >= 10.0.0 (ships with Node)
+- pnpm@12.4.1 (see `packageManager` in the root `package.json`; install via `corepack enable`
+  or `npm install -g pnpm@12.4.1` if you don't already have it)
 
 ## Quick Start
 1. Install dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 2. Run boundary check:
    ```bash
-   npm run boundary-check
+   pnpm run boundary-check
    ```
 3. Run type checking across all packages:
    ```bash
-   npm run typecheck
+   pnpm run typecheck
    ```
 4. Run the full test suite:
    ```bash
-   npm run test
+   pnpm run test
    ```
 5. Run coverage validation for core LLM and licensing paths:
    ```bash
@@ -44,6 +45,6 @@ When adding or removing a CLI command, update the command contract test and add
 one behavior assertion beyond registration. Run:
 
 ```bash
-npm run test --workspace=@purix/cli
-npm run typecheck --workspace=@purix/cli
+pnpm --filter @purix/cli test
+pnpm --filter @purix/cli typecheck
 ```

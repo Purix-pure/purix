@@ -18,14 +18,18 @@
 // correct, not a violation of "one tmp folder per project."
 //
 // Language-specific wiring still needs doing at each call site (setting
-// RUFF_CACHE_DIR, GOCACHE/GOPATH, CARGO_TARGET_DIR, BUNDLE_PATH/GEM_HOME,
-// and pointing venv creation + compiled-test-binary output here) — this
-// file only defines and creates the shared destination.
+// RUFF_CACHE_DIR, and pointing venv creation + compiled-test-binary output
+// here) — this file only defines and creates the shared destination.
+//
+// Only "python" is supported in this beta (see BETA_SCOPE.md); Go/Rust/Ruby
+// were removed. If a language is reintroduced, add it back to this union
+// AND to core/src/language/registry.ts's provider list together, so the
+// two can't drift the way they had (see audit finding 3.1).
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-export type ToolchainLang = "python" | "go" | "rust" | "ruby";
+export type ToolchainLang = "python";
 
 const TOOLCHAIN_TMP_DIRNAME = ".purix-tmp";
 
@@ -44,8 +48,7 @@ export function resolveToolchainTmp(baseDir: string, lang: ToolchainLang): strin
 
 /**
  * Convenience for the common "give me a named subfolder under this
- * language's tmp dir" case — e.g. toolchainSubdir(baseDir, "python", "venv"),
- * toolchainSubdir(baseDir, "rust", "target").
+ * language's tmp dir" case — e.g. toolchainSubdir(baseDir, "python", "venv").
  */
 export function toolchainSubdir(baseDir: string, lang: ToolchainLang, name: string): string {
   return join(resolveToolchainTmp(baseDir, lang), name);

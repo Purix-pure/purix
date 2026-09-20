@@ -1,5 +1,5 @@
 // packages/core/src/language/providers/python.pack.ts
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { LanguagePack, ToolSpec } from "../pack.js";
 import { spawnSync } from "../../platform/spawn_sync.js";

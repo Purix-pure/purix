@@ -4,7 +4,7 @@ import { expect } from "expect";
 import { runSecurityGate, GOLDEN_CORPUS, setSecurityOverride } from "./security_gate";
 import { getOverrideAudits } from "../security/override_audit";
 
-describe("ADR-036 Deterministic Security Gate", () => {
+describe("ADR-009 Deterministic Security Gate", () => {
   it("stays silent on clean code", () => {
     const res = runSecurityGate([
       { path: "src/safe.ts", content: 'export function add(a: number, b: number) { return a + b; }\n' },

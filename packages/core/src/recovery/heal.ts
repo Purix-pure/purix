@@ -3,7 +3,7 @@ import { classifyRepair } from "../llm/classify.js";
 import { applyEdits, type CompiledFileChange } from "../verify/compile.js";
 import { verifyInSandbox } from "../sandbox/sandbox.js";
 import { recordEvent } from "../manifest/events.js";
-import { OscillationGuard } from "./oscillation_guard.js";
+import { OscillationGuard, applyEditsAndCheckOscillation } from "./oscillation_guard.js";
 
 const MAX_ATTEMPTS = 3;
 
@@ -66,10 +66,8 @@ export async function runSelfHealingLoop(
       continue;
     }
 
-    for (const f of repairResult.files) currentByPath.set(f.path, f.new_content);
-    const candidateFiles = [...currentByPath.entries()].map(([path, new_content]) => ({ path, new_content }));
+    const { candidateFiles, oscillation } = applyEditsAndCheckOscillation(currentByPath, repairResult.files, oscillationGuard);
 
-    const oscillation = oscillationGuard.check(candidateFiles.map((f) => ({ path: f.path, content: f.new_content })));
     if (oscillation.hit) {
       console.log(`   🔁 ${oscillation.reason}`);
       attempts.push({ attempt, result: "fail", reason: oscillation.reason, reasoning: repair.reasoning });

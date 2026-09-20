@@ -81,7 +81,7 @@ export const pythonProvider: LanguageProvider = {
         actionHint: "run `purix lang install python`",
       };
     }
-    if (result.exitCode === 0) return { status: "pass" };
+    if (result.exitCode === 0) return { status: "pass", isolation: result.isolation };
     const stderr = result.stderr.trim();
     const stdout = result.stdout.trim();
     return { status: "fail", reason: stderr || stdout || "pyright verification failed" };
@@ -109,7 +109,7 @@ export const pythonProvider: LanguageProvider = {
       };
     }
     if (result.exitCode === 0) {
-      return { status: "pass", quarantinedFailures: [] };
+      return { status: "pass", quarantinedFailures: [], isolation: result.isolation };
     }
     const stdout = result.stdout.trim();
     const stderr = result.stderr.trim();
@@ -117,6 +117,7 @@ export const pythonProvider: LanguageProvider = {
       status: "fail",
       reason: stderr || stdout || "pytest test run failed",
       quarantinedFailures: [],
+      isolation: result.isolation,
     };
   },
 
@@ -165,7 +166,7 @@ export const pythonProvider: LanguageProvider = {
     }
   },
 
-  async auditDependencies(baseDir: string = process.cwd()): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[] }> {
+  async auditDependencies(baseDir: string = process.cwd()): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[]; ran: boolean }> {
     const reqPath = resolve(baseDir, "requirements.txt");
     const pinning: PinningFinding[] = [];
     if (existsSync(reqPath)) {
@@ -189,6 +190,12 @@ export const pythonProvider: LanguageProvider = {
     const pipAuditBin = getVenvBinPath(baseDir, "pip-audit");
     const result = providerKitHooks.runIsolatedOrNotInstalled([pipAuditBin, "--format=json", "--vulnerability-service=osv"], { cwd: baseDir, writableDir: baseDir });
 
+    // "status" in result means pip-audit itself could not run (not
+    // installed, isolation unavailable) — that is a distinct outcome from
+    // "ran cleanly and found zero vulnerabilities" and must not be
+    // collapsed into it. See provider.ts's interface comment.
+    const ran = !("status" in result);
+
     const vulnerabilities: VulnFinding[] = [];
     if (!("status" in result) && result.stdout.length > 0) {
         try {
@@ -207,7 +214,7 @@ export const pythonProvider: LanguageProvider = {
         } catch {}
     }
 
-    return { pinning, vulnerabilities };
+    return { pinning, vulnerabilities, ran };
   },
 
   async getFingerprint(baseDir: string = process.cwd()): Promise<Record<string, string>> {

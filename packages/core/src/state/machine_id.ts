@@ -78,7 +78,7 @@ export function getMachineId(baseDir?: string): string {
     // permissions, etc.), still return a value for this call so login
     // doesn't crash — just accept that the NEXT call in a fresh process
     // may mint a different id. This mirrors this codebase's existing
-    // "degrade explicitly, never silently" posture (ADR-024/040/043)
+    // "degrade explicitly, never silently" posture (ADR-002/040/043)
     // applied to a low-stakes identifier rather than a safety gate.
   }
   return id;

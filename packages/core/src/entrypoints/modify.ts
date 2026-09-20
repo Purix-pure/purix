@@ -38,10 +38,21 @@ export async function readComponentFiles(
  * previously a mid-loop failure threw straight out of the function with
  * no backups returned, leaving a half-written component with no way to
  * undo it.
+ *
+ * `writeFileImpl` is injectable (defaulting to the real fs/promises
+ * writeFile) purely for testability, following the same pattern
+ * language/provider-kit.ts's `runFn` parameter already uses — the
+ * rollback-fails-too path (GAPS-REPORT-2 §3) needs a file that writes
+ * successfully on the first pass and fails specifically on rollback,
+ * which isn't something a real filesystem can be made to do
+ * deterministically (chmod-based read-only doesn't block a root-owned
+ * process, and anything that does block root, like chattr +i, can't be
+ * toggled mid-function without racing the very code under test).
  */
 export async function applyModificationFiles(
   changes: { path: string; new_content: string }[],
-  targetDir: string = process.cwd()
+  targetDir: string = process.cwd(),
+  writeFileImpl: typeof writeFile = writeFile
 ): Promise<FileBackup[]> {
   const backups: FileBackup[] = [];
   for (const change of changes) {
@@ -56,13 +67,43 @@ export async function applyModificationFiles(
       const backup = backups[i];
       const change = changes[i];
       if (backup && change) {
-        await writeFile(backup.fullPath, change.new_content, "utf-8");
+        await writeFileImpl(backup.fullPath, change.new_content, "utf-8");
         written.push(backup);
       }
     }
   } catch (err) {
+    // BUG FIX (GAPS-REPORT-2 §3): rollback writes here used to be
+    // fire-and-forget (`.catch(() => {})`), silently discarding any
+    // failure. If the same condition that broke the original write
+    // (disk full, a permissions change mid-run, a filesystem gone
+    // read-only) also breaks the rollback, the caller previously saw
+    // only the original write error and had no idea some files were
+    // never restored — a component now sitting on disk in a partially
+    // new, partially old, internally inconsistent state, indistinguishable
+    // from a clean rollback. Track every rollback failure and, if any
+    // occurred, surface them loudly alongside the original error instead
+    // of silently discarding the one signal that manual recovery is
+    // needed.
+    const rollbackFailures: { path: string; reason: string }[] = [];
     for (const b of written) {
-      await writeFile(b.fullPath, b.previousContent, "utf-8").catch(() => {});
+      try {
+        await writeFileImpl(b.fullPath, b.previousContent, "utf-8");
+      } catch (rollbackErr) {
+        rollbackFailures.push({
+          path: b.path,
+          reason: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+        });
+      }
+    }
+    if (rollbackFailures.length > 0) {
+      const originalMessage = err instanceof Error ? err.message : String(err);
+      const detail = rollbackFailures.map((f) => `${f.path} (${f.reason})`).join(", ");
+      const compositeErr = new Error(
+        `Write failed (${originalMessage}) AND rollback failed for ${rollbackFailures.length} file(s) — these files are now in a partially-written, inconsistent state and need manual recovery: ${detail}`
+      );
+      (compositeErr as Error & { cause?: unknown; rollbackFailures?: typeof rollbackFailures }).cause = err;
+      (compositeErr as Error & { cause?: unknown; rollbackFailures?: typeof rollbackFailures }).rollbackFailures = rollbackFailures;
+      throw compositeErr;
     }
     throw err;
   }

@@ -53,6 +53,16 @@ export function getDb(): DatabaseSync {
   mkdirSync(dirname(dbPath), { recursive: true });
   _db = new DatabaseSync(dbPath);
   _db.exec(`PRAGMA journal_mode = WAL;`);
+  // BUG FIX (paired with sqlite_retry.ts's isRetryableSqliteError() fix):
+  // WAL mode alone doesn't set a busy timeout — node:sqlite's default is
+  // effectively 0, so a connection hits SQLITE_BUSY/SQLITE_IOERR the
+  // instant it can't get the lock, immediately, with nothing to smooth
+  // over a few-millisecond overlap between two processes' transactions.
+  // This gives SQLite's own C-level wait loop 5s to resolve the overlap
+  // before returning busy at all — withSqliteRetry's JS-level backoff
+  // above this is still there as the second layer for whatever's left
+  // after that, not a replacement for it.
+  _db.exec(`PRAGMA busy_timeout = 5000;`);
 
   const integrity = _db.prepare(`PRAGMA integrity_check`).get() as { integrity_check: string } | undefined;
   if (!integrity || integrity.integrity_check !== "ok") {
@@ -64,6 +74,7 @@ export function getDb(): DatabaseSync {
     } catch {}
     _db = new DatabaseSync(dbPath);
     _db.exec(`PRAGMA journal_mode = WAL;`);
+    _db.exec(`PRAGMA busy_timeout = 5000;`);
   }
 
   _db.exec(`
@@ -145,12 +156,22 @@ function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
-export function writeManifest(entry: ManifestEntry): void {
-  const db = getDb();
+// The single upsert statement both writers below use. Kept in one place so
+// the transactional-safety argument in writeManifestWithLimitCheck's
+// comment — which depends on both call sites running the *same* insert
+// inside its transaction — is enforced by structure rather than by the
+// two copies happening to be kept in sync by convention (see audit
+// finding 2.9).
+function upsertManifestRow(db: DatabaseSync, entry: ManifestEntry): void {
   db.prepare(
     `INSERT INTO manifest (component_id, data) VALUES (?, ?)
      ON CONFLICT(component_id) DO UPDATE SET data = excluded.data`
   ).run(entry.component_id, JSON.stringify(entry));
+}
+
+export function writeManifest(entry: ManifestEntry): void {
+  const db = getDb();
+  upsertManifestRow(db, entry);
 }
 
 /**
@@ -174,10 +195,7 @@ export function writeManifestWithLimitCheck(entry: ManifestEntry): void {
       const countRow = db.prepare("SELECT COUNT(*) as count FROM manifest").get() as { count: number };
       checkComponentLimit(countRow.count); // throws (aborting the transaction) if this new component would exceed the limit
     }
-    db.prepare(
-      `INSERT INTO manifest (component_id, data) VALUES (?, ?)
-       ON CONFLICT(component_id) DO UPDATE SET data = excluded.data`
-    ).run(entry.component_id, JSON.stringify(entry));
+    upsertManifestRow(db, entry);
   });
 }
 

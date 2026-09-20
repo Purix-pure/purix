@@ -201,6 +201,32 @@ export async function ingestDiff(
     }
 
     if (isDeleted) {
+      // BUG FIX (GAPS-REPORT-2 §5): every other diff section
+      // (added/modified) reads the real file off disk and runs it
+      // through applyHunks(), which verifies every context/removed line
+      // actually matches what's there before accepting the change — the
+      // same stale-base protection that keeps a diff generated against
+      // an old commit from silently corrupting a file that's since
+      // moved on. Deletion sections skipped all of that: a diff
+      // section claiming "delete src/x.ts" was accepted unconditionally,
+      // with no check that the file even exists, let alone that its
+      // content matches what the diff was generated against. A stale
+      // PR, a diff replayed out of order, or a malicious payload could
+      // delete a file that had since been rewritten with unrelated,
+      // uncommitted content the diff never saw.
+      let originalContent: string;
+      try {
+        originalContent = await readFile(join(targetDir, relPath), "utf-8");
+      } catch {
+        return {
+          ok: false,
+          reason: `diff deletes "${relPath}", but it isn't on disk at ${join(targetDir, relPath)} — refusing to accept a deletion for a file that doesn't exist`,
+        };
+      }
+      const applied = applyHunks(originalContent.split("\n"), fileDiff.hunks);
+      if (!applied.ok) {
+        return { ok: false, reason: `${relPath}: ${applied.reason}` };
+      }
       files.push({ path: relPath, new_content: "", status: "deleted" });
       continue;
     }

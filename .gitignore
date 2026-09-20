@@ -13,6 +13,7 @@ yarn-error.log*
 .turbo/
 .turbo/*
 .purix/
+.release-check/
 
 purix-architecture/
 # (removed a stray bare `*.md` rule that was here — it silently excluded
@@ -24,6 +25,9 @@ purix-architecture/
 
 # local project state, contains manifest.db and secrets
 .purix/
+/diff_*.txt
+/benchmark_*.md
+/purix_*.md
 
 # yarn v3
 .pnp.*

@@ -1,6 +1,6 @@
 // packages/mcp-server/src/repo_content_invariant.test.ts
 //
-// Adversarial pass for ADR-021: "the local MCP server never forwards
+// Adversarial pass for ADR-001: "the local MCP server never forwards
 // repository content to the remote MCP server or any other backend
 // endpoint." That ADR explicitly says this must be "verified directly by
 // an adversarial test pass on the MCP tool surface rather than assumed to
@@ -10,7 +10,7 @@
 // What this test does NOT object to: repository content being sent to a
 // user-configured third-party LLM provider (OpenAI, Anthropic, etc.) as
 // part of a classify/modify call. That is expected, and disclosed in the
-// privacy policy. ADR-021's invariant is narrower and specific:
+// privacy policy. ADR-001's invariant is narrower and specific:
 // repository content must never reach *Purix's own* backend
 // (packages/api, i.e. the base URL api_client.ts talks to) via
 // purix_modify or purix_ingest.
@@ -58,7 +58,7 @@ interface RecordedFetchCall {
   body: string;
 }
 
-describe("ADR-021 adversarial pass: MCP server never forwards repo content to Purix's own backend", () => {
+describe("ADR-001 adversarial pass: MCP server never forwards repo content to Purix's own backend", () => {
   let tmpDir: string;
   let oldCwd: string;
   let originalFetch: typeof fetch;
@@ -68,7 +68,7 @@ describe("ADR-021 adversarial pass: MCP server never forwards repo content to Pu
     tmpDir = mkdtempSync(join(tmpdir(), "purix-mcp-adversarial-"));
     oldCwd = process.cwd();
     process.chdir(tmpDir);
-    process.env.AUTO_CONFIRM = "1";
+    process.env.PURIX_MCP_AUTO_APPROVE = "1";
     process.env.PURIX_LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "test_openai_key";
     recordedCalls = [];
@@ -111,7 +111,7 @@ describe("ADR-021 adversarial pass: MCP server never forwards repo content to Pu
     closeDb();
     process.chdir(oldCwd);
     rmSync(tmpDir, { recursive: true, force: true });
-    delete process.env.AUTO_CONFIRM;
+    delete process.env.PURIX_MCP_AUTO_APPROVE;
     globalThis.fetch = originalFetch;
     delete process.env.PURIX_LLM_PROVIDER;
     delete process.env.OPENAI_API_KEY;

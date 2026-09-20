@@ -56,42 +56,95 @@ export interface VulnScanResult {
   findings: VulnFinding[];
 }
 
+type AuditTool = "pnpm" | "yarn" | "npm";
+
 /**
- * Section 8 Should-have: "vuln scan." Shells out to `npm audit --json`
- * rather than reimplementing an advisory database — npm's audit hits the
- * real registry advisory feed, which is the thing actually worth trusting
- * here. Requires an npm-resolvable lockfile (package-lock.json). If this
- * is a bun-only project with no package-lock.json, npm audit has nothing
- * to check against — this returns ran:false rather than a false "clean."
+ * Same lockfile-priority pattern as installTypescriptHint() in verify.ts:
+ * detect which package manager the TARGET project actually uses, rather
+ * than assuming npm. Bun (bun.lock/bun.lockb) is deliberately excluded —
+ * Bun does not currently expose an audit subcommand equivalent to
+ * `npm audit`/`pnpm audit`/`yarn audit`, so there is no tool to shell out
+ * to for a Bun-only project; that case falls through to ran:false below.
+ */
+function detectAuditTool(targetDir: string): AuditTool | null {
+  if (existsSync(join(targetDir, "pnpm-lock.yaml"))) return "pnpm";
+  if (existsSync(join(targetDir, "yarn.lock"))) return "yarn";
+  if (existsSync(join(targetDir, "package-lock.json"))) return "npm";
+  return null;
+}
+
+/**
+ * Section 8 Should-have: "vuln scan." Shells out to the target project's
+ * own package manager's audit command rather than reimplementing an
+ * advisory database — each of pnpm/yarn/npm audit hits the real registry
+ * advisory feed, which is the thing actually worth trusting here.
+ * BUG FIX: this used to hardcode `npm audit` against `package-lock.json`
+ * regardless of which package manager the target project actually uses,
+ * so it always returned ran:false on pnpm/yarn projects (including this
+ * repo's own). Now detects pnpm-lock.yaml / yarn.lock / package-lock.json
+ * and dispatches to the matching tool, each with its own JSON parser
+ * since the shapes differ.
  */
 export function runVulnScan(targetDir: string = process.cwd()): VulnScanResult {
-  const lockfile = join(targetDir, "package-lock.json");
-  if (!existsSync(lockfile)) {
+  const tool = detectAuditTool(targetDir);
+  if (!tool) {
     return {
       ran: false,
-      reason: "No package-lock.json found — npm audit needs one to resolve against. Run `npm install` once (alongside your bun workflow) to generate it, or `bun pm` doesn't currently expose an equivalent audit.",
+      reason: "No pnpm-lock.yaml, yarn.lock, or package-lock.json found — nothing to resolve an audit against. (Bun projects aren't supported here: Bun doesn't currently expose an audit command equivalent to npm/pnpm/yarn audit.)",
       findings: [],
     };
   }
 
-  const result = spawnSync(["npm", "audit", "--json"], { cwd: targetDir, stdout: "pipe", stderr: "pipe" });
+  const command = tool === "pnpm" ? ["pnpm", "audit", "--json"]
+    : tool === "yarn" ? ["yarn", "audit", "--json"]
+    : ["npm", "audit", "--json"];
 
+  const result = spawnSync(command, { cwd: targetDir, stdout: "pipe", stderr: "pipe" });
+
+  const stdout = result.stdout.toString();
+  const findings: VulnFinding[] = [];
+
+  if (tool === "yarn") {
+    // yarn audit --json emits one JSON object per line (NDJSON), not a
+    // single JSON document — parse line by line and pick out advisories.
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let entry: any;
+      try {
+        entry = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (entry.type === "auditAdvisory") {
+        const d = entry.data?.advisory;
+        if (d) {
+          findings.push({
+            module: d.module_name ?? "(unknown)",
+            severity: d.severity ?? "moderate",
+            title: d.title ?? "(no title)",
+            url: d.url ?? "",
+            range: d.vulnerable_versions ?? "unknown",
+          });
+        }
+      }
+    }
+    return { ran: true, findings };
+  }
+
+  // pnpm audit --json and npm audit --json (v7+) share the same
+  // `vulnerabilities` object shape, keyed by package name.
   let parsed: any;
   try {
-    parsed = JSON.parse(result.stdout.toString());
+    parsed = JSON.parse(stdout);
   } catch {
     return {
       ran: false,
-      reason: result.stderr.toString().trim() || "npm audit produced no parseable output",
+      reason: result.stderr.toString().trim() || `${tool} audit produced no parseable output`,
       findings: [],
     };
   }
 
-  const findings: VulnFinding[] = [];
-  // npm audit's JSON shape differs between npm 6, 7, and 8+. This handles
-  // the v7+ shape (`vulnerabilities` keyed by package name). If you're on
-  // npm 6 this won't parse right — check `npm --version` if findings come
-  // back empty on a project you know has issues.
   for (const [name, v] of Object.entries<any>(parsed.vulnerabilities ?? {})) {
     for (const via of v.via ?? []) {
       if (typeof via === "object") {

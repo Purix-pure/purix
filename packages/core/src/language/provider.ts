@@ -12,7 +12,13 @@ export interface LanguageProvider {
   verify(filePaths: string[], baseDir?: string, runFn?: any): VerificationResult;
   runTests(componentId: string, testFiles: string[], baseDir?: string, runFn?: any): TestRunResult;
   checkIdiom(filePaths: string[], baseDir?: string): IdiomCheckResult;
-  auditDependencies(baseDir?: string, runFn?: any): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[] }>;
+  // `ran: false` means the scan itself could not execute (tool not
+  // installed, network unavailable, no manifest present) — this MUST be
+  // distinguished from "ran and found nothing," per AGENTS.md's rule that
+  // "checked and passed" and "could not check" are never the same outcome.
+  // A caller that only reads `vulnerabilities.length === 0` cannot tell
+  // these apart; `ran` exists so it doesn't have to guess.
+  auditDependencies(baseDir?: string, runFn?: any): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[]; ran: boolean }>;
 
   getFingerprint(baseDir?: string): Promise<Record<string, string>>;
   // Lazy by design: the TypeScript checker pulls in ts-morph (which bundles

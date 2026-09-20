@@ -3,20 +3,21 @@ import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "../platform/spawn_sync.js";
-import type { TestIntegrityChecker } from "./test_integrity.js";
+import { diffTestProfiles, type TestIntegrityChecker, type TestIntegrityFinding, type TestIntegrityResult } from "./test_integrity.js";
 
-export interface TestIntegrityFinding {
-  path: string;
-  reason: string;
-}
-
-export interface TestIntegrityResult {
-  flagged: boolean;
-  findings: TestIntegrityFinding[];
-}
+// Re-exported for anything importing these from this module's old location.
+export type { TestIntegrityFinding, TestIntegrityResult };
 
 interface PythonTestProfile {
   assertionCount: number;
+  // Unparsed source text of each `assert <expr>` test expression (via
+  // Python's own ast.unparse, Python 3.9+ — this project's floor is 3.10,
+  // see python.ts minSupportedVersion). Tracking targets, not just a
+  // count, is what lets the shared diffTestProfiles() catch an assertion
+  // on one thing being silently swapped for an assertion on something
+  // else (previously only the TypeScript checker could do this — see
+  // audit finding 2.4).
+  assertionTargets: string[];
   skipCount: number;
 }
 
@@ -54,10 +55,15 @@ except Exception:
 class TestVisitor(ast.NodeVisitor):
     def __init__(self):
         self.assert_count = 0
+        self.assert_targets = []
         self.skip_count = 0
 
     def visit_Assert(self, node):
         self.assert_count += 1
+        try:
+            self.assert_targets.append(ast.unparse(node.test))
+        except Exception:
+            self.assert_targets.append("(unparsable)")
         self.generic_visit(node)
 
     def visit_Call(self, node):
@@ -83,7 +89,11 @@ class TestVisitor(ast.NodeVisitor):
 
 visitor = TestVisitor()
 visitor.visit(tree)
-print(json.dumps({"assertionCount": visitor.assert_count, "skipCount": visitor.skip_count}))
+print(json.dumps({
+    "assertionCount": visitor.assert_count,
+    "assertionTargets": visitor.assert_targets,
+    "skipCount": visitor.skip_count,
+}))
 `;
 
   const scriptFile = join(tmpdir(), `purix-py-script-${Math.random().toString(36).slice(2)}.py`);
@@ -103,6 +113,7 @@ print(json.dumps({"assertionCount": visitor.assert_count, "skipCount": visitor.s
     if (parsed.error) return null;
     return {
       assertionCount: parsed.assertionCount ?? 0,
+      assertionTargets: parsed.assertionTargets ?? [],
       skipCount: parsed.skipCount ?? 0,
     };
   } catch {
@@ -117,43 +128,17 @@ export function checkPythonTestIntegrity(
   before: { path: string; content: string }[],
   after: { path: string; content: string }[]
 ): TestIntegrityResult {
-  const beforeByPath = new Map(before.map((f) => [f.path, f.content]));
-  const findings: TestIntegrityFinding[] = [];
-
-  for (const file of after) {
-    if (!file.path.endsWith(".py")) continue;
-    const priorContent = beforeByPath.get(file.path);
-    if (priorContent === undefined) continue;
-    if (priorContent === file.content) continue;
-
-    const priorProfile = analyzePythonFile(priorContent);
-    const newProfile = analyzePythonFile(file.content);
-
-    if (!priorProfile || !newProfile) {
-      findings.push({
-        path: file.path,
-        reason: `couldn't parse python test file to compare assertions — treating as a flag`,
-      });
-      continue;
-    }
-
-    if (newProfile.assertionCount < priorProfile.assertionCount) {
-      findings.push({
-        path: file.path,
-        reason: `assertion count dropped from ${priorProfile.assertionCount} to ${newProfile.assertionCount}`,
-      });
-      continue;
-    }
-
-    if (newProfile.skipCount > priorProfile.skipCount) {
-      findings.push({
-        path: file.path,
-        reason: `${newProfile.skipCount - priorProfile.skipCount} new skip annotation(s) added`,
-      });
-    }
-  }
-
-  return { flagged: findings.length > 0, findings };
+  // analyzePythonFile only needs `content` (it shells out to a temp file
+  // rather than reading `path`), but diffTestProfiles' analyze signature
+  // is (content, path) to match the TypeScript checker — the unused path
+  // parameter is intentionally ignored here.
+  return diffTestProfiles(
+    before,
+    after,
+    (content) => analyzePythonFile(content),
+    (path) => path.endsWith(".py"),
+    `couldn't parse python test file to compare assertions — treating as a flag`
+  );
 }
 
 export function isPythonTestFilePath(path: string): boolean {

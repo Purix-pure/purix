@@ -3,13 +3,16 @@
 // Writes a single key/value into the config store at the given baseDir,
 // then exits. Standin for "another OS process/CLI invocation ran `purix
 // config set ...`" in config_hot_reload.test.ts.
+import { writeSync } from "node:fs";
 import { createConfigStore } from "./config.js";
 
 const baseDir = process.argv[2];
 const key = process.argv[3];
 const rawValue = process.argv[4];
 if (!baseDir || !key || rawValue === undefined) {
-  console.error("usage: config_write_once_worker.ts <baseDir> <key> <value>");
+  // LIFECYCLE FIX (parity with budget_race_worker.ts): synchronous write
+  // ahead of process.exit() — see that file's comment for why.
+  writeSync(2, "usage: config_write_once_worker.ts <baseDir> <key> <value>\n");
   process.exit(1);
 }
 

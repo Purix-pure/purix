@@ -7,11 +7,14 @@
 // in a truncated/partial state, only ever "old complete" or "new
 // complete". A worker that exited on its own would give the test no
 // control over WHEN the kill lands relative to a write.
+import { writeSync } from "node:fs";
 import { createConfigStore } from "./config.js";
 
 const baseDir = process.argv[2];
 if (!baseDir) {
-  console.error("usage: config_race_worker.ts <baseDir>");
+  // LIFECYCLE FIX (parity with budget_race_worker.ts): synchronous write
+  // ahead of process.exit() — see that file's comment for why.
+  writeSync(2, "usage: config_race_worker.ts <baseDir>\n");
   process.exit(1);
 }
 

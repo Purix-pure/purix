@@ -6,8 +6,9 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@12.4.1",
   "scripts": {
+    "build": "turbo run build",
     "purix": "turbo run build --filter=@purix/cli... && pnpm --filter @purix/cli exec tsx src/cli.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
@@ -23,12 +24,7 @@
     "typescript": "5.7.2"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "cross-spawn": "^7.0.6"
-  },
-  "pnpm": {
-    "overrides": {
-      "qs": ">=6.16.0",
-      "fast-uri": ">=3.1.6"
-    }
   }
 }

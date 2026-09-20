@@ -51,6 +51,27 @@ export async function callLlm(
     recordCircuitSuccess();
     return result.text ?? "";
   } catch (err: any) {
+    // BUG FIX (GAPS-REPORT-2 §2): assertBudgetAvailable() reserves
+    // estimatedCost into total_spent_usd at the top of THIS invocation —
+    // including every retried attempt, since each is its own real call
+    // with its own real spend risk. Previously, only the success path
+    // ever reconciled that reservation (via recordProviderUsage a few
+    // lines up); every failure path fell straight through to `throw err`
+    // with no refund, permanently committing the reservation with zero
+    // dollars of real spend behind it. Enough consecutive failures (a
+    // misconfigured API key, a provider outage) would exhaust the entire
+    // cost ceiling and then correctly-but-wrongly refuse every
+    // subsequent call, including ones that would have succeeded — a
+    // self-inflicted denial-of-service on the tool's own core function.
+    //
+    // recordProviderUsage() already computes exactly the right refund
+    // for a zero-usage call: actualCost is 0, so delta = 0 - reserved =
+    // -reserved, releasing this attempt's reservation back out. Doing
+    // this here, before either retrying (which reserves its own
+    // separate amount on its own recursive invocation) or giving up,
+    // means every attempt's reservation is accounted for exactly once,
+    // whichever way this attempt ends.
+    recordProviderUsage({ inputTokens: 0, outputTokens: 0 }, provider.id, tier, reserved);
     if (provider.isTransientError(err)) {
       recordCircuitFailure();
       if (attempt <= 4) {

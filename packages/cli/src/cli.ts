@@ -1,6 +1,34 @@
 #!/usr/bin/env node
-// packages/cli/src/cli.ts>COM
-// Must be the first import: loads .env from process.cwd() (the user's
+// packages/cli/src/cli.ts
+//
+// Must run before ANY import: several core modules (manifest/store,
+// platform/sqlite_compat, llm/sqlite_retry, licensing/tier) use the
+// built-in node:sqlite module, which is still experimental on Node 22/23
+// (our minimum supported version — engines requires >=22.13.0; it isn't
+// unflagged as stable until Node 24). Node prints
+// "ExperimentalWarning: SQLite is an experimental feature and might
+// change at any time" the first time that module loads, on every single
+// command that touches the manifest DB — which is nearly all of them.
+// That's alarming/confusing for users with no bearing on Purix's own
+// stability, and setting process.env.NODE_NO_WARNINGS from inside the
+// process does NOT suppress it (verified: Node's warning emission is
+// wired up before user code runs, so an env var set here is too late).
+// Filtering process.emitWarning by message, before any sqlite-touching
+// module gets a chance to import, is the mechanism that actually works —
+// and unlike `--no-warnings` (which can't be injected into how a
+// globally-installed or `npx`-invoked binary gets launched) or a blanket
+// `process.removeAllListeners("warning")` (which would also hide a real
+// future deprecation warning), this only filters this one specific,
+// known, expected message and lets everything else through unchanged.
+const originalEmitWarning = process.emitWarning.bind(process);
+process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+  const message = typeof warning === "string" ? warning : warning.message;
+  if (message.includes("SQLite is an experimental feature")) return;
+  // @ts-expect-error — forwarding the exact overload Node was called with
+  return originalEmitWarning(warning, ...args);
+}) as typeof process.emitWarning;
+
+// Must be the first *import*: loads .env from process.cwd() (the user's
 // project, where they'd put a real .env per .env.example) into
 // process.env before anything else runs. Several modules read
 // process.env.* at module-evaluation time (e.g. cli/output.ts's `quiet`
@@ -45,7 +73,7 @@ const COMMAND_REGISTRY_SPECS = [
   { name: "registerProviderCommands", importer: () => import("./cli/commands/provider.js"), exportName: "registerProviderCommands" },
   { name: "registerTierCommands", importer: () => import("./cli/commands/tier.js"), exportName: "registerTierCommands" },
   // registerMcpCommands intentionally not wired in for v1.0 launch — see
-  // ADR-057 ("MCP Client Commands Governance Deferral"). The gateway/registry
+  // ADR-018 ("MCP Client Commands Governance Deferral"). The gateway/registry
   // code is intact and untouched; re-enable this export + the
   // registerMcpCommands(program) call below once the governance hardening
   // (identity-backed provenance, DLP scrub, escalation budget caps) ships.
@@ -230,6 +258,32 @@ function isReadOnlyCommand(actionCommand: Command): boolean {
   return READ_ONLY_COMMANDS.has(commandPath(actionCommand));
 }
 
+/**
+ * Prints a top-level command failure and sets the process exit code.
+ *
+ * Every intentional failure thrown anywhere in @purix/core is a plain
+ * `throw new Error("...")` with a clear, actionable message (confirmed:
+ * zero uses of TypeError/RangeError/etc. for expected conditions across
+ * the whole core package) — things like "No LLM provider is configured.
+ * Run ...", "Repository is already locked by active process PID ...",
+ * "Refusing to scaffold — file(s) already exist: ...". Those are Purix
+ * doing its job, not Purix breaking. A genuine unexpected failure (a
+ * real bug, a non-Error throw, a native runtime error) surfaces as some
+ * other error shape.
+ *
+ * Both call sites used to label every single failure "🛑 Unhandled
+ * error" regardless of which kind it was, which made routine, expected
+ * setup issues (an unconfigured provider, a missing manifest entry) read
+ * like the tool itself was broken. This restores that distinction
+ * instead of duplicating the same logic at both call sites.
+ */
+function reportCommandFailure(err: unknown): void {
+  const isExpectedFailure = err instanceof Error && err.constructor === Error;
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(isExpectedFailure ? `\n🛑 ${message}` : `\n🛑 Unhandled error: ${message}`);
+  process.exitCode = 1;
+}
+
 function createBaseProgram(): Command {
   const program = new Command();
   program
@@ -274,7 +328,14 @@ function createBaseProgram(): Command {
     ]);
     await reconcilePendingOperations();
     acquireRepoLock();
-    startScheduler();
+    // Only announce the scheduler starting for the one genuinely long-lived
+    // command (mcp-serve stays up and actually reaches later polls). Every
+    // other command here is a one-shot process that starts the scheduler
+    // as routine setup and exits almost immediately, well before the
+    // first poll interval elapses — "Started, polling every 30000ms" was
+    // printing on every single mutating invocation and describing polling
+    // that was never going to happen.
+    startScheduler(commandPath(actionCommand) === "mcp-serve");
     commandActionStartMs = performance.now();
   });
 
@@ -360,8 +421,7 @@ if (isDirectlyExecuted()) {
       try {
         await minimalProgram.parseAsync(process.argv);
       } catch (err) {
-        console.error(`\n🛑 Unhandled error: ${err instanceof Error ? err.message : err}`);
-        process.exitCode = 1;
+        reportCommandFailure(err);
       }
       return;
     }
@@ -404,8 +464,7 @@ if (isDirectlyExecuted()) {
       const program = await buildProgram();
       await program.parseAsync(process.argv);
     } catch (err) {
-      console.error(`\n🛑 Unhandled error: ${err instanceof Error ? err.message : err}`);
-      process.exitCode = 1;
+      reportCommandFailure(err);
     } finally {
       timingState.parseMs = Math.max(0, performance.now() - parseStartMs - timingState.actionMs);
     }

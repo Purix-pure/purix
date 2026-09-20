@@ -11,7 +11,6 @@ import { checkIdioms } from "../../verify/idiom.js";
 import type { PinningFinding, VulnFinding } from "../../security/deps_audit.js";
 import { checkVersionPinning, runVulnScan } from "../../security/deps_audit.js";
 import type { TestIntegrityChecker } from "../../verify/test_integrity.js";
-import { providerKitHooks, runIsolatedOrNotInstalled } from "../provider-kit.js";
 
 export const typescriptProvider: LanguageProvider = {
   id: "typescript",
@@ -55,10 +54,14 @@ export const typescriptProvider: LanguageProvider = {
     return checkIdioms(filePaths, baseDir);
   },
 
-  async auditDependencies(baseDir: string = process.cwd()): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[] }> {
+  async auditDependencies(baseDir: string = process.cwd()): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[]; ran: boolean }> {
     const pinning = await checkVersionPinning(baseDir);
     const scan = runVulnScan(baseDir);
-    return { pinning, vulnerabilities: scan.findings };
+    // scan.ran distinguishes "no vulnerabilities found" from "could not
+    // scan at all" (no lockfile, npm unavailable) — previously discarded
+    // here, which is what let a caller treat both cases as an identical
+    // clean pass. See provider.ts's interface comment.
+    return { pinning, vulnerabilities: scan.findings, ran: scan.ran };
   },
 
   async getFingerprint(baseDir: string = process.cwd()): Promise<Record<string, string>> {

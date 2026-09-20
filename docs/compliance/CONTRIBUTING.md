@@ -10,24 +10,24 @@ See [SETUP.md](./SETUP.md) for the full local development walkthrough. The
 short version:
 
 ```bash
-npm install
-npm run boundary-check
-npm run typecheck
-npm run test
+pnpm install
+pnpm run boundary-check
+pnpm run typecheck
+pnpm run test
 ```
 
-Node >= 22.13.0 and npm >= 10.0.0 (npm ships with Node — no separate install
-needed).
+Node >= 22.13.0 and pnpm@12.4.1 (see `packageManager` in the root `package.json`;
+`corepack enable` will pick it up automatically).
 
 ## Before opening a PR
 
 Run the same four checks CI runs on every PR:
 
 ```bash
-npm run boundary-check   # packages/core must never import from packages/cli or packages/api
-npm run artifact-check   # no leftover toolchain/build artifacts committed outside .purix-tmp/
-npm run typecheck        # tsc --noEmit across all three packages
-npm run test             # the full test suite — 386 tests as of this writing
+pnpm run boundary-check   # packages/core must never import from packages/cli or packages/api
+pnpm run artifact-check   # no leftover toolchain/build artifacts committed outside .purix-tmp/
+pnpm run typecheck        # tsc --noEmit across all three packages
+pnpm run test             # the full test suite — 386 tests as of this writing
 ```
 
 All four have to pass before a PR can merge — `.github/workflows/ci.yml` enforces
@@ -44,7 +44,7 @@ this. Running them locally first saves a round trip.
   that discipline; don't "simplify" it into an in-process mock.
 - **The core/cli/api boundary is a hard rule, not a style preference.**
   `packages/core` must never import from `packages/cli` or `packages/api`.
-  `npm run boundary-check` enforces this by scanning for both
+  `pnpm run boundary-check` enforces this by scanning for both
   package-specifier imports and relative-path escapes. If your change needs
   core to know something cli-specific, that's a sign the abstraction belongs
   in core instead, not that the check should be loosened.
@@ -66,7 +66,7 @@ this. Running them locally first saves a round trip.
 ## Filing issues
 
 Bug reports are most useful with: the exact command you ran, the full error
-output (not a paraphrase), and your Node/npm versions (`node -v && npm -v`).
+output (not a paraphrase), and your Node/pnpm versions (`node -v && pnpm -v`).
 For anything involving the sandboxed verification step, whether the target
 project itself uses npm, yarn, pnpm, or bun also matters — several past bugs
 in this codebase were specific to one package manager's `node_modules`

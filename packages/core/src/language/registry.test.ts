@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { createConfigStore } from "../state/config";
 import { clearEntitlementsCache } from "../licensing/tier";
 
-describe("ADR-052 Registry & Language Gating", () => {
+describe("ADR-017 Registry & Language Gating", () => {
   let tmpDir: string;
   let oldCwd: string;
 
@@ -56,6 +56,24 @@ describe("ADR-052 Registry & Language Gating", () => {
     config.set("language", "python");
     const lang = resolveLanguage(undefined, tmpDir);
     expect(lang).toBe("python");
+  });
+
+  // Previously untested: Document 4 finding §1.1/§1.5 found a live defect
+  // where sandbox.ts caught exactly this thrown error and silently
+  // defaulted to "typescript" — the one outcome this throw exists to
+  // prevent. That caller-side bug is fixed separately (sandbox.ts now
+  // fails closed), but the throw itself had zero test coverage, so a
+  // future regression here would stay invisible until it broke a caller
+  // again. This locks in both halves: the throw fires, and for the right
+  // reason.
+  it("throws when multiple language markers are present with no explicit declaration", () => {
+    process.env.PURIX_DEV_TIER = "pro";
+    // A real, legitimate layout this can hit: a TS frontend and a Python
+    // backend sharing one repo root with no monorepo split and no
+    // explicit `language` set in .purix/config.json.
+    writeFileSync(join(tmpDir, "tsconfig.json"), "{}");
+    writeFileSync(join(tmpDir, "requirements.txt"), "");
+    expect(() => resolveLanguage(undefined, tmpDir)).toThrow(/Multiple language markers detected/);
   });
 
   // Added 2026-08-30 audit session, updated at beta-scope trim (Go/Ruby/Rust

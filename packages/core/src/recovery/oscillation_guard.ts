@@ -1,5 +1,6 @@
 // src/recovery/oscillation_guard.ts
 import { computeSyncHash } from "../state/hash.js";
+import type { CompiledFileChange } from "../verify/compile.js";
 
 /**
  * §E-OSC oscillation guard. Not true AST canonicalization (that's Bundle
@@ -50,4 +51,24 @@ export class OscillationGuard {
     }
     return { hit: false, hash, seenCount };
   }
+}
+
+/**
+ * Merges one round of applied edits into the running file map and checks
+ * the result against `guard` in one step. Both runEscalation and
+ * runSelfHealingLoop repeated this exact sequence — mutate the map with
+ * the newly-applied files, rebuild the full candidate list from it, then
+ * hand that to the guard — as their own inline code (see audit finding
+ * 2.8); this is that sequence, kept next to the guard it drives so the
+ * two can't drift the way the guard classes themselves once had.
+ */
+export function applyEditsAndCheckOscillation(
+  currentByPath: Map<string, string>,
+  appliedFiles: CompiledFileChange[],
+  guard: OscillationGuard
+): { candidateFiles: CompiledFileChange[]; oscillation: OscillationCheck } {
+  for (const f of appliedFiles) currentByPath.set(f.path, f.new_content);
+  const candidateFiles: CompiledFileChange[] = [...currentByPath.entries()].map(([path, new_content]) => ({ path, new_content }));
+  const oscillation = guard.check(candidateFiles.map((f) => ({ path: f.path, content: f.new_content })));
+  return { candidateFiles, oscillation };
 }

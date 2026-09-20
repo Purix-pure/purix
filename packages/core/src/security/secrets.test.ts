@@ -4,7 +4,7 @@
 // all before this — every other file that calls them (sandbox.ts,
 // scaffold.ts, migration.ts, escalate.ts's outbound scrub) only
 // exercised them indirectly through much larger integration tests. Given
-// this is the one mechanism ADR-025 and ADR-037 both depend on to keep a
+// this is the one mechanism ADR-003 and ADR-037 both depend on to keep a
 // real credential out of a commit, it earns direct, standalone coverage
 // of its own rather than staying implicitly tested through everything
 // that happens to call it.

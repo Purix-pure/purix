@@ -62,10 +62,10 @@ language gets added back.
 ## Quick start
 
 ```bash
-npm install
-npm run boundary-check   # verifies packages/core never imports from packages/cli
-npm run typecheck
-npm run test
+pnpm install
+pnpm run boundary-check   # verifies packages/core never imports from packages/cli
+pnpm run typecheck
+pnpm run test
 ```
 
 See [SETUP.md](./SETUP.md) for the full local development walkthrough.
@@ -73,13 +73,13 @@ See [SETUP.md](./SETUP.md) for the full local development walkthrough.
 Running the CLI directly:
 
 ```bash
-npm run purix -- --help
+pnpm run purix -- --help
 ```
 
 Running the MCP server:
 
 ```bash
-npm run purix -- mcp-serve
+pnpm run purix -- mcp-serve
 ```
 
 Whoever launches the MCP server should set `PURIX_MCP_AGENT_ID` to identify

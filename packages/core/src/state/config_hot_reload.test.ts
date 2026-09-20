@@ -184,7 +184,50 @@ describe("Part 2: config hot reload — cross-process visibility", () => {
     const entries = readdirSync(join(dir, ".purix"));
     for (const entry of entries) {
       if (entry === "config.json") continue;
+      // config.lock: expected iff the kill landed while a set()/delete()
+      // held the write lock (GAPS-REPORT-2 §6's fix) — a crashed holder
+      // leaves it behind until the next acquirer's staleness check
+      // reclaims it; that's the documented, intended tradeoff of adding
+      // real mutual exclusion, not a leak.
+      if (entry === "config.lock") continue;
       expect(entry).toMatch(/^\.config\.json\.\d+\..*\.tmp$/);
+    }
+  });
+
+  it("BUG FIX (GAPS-REPORT-2 §6): concurrent set() calls from different real processes don't lose each other's writes", async () => {
+    // The actual race: N real OS processes each run `purix config set
+    // <own-key> <value>` at roughly the same time. Before the fix, each
+    // one's set() did readAll() -> mutate -> writeAll() with no mutual
+    // exclusion — whichever writeAll() landed last would win with ITS
+    // single-key change against ITS OWN stale snapshot, silently
+    // discarding every other process's change that hadn't been picked up
+    // in that snapshot. Spawned concurrently (not one-at-a-time, which
+    // would never have exercised the race at all) so their read-modify-
+    // write windows genuinely overlap.
+    const keyCount = 8;
+    const spawnOne = (key: string, value: string): Promise<void> =>
+      new Promise<void>((resolvePromise, reject) => {
+        const commandParts = [...tsxCommand, writeOnceWorkerPath, dir, key, value];
+        const [command, ...args] = commandParts;
+        if (!command) throw new Error("empty spawn command");
+        const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+        let stderr = "";
+        child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+        child.on("close", (code: number | null) => (code === 0 ? resolvePromise() : reject(new Error(stderr))));
+      });
+
+    const writes = Array.from({ length: keyCount }, (_, i) => spawnOne(`key-${i}`, String(i)));
+    await Promise.all(writes);
+
+    const finalStore = createConfigStore(dir);
+    const all = finalStore.all();
+    for (let i = 0; i < keyCount; i++) {
+      // Before the fix, this would fail intermittently (typically several
+      // of the 8 keys missing, not just one) — the point isn't that every
+      // single run necessarily loses a write without the fix, it's that
+      // the lock makes losing one structurally impossible rather than
+      // merely unlikely.
+      expect(all[`key-${i}`]).toBe(i);
     }
   });
 });

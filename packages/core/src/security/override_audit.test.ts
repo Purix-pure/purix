@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { recordOverrideAudit, getOverrideAudits } from "./override_audit";
 import { closeDb } from "../manifest/store";
 
-describe("ADR-039 Override-with-Audit Escape Hatch", () => {
+describe("ADR-011 Override-with-Audit Escape Hatch", () => {
   let originalCwd: string;
   let tmpDir: string;
 

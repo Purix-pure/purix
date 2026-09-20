@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPurixMcpServer, createToolCaller, getAgentId } from "./server";
-import { closeDb, writeManifest } from "@purix/core/manifest/store";
+import { closeDb, writeManifest, readManifest } from "@purix/core/manifest/store";
 import { listEvents } from "@purix/core/manifest/events";
 
 describe("Purix MCP Server", () => {
@@ -16,14 +16,14 @@ describe("Purix MCP Server", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "purix-mcp-test-"));
     oldCwd = process.cwd();
     process.chdir(tmpDir);
-    process.env.AUTO_CONFIRM = "1"; // bypass prompt for test
+    process.env.PURIX_MCP_AUTO_APPROVE = "1"; // bypass prompt for test
   });
 
   afterEach(() => {
     closeDb();
     process.chdir(oldCwd);
     rmSync(tmpDir, { recursive: true, force: true });
-    delete process.env.AUTO_CONFIRM;
+    delete process.env.PURIX_MCP_AUTO_APPROVE;
   });
 
   test("server initializes and lists tools successfully", async () => {
@@ -228,6 +228,48 @@ describe("Purix MCP Server", () => {
       const sessionB = createToolCaller();
       const sessionBFirst = await sessionB("purix_index", { full: true });
       expect(sessionBFirst.content[0]!.text).not.toContain("reached its limit");
+    });
+
+    test("gated MCP tool call rejects fast instead of hanging when PURIX_MCP_AUTO_APPROVE is unset (no elicitation support)", async () => {
+      delete process.env.PURIX_MCP_AUTO_APPROVE;
+      writeManifest({
+        component_id: "gate-test-comp",
+        component_type: "module",
+        current_version: 1,
+        schema_version: 5,
+        parts: { tools: [], config: {} },
+        files: [],
+        depends_on: [],
+        depended_on_by: [],
+        version_history: [],
+        verification_status: "pass",
+        last_synced_hash: null,
+        language: "typescript",
+      });
+
+      const callTool = createToolCaller();
+
+      // Race against a short timeout: before the fix, this call opened a
+      // readline reader on the MCP transport's own stdin and never
+      // resolved. If it still hangs, this test times out instead of
+      // reporting a clean pass/fail — which is itself the regression
+      // signal, not a flake to retry past.
+      const result = await Promise.race([
+        callTool("purix_delete", { componentId: "gate-test-comp" }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timed out — likely hung on stdin")), 2000)),
+      ]);
+
+      const text = (result as { content: Array<{ text?: string }> }).content[0]!.text ?? "";
+      expect(text).toContain("no working human-confirmation channel yet");
+      expect(text).not.toContain("Deletion rejected by human confirmation checkpoint.");
+
+      // Never silently approved either — the component must still exist.
+      const stillThere = readManifest("gate-test-comp");
+      expect(stillThere).toBeDefined();
+
+      const events = listEvents({ kind: "confirm_response" });
+      const rejection = events.find((e) => (e.detail as any).reason === "mcp_no_elicitation_support");
+      expect(rejection).toBeDefined();
     });
   });
 });
