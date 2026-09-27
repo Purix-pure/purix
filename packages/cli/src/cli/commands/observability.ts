@@ -1,7 +1,6 @@
 // src/cli/commands/observability.ts
 import type { Command } from "commander";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { getRecentLogs, redactLogContent } from "../../telemetry/log.js";
 
 export function registerObservabilityCommands(program: Command) {
@@ -65,13 +64,27 @@ export function registerObservabilityCommands(program: Command) {
         const result = await runFullAudit(process.cwd());
         for (const line of formatFullAuditLines(result)) console.log(line);
       } catch (err) {
-        console.error(`\n🛑 Audit failed: ${err instanceof Error ? err.message : err}`);
+        console.error(`\n🛑 Audit failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
       }
     });
 
-  program
-    .command("audit-trail")
+  // COMMAND-SURFACE FIX (2026-09-22 CLI/MCP command-standard pass): the old
+  // "audit-trail" and "audit-verify" genuinely shared one resource (the
+  // compliance audit log/chain) and are grouped here as verbs on it.
+  // Deliberately named "audit-log", NOT "audit" — "audit" already exists
+  // above as a flat command, and it's a different concept entirely (a
+  // dependency-pinning/vuln/idiom scan, closer to `npm audit` than to a
+  // compliance log). Reusing "audit" as this group's noun too would
+  // recreate the exact "don't have ambiguous or similarly-named commands"
+  // problem clig.dev warns about — confirmed directly from these two
+  // commands' own descriptions before deciding this, not assumed from the
+  // shared word. See security.ts's matching comment for the standard and
+  // why this rename is safe pre-release.
+  const auditLogCmd = program.command("audit-log").description("Compliance audit-trail export and tamper-evidence verification");
+
+  auditLogCmd
+    .command("trail")
     .description("Compliance audit-trail export — one row per landed commit, joined with gate evidence")
     .option("-c, --component <componentId>", "filter to one component")
     .option("-s, --since <isoTimestamp>", "only include commits at or after this ISO timestamp")
@@ -82,6 +95,17 @@ export function registerObservabilityCommands(program: Command) {
         const { requireEntitlement } = await import("@purix/core/licensing/tier");
         const { buildAuditTrail, formatAuditTrailJson, formatAuditTrailMarkdown } = await import("@purix/core/manifest/audit_export");
         requireEntitlement("auditExport");
+        // TEST-REPORT F12: unknown formats fell back to markdown, and an unparseable --since silently matched nothing.
+        if (opts.format !== undefined && opts.format !== "json" && opts.format !== "markdown") {
+          throw new Error(`Unknown --format "${opts.format}". Use "markdown" or "json".`);
+        }
+        if (opts.since !== undefined && Number.isNaN(Date.parse(opts.since))) {
+          throw new Error(`--since "${opts.since}" is not a valid ISO timestamp (e.g. 2026-09-01 or 2026-09-01T12:00:00Z).`);
+        }
+        if (opts.component) {
+          const { readManifest } = await import("@purix/core/manifest/store");
+          if (!readManifest(opts.component)) throw new Error(`No manifest entry for "${opts.component}". Run "purix status" to see what's tracked.`);
+        }
         const format = opts.format === "json" ? "json" : "markdown";
         const report = buildAuditTrail({ componentId: opts.component, since: opts.since });
         const output = format === "json" ? formatAuditTrailJson(report) : formatAuditTrailMarkdown(report);
@@ -92,13 +116,13 @@ export function registerObservabilityCommands(program: Command) {
           console.log(output);
         }
       } catch (err) {
-        console.error(`\n🛑 Failed to export audit-trail: ${err instanceof Error ? err.message : err}`);
+        console.error(`\n🛑 Failed to export audit-trail: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
       }
     });
 
-  program
-    .command("audit-verify")
+  auditLogCmd
+    .command("verify")
     .description("Verify local tamper-evident audit chain integrity")
     .action(async () => {
       const { verifyAuditChain } = await import("@purix/core/security/audit_tamper_evidence");
@@ -106,7 +130,15 @@ export function registerObservabilityCommands(program: Command) {
       if (!result.valid) {
         console.error(`🛑 Audit chain verification failed at record index ${result.compromisedIndex ?? "unknown"}: ${result.reason}`);
         process.exitCode = 1;
+        return;
       }
+      // TEST-REPORT F16: success used to print nothing at all, so "verified"
+      // and "did nothing" looked identical (and the MCP tool already said "passed").
+      console.log(
+        result.recordCount === 0
+          ? "Audit chain is empty (0 records) — nothing to verify yet."
+          : `Audit chain verification passed — ${result.recordCount ?? "all"} record(s), no tampering detected.`
+      );
     });
 
   program

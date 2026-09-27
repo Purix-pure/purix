@@ -19,10 +19,10 @@ describe("buildProgram", () => {
     // One representative command per registered group — this is a
     // wiring check, not a re-test of each command's own behavior.
     expect(names).toContain("create");
-    expect(names).toContain("migrations");
+    expect(names).toContain("migration");
     expect(names).toContain("status");
-    expect(names).toContain("secret-set");
-    expect(names).toContain("provider-set");
+    expect(names).toContain("secret");
+    expect(names).toContain("provider");
     expect(names).toContain("tier-status");
     expect(names).toContain("backup");
     expect(names).toContain("remember");

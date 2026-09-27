@@ -8,9 +8,9 @@
 // Computed once, cached from then on — renaming a remote or re-cloning
 // must not fragment a project's savings/sync history.
 //
-// ADR-041 correction (2026-08-30 fix): the no-remote UUID fallback used to
+// ADR-042 correction (2026-08-30 fix): the no-remote UUID fallback used to
 // be cached in <baseDir>/.purix/config.json — a per-worktree path. Two
-// worktrees of the SAME repository (ADR-041's whole subject) would each
+// worktrees of the SAME repository (ADR-042's whole subject) would each
 // mint and cache their OWN random UUID, silently giving them separate
 // repo_id values in the shared budget/manifest DB — meaning the atomic
 // ceiling check in llm/budget.ts, however correct in isolation, was
@@ -117,13 +117,30 @@ export function getProjectId(baseDir: string = process.cwd()): string {
   const cached = store.get(PROJECT_ID_CONFIG_KEY);
   if (typeof cached === "string" && cached.length > 0) return cached;
 
-  // Clones are isolated by default unless explicitly opted in via purix.shareProjectId = true
+  // CONCURRENCY FIX (found investigating llm/budget_worktree.test.ts's
+  // pre-existing flaky "ten concurrent workers" failure — see
+  // config.ts's getOrCreate() comment for the full mechanism): the id
+  // must be minted AND persisted as one atomic, locked operation. Two
+  // processes racing here with nothing cached yet used to each pass the
+  // `cached` check above, independently mint their OWN random UUID, and
+  // each use its own value for the rest of that invocation — set()'s
+  // lock only protects the two writes from corrupting the config file,
+  // not from both minting having already happened. That silently split
+  // one project into two different budget_state rows in the shared
+  // ledger, each separately enforcing the full cost ceiling — confirmed
+  // directly: instrumented concurrent runs showed two distinct repo_id
+  // values in play, and the "ten concurrent workers never jointly exceed
+  // the ceiling" test failing with as many as 9 successes against a
+  // ceiling sized for 3. getOrCreate() moves the mint-or-read inside the
+  // same lock set()/delete() already use, so only the first caller to
+  // acquire the lock actually mints a value — everyone else re-reads
+  // under that same lock and gets that value back instead of minting
+  // (and briefly using) a competing one.
   const shareIdentity = store.get("purix.shareProjectId") === true || store.get("isolateBudget") === false;
   const remoteUrl = shareIdentity ? readGitRemoteUrl(baseDir) : null;
-  const id = remoteUrl
-    ? createHash("sha256").update(remoteUrl).digest("hex")
-    : randomUUID();
+  const id = store.getOrCreate(PROJECT_ID_CONFIG_KEY, () =>
+    remoteUrl ? createHash("sha256").update(remoteUrl).digest("hex") : randomUUID()
+  );
 
-  store.set(PROJECT_ID_CONFIG_KEY, id);
-  return id;
+  return id as string;
 }

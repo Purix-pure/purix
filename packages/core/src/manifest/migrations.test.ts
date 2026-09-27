@@ -1,11 +1,12 @@
 // src/manifest/migrations.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listMigrations } from "./migrations";
 import { closeDb } from "./store";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 let originalCwd: string;
 let tmpDir: string;
@@ -19,7 +20,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("Manifest Migrations", () => {

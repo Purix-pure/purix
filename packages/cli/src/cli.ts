@@ -26,7 +26,7 @@ process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
   if (message.includes("SQLite is an experimental feature")) return;
   // @ts-expect-error — forwarding the exact overload Node was called with
   return originalEmitWarning(warning, ...args);
-}) as typeof process.emitWarning;
+});
 
 // Must be the first *import*: loads .env from process.cwd() (the user's
 // project, where they'd put a real .env per .env.example) into
@@ -39,6 +39,7 @@ import { Command } from "commander";
 import { setQuiet } from "./cli/output.js";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
+import { PURIX_VERSION } from "./version.js";
 import { logError } from "./telemetry/log.js";
 
 const MODE = process.env.PURIX_DEBUG_TIMING === "1";
@@ -67,6 +68,7 @@ let commandActionStartMs = 0;
 // staying bundler-safe.
 const COMMAND_REGISTRY_SPECS = [
   { name: "registerLifecycleCommands", importer: () => import("./cli/commands/lifecycle.js"), exportName: "registerLifecycleCommands" },
+  { name: "registerChangeCommands", importer: () => import("./cli/commands/change.js"), exportName: "registerChangeCommands" },
   { name: "registerMigrationsCommands", importer: () => import("./cli/commands/migrations.js"), exportName: "registerMigrationsCommands" },
   { name: "registerObservabilityCommands", importer: () => import("./cli/commands/observability.js"), exportName: "registerObservabilityCommands" },
   { name: "registerSecurityCommands", importer: () => import("./cli/commands/security.js"), exportName: "registerSecurityCommands" },
@@ -110,29 +112,20 @@ const COMMAND_REGISTRY_SPECS = [
 const COMMAND_NAME_TO_SPEC: Record<string, (typeof COMMAND_REGISTRY_SPECS)[number]["name"]> = {
   create: "registerLifecycleCommands",
   modify: "registerLifecycleCommands",
+  change: "registerChangeCommands",
   ingest: "registerLifecycleCommands",
   delete: "registerLifecycleCommands",
-  "accept-drift": "registerMigrationsCommands",
-  "migration-activate": "registerMigrationsCommands",
-  "migration-rollback": "registerMigrationsCommands",
-  migrations: "registerMigrationsCommands",
+  migration: "registerMigrationsCommands",
   status: "registerObservabilityCommands",
   library: "registerObservabilityCommands",
   stats: "registerObservabilityCommands",
   audit: "registerObservabilityCommands",
-  "audit-trail": "registerObservabilityCommands",
-  "audit-verify": "registerObservabilityCommands",
+  "audit-log": "registerObservabilityCommands",
   diagnostics: "registerObservabilityCommands",
-  "secret-set": "registerSecurityCommands",
-  "secret-rotate": "registerSecurityCommands",
-  "secret-remove": "registerSecurityCommands",
-  "secrets-status": "registerSecurityCommands",
-  "provider-set": "registerProviderCommands",
-  "provider-status": "registerProviderCommands",
-  "provider-list": "registerProviderCommands",
+  secret: "registerSecurityCommands",
+  provider: "registerProviderCommands",
   "tier-status": "registerTierCommands",
   backup: "registerBackupCommands",
-  restore: "registerBackupCommands",
   reconcile: "registerBackupCommands",
   remember: "registerMemoryCommands",
   tools: "registerToolsCommands",
@@ -195,20 +188,30 @@ async function registerCommandModules(
 }
 
 
-process.on("uncaughtException", async (err) => {
-  logError(err, "uncaughtException");
-  console.error("\n🛑 Something went wrong. Details saved to ~/.purix/logs/. Run `purix diagnostics` to review or share them.");
-  const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
-  releaseRepoLock();
-  process.exit(1);
+process.on("uncaughtException", (err) => {
+  void (async () => {
+    logError(err, "uncaughtException");
+    console.error("\n🛑 Something went wrong. Details saved to ~/.purix/logs/. Run `purix diagnostics` to review or share them.");
+    const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
+    releaseRepoLock();
+    process.exit(1);
+  })().catch((handlerErr: unknown) => {
+    console.error("Failed while handling an uncaught exception:", handlerErr);
+    process.exit(1);
+  });
 });
 
-process.on("unhandledRejection", async (err) => {
-  logError(err, "unhandledRejection");
-  console.error("\n🛑 Something went wrong. Details saved to ~/.purix/logs/. Run `purix diagnostics` to review or share them.");
-  const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
-  releaseRepoLock();
-  process.exit(1);
+process.on("unhandledRejection", (err) => {
+  void (async () => {
+    logError(err, "unhandledRejection");
+    console.error("\n🛑 Something went wrong. Details saved to ~/.purix/logs/. Run `purix diagnostics` to review or share them.");
+    const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
+    releaseRepoLock();
+    process.exit(1);
+  })().catch((handlerErr: unknown) => {
+    console.error("Failed while handling an unhandled rejection:", handlerErr);
+    process.exit(1);
+  });
 });
 
 /**
@@ -237,9 +240,9 @@ const READ_ONLY_COMMANDS = new Set([
   "stats",
   "audit",
   "diagnostics",
-  "secrets-status",
-  "provider-status",
-  "provider-list",
+  "secret status",
+  "provider status",
+  "provider list",
   "tier-status",
   "config get",
   "lang list",
@@ -288,8 +291,8 @@ function createBaseProgram(): Command {
   const program = new Command();
   program
     .name("purix")
-    .description("Verification & Governance Layer for AI-Generated Code (Purix v0.2.0-beta.0)")
-    .version("0.2.0-beta.0");
+    .description(`Verification & Governance Layer for AI-Generated Code (Purix v${PURIX_VERSION})`)
+    .version(PURIX_VERSION);
 
   // Part 2: global quiet flag, alongside the existing preAction hook.
   program.option("-q, --quiet", "suppress non-essential output");
@@ -346,15 +349,25 @@ function createBaseProgram(): Command {
     releaseRepoLock();
   });
 
-  process.on("SIGINT", async () => {
-    const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
-    releaseRepoLock();
-    process.exit(130);
+  process.on("SIGINT", () => {
+    void (async () => {
+      const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
+      releaseRepoLock();
+      process.exit(130);
+    })().catch((handlerErr: unknown) => {
+      console.error("Failed while handling SIGINT:", handlerErr);
+      process.exit(130);
+    });
   });
-  process.on("SIGTERM", async () => {
-    const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
-    releaseRepoLock();
-    process.exit(143);
+  process.on("SIGTERM", () => {
+    void (async () => {
+      const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
+      releaseRepoLock();
+      process.exit(143);
+    })().catch((handlerErr: unknown) => {
+      console.error("Failed while handling SIGTERM:", handlerErr);
+      process.exit(143);
+    });
   });
 
   return program;
@@ -414,8 +427,8 @@ if (isDirectlyExecuted()) {
       const minimalProgram = new Command();
       minimalProgram
         .name("purix")
-        .description("Verification & Governance Layer for AI-Generated Code (Purix v0.2.0-beta.0)")
-        .version("0.2.0-beta.0")
+        .description(`Verification & Governance Layer for AI-Generated Code (Purix v${PURIX_VERSION})`)
+        .version(PURIX_VERSION)
         .option("-q, --quiet", "suppress non-essential output");
 
       try {
@@ -462,9 +475,31 @@ if (isDirectlyExecuted()) {
       }
 
       const program = await buildProgram();
+      // A bare `purix` (no command, no flags) is a request for orientation,
+      // not a usage error. Commander would print the same help but exit 1
+      // (help({ error: true })), which makes `pnpm purix` report
+      // ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL after a successful build.
+      // Unknown commands and bad flags still fall through to parseAsync
+      // and keep their non-zero exit.
+      if (argv.length === 0) {
+        program.outputHelp();
+        return;
+      }
       await program.parseAsync(process.argv);
     } catch (err) {
       reportCommandFailure(err);
+      // TEST-REPORT F8: Commander skips the postAction hook when an action
+      // throws, so a failed mutating command (missing provider key, model
+      // returned non-JSON, ...) used to leave .purix/repo.lock behind for
+      // the next run to clear as "stale". releaseRepoLock() only removes a
+      // lock this process owns, and is loaded only on this failure path so
+      // the success path keeps its startup cost.
+      try {
+        const { releaseRepoLock } = await import("@purix/core/state/repo_lock");
+        releaseRepoLock();
+      } catch {
+        // Never let cleanup mask the original failure.
+      }
     } finally {
       timingState.parseMs = Math.max(0, performance.now() - parseStartMs - timingState.actionMs);
     }

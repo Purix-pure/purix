@@ -1,6 +1,6 @@
 // src/platform/sqlite_compat.ts
 //
-// Runtime migration (ADR-009, ADR-016): manifest/store.ts's own internal
+// Runtime migration (ADR-048, ADR-040): manifest/store.ts's own internal
 // functions were migrated to call node:sqlite's DatabaseSync directly
 // (prepare/run/get/all — see store.ts's header comment). But getDb() is
 // also imported directly by seven other files in this package —
@@ -31,7 +31,7 @@ class CompatStatement {
     return this.stmt.get(...(args as any[]));
   }
   all(...args: unknown[]): unknown[] {
-    return this.stmt.all(...(args as any[])) as unknown[];
+    return this.stmt.all(...(args as any[]));
   }
 }
 

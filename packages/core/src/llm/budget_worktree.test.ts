@@ -1,6 +1,6 @@
 // packages/core/src/llm/budget_worktree.test.ts
 //
-// ADR-041's Consequences section explicitly calls for: "a specific stress
+// ADR-042's Consequences section explicitly calls for: "a specific stress
 // test... two concurrent runs on two worktrees of the same repository,
 // both near the burn-guard ceiling at once, confirming the
 // conditional-update form holds and neither run observes a stale 'under
@@ -12,7 +12,7 @@
 // against the SAME shared ledger at (as close as Node allows) the same
 // instant.
 //
-// This also incidentally verifies the OTHER half of ADR-041: that the two
+// This also incidentally verifies the OTHER half of ADR-042: that the two
 // worktrees' shared state actually resolves to the same file. If
 // git_common_dir.ts were wrong, each worktree would silently get its own
 // ceiling and BOTH spawns would report "success" — this test would only
@@ -20,11 +20,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveSharedStateDir } from "../state/git_common_dir";
 import { resolveTsxCommand } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 // A worker's cwd is a bare git worktree with no node_modules of its own,
 // so it can't resolve a bare "tsx" import itself — run tsx's own binary
@@ -52,8 +53,8 @@ beforeEach(() => {
 
   worktreeA = mkdtempSync(join(tmpdir(), "purix-worktree-a-"));
   worktreeB = mkdtempSync(join(tmpdir(), "purix-worktree-b-"));
-  rmSync(worktreeA, { recursive: true, force: true });
-  rmSync(worktreeB, { recursive: true, force: true });
+  safeRmSync(worktreeA);
+  safeRmSync(worktreeB);
   git(["worktree", "add", "-q", "-b", "branch-a", worktreeA], repoDir);
   git(["worktree", "add", "-q", "-b", "branch-b", worktreeB], repoDir);
 });
@@ -61,13 +62,13 @@ beforeEach(() => {
 afterEach(() => {
   try {
     git(["worktree", "remove", "--force", worktreeA], repoDir);
-  } catch {}
+  } catch { /* test cleanup — worktree may already be gone */ }
   try {
     git(["worktree", "remove", "--force", worktreeB], repoDir);
-  } catch {}
-  rmSync(repoDir, { recursive: true, force: true });
-  rmSync(worktreeA, { recursive: true, force: true });
-  rmSync(worktreeB, { recursive: true, force: true });
+  } catch { /* test cleanup — worktree may already be gone */ }
+  safeRmSync(repoDir);
+  safeRmSync(worktreeA);
+  safeRmSync(worktreeB);
 });
 
 function spawnWorker(cwd: string, estimatedCost: string, ceiling: string): Promise<{ result: string; message?: string }> {
@@ -97,7 +98,7 @@ function spawnWorker(cwd: string, estimatedCost: string, ceiling: string): Promi
   });
 }
 
-describe("ADR-041: real multi-process worktree concurrency", () => {
+describe("ADR-042: real multi-process worktree concurrency", () => {
   it("two worktrees of the same repo share the same resolved state directory", () => {
     // Called explicitly with each worktree's path (rather than relying on
     // process.cwd()), since this test doesn't chdir.
@@ -153,7 +154,7 @@ describe("ADR-041: real multi-process worktree concurrency", () => {
     const results = await Promise.all(workers);
     const successCount = results.filter((r) => r.result === "success").length;
 
-    // The safety property ADR-041 exists for: successes must NEVER exceed
+    // The safety property ADR-042 exists for: successes must NEVER exceed
     // what the ceiling allows (0.30 / 0.10 = 3). Under contention it's
     // safe (if conservative) for a legitimate reservation to be refused
     // defensively rather than succeed — that's not a violation — but it

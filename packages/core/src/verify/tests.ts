@@ -1,6 +1,6 @@
 // src/verify/tests.ts
 //
-// Runtime migration (ADR-009) & framework detection: supports executing test suites
+// Runtime migration (ADR-048) & framework detection: supports executing test suites
 // across Node.js (`node:test` via `tsx`), Jest, Vitest, and Mocha with isolation via `runIsolated`.
 // `detectTestFramework` identifies the configured test runner, and `runTestsWithQuarantine`
 // executes the tests in sandbox isolation, parsing JSON/TAP test results.
@@ -29,7 +29,7 @@ export interface TestRunResult {
  * (non-hoisted) layout, so this checks baseDir's own node_modules/.bin
  * first before assuming a network-dependent npx fallback is needed.
  */
-function tsxCommand(baseDir: string): string[] {
+export function tsxCommand(baseDir: string): string[] {
   const localTsx = resolve(baseDir, "node_modules/.bin/tsx");
   return existsSync(localTsx) ? [localTsx] : ["npx", "tsx"];
 }
@@ -40,7 +40,7 @@ export function detectTestFramework(baseDir: string, testFiles: string[]): "jest
   if (existsSync(pkgPath)) {
     try {
       pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    } catch {}
+    } catch { /* malformed package.json is handled by the empty pkg default below */ }
   }
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   const hasJest = Boolean(deps.jest || existsSync(resolve(baseDir, "jest.config.js")) || existsSync(resolve(baseDir, "jest.config.ts")));
@@ -67,7 +67,7 @@ export function detectTestFramework(baseDir: string, testFiles: string[]): "jest
   return null;
 }
 
-function parseJestJson(output: string): ParsedTapTest[] {
+export function parseJestJson(output: string): ParsedTapTest[] {
   try {
     const data = JSON.parse(output);
     const results: ParsedTapTest[] = [];
@@ -82,7 +82,7 @@ function parseJestJson(output: string): ParsedTapTest[] {
   }
 }
 
-function parseVitestJson(output: string): ParsedTapTest[] {
+export function parseVitestJson(output: string): ParsedTapTest[] {
   try {
     const data = JSON.parse(output);
     const results: ParsedTapTest[] = [];
@@ -97,7 +97,7 @@ function parseVitestJson(output: string): ParsedTapTest[] {
   }
 }
 
-function parseMochaJson(output: string): ParsedTapTest[] {
+export function parseMochaJson(output: string): ParsedTapTest[] {
   try {
     const data = JSON.parse(output);
     const results: ParsedTapTest[] = [];
@@ -110,7 +110,7 @@ function parseMochaJson(output: string): ParsedTapTest[] {
   }
 }
 
-interface ParsedTapTest {
+export interface ParsedTapTest {
   name: string;
   passed: boolean;
 }
@@ -136,7 +136,7 @@ interface ParsedTapTest {
  * block or whole file) — that field, not indentation, is what this
  * scans for.
  */
-function parseTapOutput(output: string): ParsedTapTest[] {
+export function parseTapOutput(output: string): ParsedTapTest[] {
   const results: ParsedTapTest[] = [];
   const resultRe = /^\s*(ok|not ok) \d+ - (.+)$/;
   const typeRe = /^\s*type: '(\w+)'/;
@@ -258,7 +258,7 @@ export function runTestsWithQuarantine(
     );
   }
 
-  let parsedTests: ParsedTapTest[] = [];
+  let parsedTests: ParsedTapTest[];
   if (framework === "jest") parsedTests = parseJestJson(isolated.stdout);
   else if (framework === "vitest") parsedTests = parseVitestJson(isolated.stdout);
   else if (framework === "mocha") parsedTests = parseMochaJson(isolated.stdout);

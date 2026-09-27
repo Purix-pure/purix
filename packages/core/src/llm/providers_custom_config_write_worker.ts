@@ -1,6 +1,6 @@
 // packages/core/src/llm/providers_custom_config_write_worker.ts
 //
-// Standin for "a separate `purix provider-set custom ...` invocation, or
+// Standin for "a separate `purix provider set custom ...` invocation, or
 // another process entirely, rewriting provider-config.json's custom block
 // out from under a long-lived process" — see the "getProvider — custom
 // provider hot reload across processes" test in providers.test.ts.

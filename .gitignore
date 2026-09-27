@@ -46,15 +46,14 @@ purix-architecture/
 .tmp-*
 *.job
 
-  # dotenv environment variable files
+# dotenv environment variable files
 # .env.example is intentionally NOT ignored — it's the committed template for your own .env file. All other .env files are ignored, including
- !.env.example
 .env
 .env.*
+!.env.example
 /purix-architecture/*
 .turbo
 .turbo/*
-.env.example
 
 # Toolchain installs & fixture-scoped caches — never bundle or commit
 **/Python/

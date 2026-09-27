@@ -7,7 +7,7 @@
 // "full sandbox pass" rather than "compiles".
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "../manifest/schema";
@@ -15,6 +15,7 @@ import { acceptDrift } from "./drift";
 import { computeSyncHash } from "./hash";
 import { closeDb } from "../manifest/store";
 import { resolveRealNodeModules } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const REAL_NODE_MODULES = resolveRealNodeModules();
 
@@ -62,7 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("acceptDrift — full sandbox pass as the trust bar for a new baseline", () => {

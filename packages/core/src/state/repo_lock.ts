@@ -72,7 +72,7 @@ export function acquireRepoLock(baseDir: string = process.cwd()): void {
           );
           try {
             unlinkSync(p);
-          } catch {}
+          } catch { /* removing a stale/corrupt lock file is best-effort */ }
         }
       }
     } catch (err: any) {
@@ -82,7 +82,7 @@ export function acquireRepoLock(baseDir: string = process.cwd()): void {
       // Corrupt lock file or read error — remove it
       try {
         unlinkSync(p);
-      } catch {}
+      } catch { /* removing a stale/corrupt lock file is best-effort */ }
     }
   }
 
@@ -108,6 +108,6 @@ export function releaseRepoLock(baseDir: string = process.cwd()): void {
   } catch {
     try {
       unlinkSync(p);
-    } catch {}
+    } catch { /* removing a stale/corrupt lock file is best-effort */ }
   }
 }

@@ -6,12 +6,13 @@
 // now tags every recorded checkpoint with whether it was auto-confirmed.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { confirmGated } from "./gated-confirm";
 import { listEvents } from "../manifest/events";
 import { closeDb } from "../manifest/store";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("confirmGated — auto_confirmed audit field", () => {
   let originalCwd: string;
@@ -30,7 +31,7 @@ describe("confirmGated — auto_confirmed audit field", () => {
   afterEach(() => {
     closeDb();
     process.chdir(originalCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
     if (originalAutoConfirm === undefined) delete process.env.AUTO_CONFIRM;
     else process.env.AUTO_CONFIRM = originalAutoConfirm;
     if (originalNodeEnv === undefined) delete process.env.NODE_ENV;

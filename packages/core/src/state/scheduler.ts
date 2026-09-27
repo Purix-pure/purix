@@ -1,6 +1,6 @@
 // src/state/scheduler.ts
 //
-// Single shared scheduler for periodic maintenance tasks (ADR-051, ADR-042 amendment).
+// Single shared scheduler for periodic maintenance tasks (ADR-043, ADR-037 amendment, formerly ADR-051/ADR-042).
 // Runs on a configurable interval, gated by the repo lock so maintenance never
 // runs while a pipeline run is in progress.
 //
@@ -175,7 +175,7 @@ registerScheduledTask(
   "audit-chain-pruning",
   () => (getConfig().get("scheduler.auditPruneIntervalMs") as number) ?? 24 * 60 * 60 * 1000,
   () => {
-    const maxAgeDays = (getConfig().get("scheduler.auditRetentionDays") as number) ?? 90;
+    const maxAgeDays = (getConfig().get("scheduler.auditRetentionDays") as number) ?? 365;
     const olderThanMs = maxAgeDays * 24 * 60 * 60 * 1000;
     try {
       pruneAuditChain(olderThanMs);

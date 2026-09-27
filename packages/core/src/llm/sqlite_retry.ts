@@ -57,7 +57,7 @@ export class SqliteRetryExhaustedError extends Error {
 // a retry — so it belongs in the same bucket rather than escaping as an
 // unhandled crash the one time it shows up in this particular shape.
 function isRetryableSqliteError(err: unknown): boolean {
-  const message = String((err as { message?: unknown })?.message ?? "");
+  const message = err instanceof Error ? err.message : String(err);
   return /SQLITE_BUSY|database is locked|SQLITE_IOERR|disk I\/O error/i.test(message);
 }
 

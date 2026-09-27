@@ -78,7 +78,7 @@ export function recordEvent(
       ]
     );
   } catch (err) {
-    console.warn(`  [events] failed to record "${kind}" event (non-fatal): ${err instanceof Error ? err.message : err}`);
+    console.warn(`  [events] failed to record "${kind}" event (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

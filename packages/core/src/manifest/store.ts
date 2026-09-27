@@ -1,8 +1,8 @@
 // src/manifest/store.ts
 //
-// Runtime migration (ADR-009, ADR-016): this file previously used
+// Runtime migration (ADR-048, ADR-040): this file previously used
 // bun:sqlite. It now uses Node's built-in node:sqlite (DatabaseSync),
-// the driver ADR-016 specifies — no native compile step on install,
+// the driver ADR-040 specifies — no native compile step on install,
 // matching this project's "installed by strangers via a package
 // runner" constraint. Two real API differences from bun:sqlite drove
 // changes below, both isolated to this file so nothing calling these
@@ -32,7 +32,7 @@ import { checkComponentLimit } from "../licensing/tier.js";
 import { CompatDb } from "../platform/sqlite_compat.js";
 import { resolveSharedStateDir } from "../state/git_common_dir.js";
 
-// ADR-041: this path must resolve to the repository's common git
+// ADR-042 (formerly ADR-041): this path must resolve to the repository's common git
 // directory (shared across every worktree), not a path under the
 // per-worktree working directory — see git_common_dir.ts. Computed at
 // call time (not module load) so it tracks process.cwd(), matching how
@@ -49,65 +49,112 @@ const DEFAULT_PROVENANCE: Provenance = { source_type: "instruction", source_agen
 export function getDb(): DatabaseSync {
   if (_db) return _db;
   const dbPath = resolveDbPath();
-  _dbPath = dbPath;
   mkdirSync(dirname(dbPath), { recursive: true });
-  _db = new DatabaseSync(dbPath);
-  _db.exec(`PRAGMA journal_mode = WAL;`);
-  // BUG FIX (paired with sqlite_retry.ts's isRetryableSqliteError() fix):
-  // WAL mode alone doesn't set a busy timeout — node:sqlite's default is
-  // effectively 0, so a connection hits SQLITE_BUSY/SQLITE_IOERR the
-  // instant it can't get the lock, immediately, with nothing to smooth
-  // over a few-millisecond overlap between two processes' transactions.
-  // This gives SQLite's own C-level wait loop 5s to resolve the overlap
-  // before returning busy at all — withSqliteRetry's JS-level backoff
-  // above this is still there as the second layer for whatever's left
-  // after that, not a replacement for it.
-  _db.exec(`PRAGMA busy_timeout = 5000;`);
 
-  const integrity = _db.prepare(`PRAGMA integrity_check`).get() as { integrity_check: string } | undefined;
-  if (!integrity || integrity.integrity_check !== "ok") {
-    console.error(`\n🛑 CRITICAL: SQLite storage corruption detected (${integrity?.integrity_check ?? "unknown"}). Rebuilding database...`);
-    console.warn(`   Warning: Local-only state including Operation Library, burn-guard ledger, and un-synced audit records have been reset.`);
-    _db.close();
-    try {
-      unlinkSync(dbPath);
-    } catch {}
-    _db = new DatabaseSync(dbPath);
-    _db.exec(`PRAGMA journal_mode = WAL;`);
-    _db.exec(`PRAGMA busy_timeout = 5000;`);
-  }
-
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS manifest (
-      component_id TEXT PRIMARY KEY,
-      data TEXT NOT NULL
-    )
-  `);
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS pending_operations (
-      id TEXT PRIMARY KEY,
-      component_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      before_snapshot TEXT NOT NULL,
-      after_snapshot TEXT NOT NULL,
-      new_version INTEGER NOT NULL,
-      operation TEXT NOT NULL,
-      contract_changed INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-  // v1.0 §4.1 Must-have: provenance now travels with a pending operation
-  // too, so a crash-recovered commit (reconcile.ts) can record the real
-  // origin instead of guessing at reconciliation time. ADD COLUMN throws
-  // on a DB that already has this column — that's still the simplest
-  // reliable way to tell "already migrated" from "fresh table" under
-  // node:sqlite, so the caught failure here is expected, not swallowed
-  // silently.
+  // BUG FIX (getDb() half-initialized-connection defect): the module-level
+  // _db/_dbPath used to be assigned *before* the PRAGMA/integrity-check/
+  // CREATE TABLE setup below ran. If any of those calls threw (a failed
+  // rebuild's own exec, a permissions or disk-full error mid-setup, etc.),
+  // getDb() would throw for that call — but _db was already non-null, so
+  // every *subsequent* call hit `if (_db) return _db` at the top and
+  // handed back that same half-initialized connection, skipping setup
+  // entirely (no PRAGMAs, no guaranteed tables), instead of retrying
+  // initialization. Building the connection in a local variable and only
+  // committing it to the module-level _db/_dbPath after every setup step
+  // has succeeded means a failure here leaves _db null, so the next call
+  // starts initialization over from scratch instead of reusing a broken
+  // connection.
+  let db = new DatabaseSync(dbPath);
   try {
-    _db.exec(`ALTER TABLE pending_operations ADD COLUMN provenance TEXT`);
-  } catch {
-    // column already exists — already migrated, nothing to do
+    db.exec(`PRAGMA journal_mode = WAL;`);
+    // BUG FIX (paired with sqlite_retry.ts's isRetryableSqliteError() fix):
+    // WAL mode alone doesn't set a busy timeout — node:sqlite's default is
+    // effectively 0, so a connection hits SQLITE_BUSY/SQLITE_IOERR the
+    // instant it can't get the lock, immediately, with nothing to smooth
+    // over a few-millisecond overlap between two processes' transactions.
+    // This gives SQLite's own C-level wait loop 5s to resolve the overlap
+    // before returning busy at all — withSqliteRetry's JS-level backoff
+    // above this is still there as the second layer for whatever's left
+    // after that, not a replacement for it.
+    db.exec(`PRAGMA busy_timeout = 5000;`);
+
+    const integrity = db.prepare(`PRAGMA integrity_check`).get() as { integrity_check: string } | undefined;
+    if (!integrity || integrity.integrity_check !== "ok") {
+      console.error(`\n🛑 CRITICAL: SQLite storage corruption detected (${integrity?.integrity_check ?? "unknown"}). Rebuilding database...`);
+      console.warn(`   Warning: Local-only state including Operation Library, burn-guard ledger, and un-synced audit records have been reset.`);
+      db.close();
+      try {
+        unlinkSync(dbPath);
+      } catch { /* best-effort — we're about to recreate the file regardless */ }
+      db = new DatabaseSync(dbPath);
+      db.exec(`PRAGMA journal_mode = WAL;`);
+      db.exec(`PRAGMA busy_timeout = 5000;`);
+    }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS manifest (
+        component_id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_operations (
+        id TEXT PRIMARY KEY,
+        component_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        before_snapshot TEXT NOT NULL,
+        after_snapshot TEXT NOT NULL,
+        new_version INTEGER NOT NULL,
+        operation TEXT NOT NULL,
+        contract_changed INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    // v1.0 §4.1 Must-have: provenance now travels with a pending operation
+    // too, so a crash-recovered commit (reconcile.ts) can record the real
+    // origin instead of guessing at reconciliation time. ADD COLUMN throws
+    // on a DB that already has this column — that's still the simplest
+    // reliable way to tell "already migrated" from "fresh table" under
+    // node:sqlite, so the caught failure here is expected, not swallowed
+    // silently.
+    try {
+      db.exec(`ALTER TABLE pending_operations ADD COLUMN provenance TEXT`);
+    } catch {
+      // column already exists — already migrated, nothing to do
+    }
+    // language-plugin-architecture (docs/adr-drafts/language-plugin-architecture.md):
+    // a disposable, rebuildable CACHE of what discoverLanguages() found on
+    // its last scan — never itself the source of truth (disk/manifests
+    // are), and never hand-edited. discovery_hash is compared against
+    // computeDiscoveryHash()'s current result before trusting the cached
+    // capabilities/install_root columns; a mismatch means an install/
+    // uninstall happened since the last scan and a fresh discoverLanguages()
+    // call is needed. See design doc §5.1 for why this is a content hash
+    // rather than a TTL (TTL-based cache trust was a real, filed pnpm
+    // production bug — pnpm/pnpm#12100 — not a hypothetical concern).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS language_registry (
+        language_id TEXT PRIMARY KEY,
+        min_supported_version TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        capabilities TEXT NOT NULL,
+        scaffold_extensions TEXT NOT NULL,
+        install_root TEXT NOT NULL,
+        manifest_path TEXT NOT NULL,
+        certified INTEGER NOT NULL DEFAULT 0,
+        discovery_hash TEXT NOT NULL,
+        last_scanned_at TEXT NOT NULL
+      )
+    `);
+  } catch (err) {
+    try {
+      db.close();
+    } catch { /* already failing — closing is best-effort, the original error still propagates */ }
+    throw err;
   }
+
+  _db = db;
+  _dbPath = dbPath;
   return _db;
 }
 

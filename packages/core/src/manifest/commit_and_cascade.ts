@@ -92,7 +92,7 @@ export async function commitVersionedChange(params: CommitVersionedChangeParams)
   try {
     backups = await applyModificationFiles(finalFiles, targetDir);
   } catch (err) {
-    console.error(`\n🛑 File write failed, rolled back: ${err instanceof Error ? err.message : err}`);
+    console.error(`\n🛑 File write failed, rolled back: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
     return { ok: false };
   }

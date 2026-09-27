@@ -1,9 +1,7 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { parseLockfileFingerprint, resolveToolchainCache, runIsolatedOrNotInstalled } from "./provider-kit";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "path";
 
 describe("Provider Kit", () => {
   it("parseLockfileFingerprint works", () => {

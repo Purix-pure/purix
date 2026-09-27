@@ -145,7 +145,13 @@ if (mode === "full") {
       if (!has(/package\/dist\//)) bad.push(`${f}: no dist/ folder`);
       if (has(/package\/src\//)) bad.push(`${f}: contains src/ (should ship dist only)`);
       if (has(/(^|\/)\.env($|\.)/) && !has(/\.env\.example$/)) bad.push(`${f}: contains a .env file`);
-      if (has(/\.test\.(js|ts)$/)) bad.push(`${f}: contains test files`);
+      // The conformance fixtures under dist/language/conformance/fixtures/ are shipped ON PURPOSE (scripts/copy-fixtures.mjs):
+      // `purix lang verify <id>` runs them on the user's machine and fails with "file does not exist" without them.
+      // They include *.test.ts files (broken_test_fixture.test.ts, passing_fixture.test.ts), so exclude that folder from the
+      // "no test files" rule — and instead require it to be present in the core package.
+      const isConformanceFixture = (x) => /package\/dist\/language\/conformance\/fixtures\//.test(x);
+      if (list.some((x) => /\.test\.(js|ts)$/.test(x) && !isConformanceFixture(x))) bad.push(`${f}: contains test files`);
+      if (/purix-core-/.test(f) && !list.some(isConformanceFixture)) bad.push(`${f}: missing dist/language/conformance/fixtures (purix lang verify needs them)`);
       digests.push(`${f}  sha256:${createHash("sha256").update(readFileSync(full)).digest("hex")}`);
     }
     writeFileSync(join(outDir, "tarball-digests.txt"), digests.join("\n") + "\n");

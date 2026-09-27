@@ -1,7 +1,7 @@
 // src/llm/escalate.ts
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { callLlm, ChangeEditSchema } from "./classify.js";
+import { callLlm, ChangeEditSchema, parseModelJson } from "./classify.js";
 import { routeTier } from "./router.js";
 import { scanForInjectionAttempts } from "./injection.js";
 
@@ -113,6 +113,5 @@ Respond with ONLY valid JSON (no markdown fences, no commentary):
     console.log(`  [router] ${decision.reason}`);
   }
   const raw = await callLlm(prompt, decision.tier, 1, { call: "escalation", decision });
-  const cleaned = raw.replace(/```json|```/g, "").trim();
-  return EscalationVerdictSchema.parse(JSON.parse(cleaned));
+  return parseModelJson(raw, EscalationVerdictSchema, "escalation");
 }

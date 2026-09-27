@@ -8,6 +8,7 @@ import { findUnsafePaths } from "../gates/path_guard.js";
 import { scanForSecrets } from "../security/secrets.js";
 import { verifyComponent } from "../verify/verify.js";
 import { getLanguageProvider, resolveLanguage } from "../language/registry.js";
+import { computeSyncHash } from "../state/hash.js";
 
 export async function writeScaffold(
   plan: TopologyPlan,
@@ -100,7 +101,8 @@ export async function writeScaffold(
         if (existsSync(p)) rmSync(p);
       }
       throw new Error(
-        `Scaffold failed — could not determine a language for "${plan.component_id}", rolled back what was written: ${err instanceof Error ? err.message : String(err)}`
+        `Scaffold failed — could not determine a language for "${plan.component_id}", rolled back what was written: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err }
       );
     }
   })();
@@ -122,9 +124,6 @@ export async function writeScaffold(
 // fails closed rather than silently mis-tagging it (see audit finding 3.1).
 export const SCAFFOLD_EXTENSION_LANGUAGES: [string, string][] = [
   [".py", "python"],
-  [".rs", "rust"],
-  [".go", "go"],
-  [".rb", "ruby"],
 ];
 
 export function detectScaffoldLanguage(files: { path: string }[], componentId: string, targetDir: string): string {
@@ -172,6 +171,9 @@ export function buildManifestEntry(plan: TopologyPlan, sourceAgent: string | nul
       },
     ],
     verification_status: "pending",
-    last_synced_hash: null,
+    // TEST-REPORT F3: files are written verbatim from starter_content (see
+    // writeScaffold), so the baseline is known here. A null baseline made
+    // checkDrift() report "never drifted" until the first modify/ingest.
+    last_synced_hash: computeSyncHash(plan.files.map((f) => ({ path: f.path, content: f.starter_content }))),
   };
 }

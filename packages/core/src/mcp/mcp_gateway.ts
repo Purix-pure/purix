@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getServer } from "./mcp_registry.js";
+import { PURIX_VERSION } from "../version.js";
 
 export interface McpToolInfo {
   name: string;
@@ -27,11 +28,11 @@ async function connect(name: string): Promise<Client> {
 
   const baseUrl = new URL(server.url);
   try {
-    const client = new Client({ name: "purix", version: "0.2.0-beta.0" });
+    const client = new Client({ name: "purix", version: PURIX_VERSION });
     await client.connect(new StreamableHTTPClientTransport(baseUrl));
     return client;
   } catch {
-    const client = new Client({ name: "purix", version: "0.2.0-beta.0" });
+    const client = new Client({ name: "purix", version: PURIX_VERSION });
     await client.connect(new SSEClientTransport(baseUrl));
     return client;
   }

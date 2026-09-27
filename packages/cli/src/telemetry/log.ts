@@ -1,14 +1,16 @@
 // packages/cli/src/telemetry/log.ts
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { PURIX_VERSION } from "../version.js";
+import { safeRmSync } from "@purix/core/platform/fs_retry";
 
 function getLogDir(): string {
   const dir = join(homedir(), ".purix", "logs");
   if (!existsSync(dir)) {
     try {
       mkdirSync(dir, { recursive: true });
-    } catch {}
+    } catch { /* best-effort logging housekeeping — a failure here shouldn't break the CLI */ }
   }
   return dir;
 }
@@ -27,13 +29,13 @@ export function logError(err: unknown, context?: string): void {
       context: context ?? "cli",
       message: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
-      version: "0.2.0-beta.0",
+      version: PURIX_VERSION,
     };
     appendFileSync(p, JSON.stringify(entry) + "\n", "utf-8");
 
     // Clean up logs older than 7 days
     cleanupOldLogs(dir);
-  } catch {}
+  } catch { /* best-effort logging housekeeping — a failure here shouldn't break the CLI */ }
 }
 
 function cleanupOldLogs(dir: string): void {
@@ -45,11 +47,11 @@ function cleanupOldLogs(dir: string): void {
         const fp = join(dir, file);
         const stats = statSync(fp);
         if (now - stats.mtimeMs > 7 * 24 * 60 * 60 * 1000) {
-          rmSync(fp, { force: true });
+          safeRmSync(fp);
         }
       }
     }
-  } catch {}
+  } catch { /* best-effort logging housekeeping — a failure here shouldn't break the CLI */ }
 }
 
 function readdirNames(dir: string): string[] {
@@ -90,5 +92,5 @@ export function redactLogContent(line: string): string {
     .replace(/\/home\/[^\s"']+/gi, "[REDACTED_PATH]")
     .replace(/\/Users\/[^\s"']+/gi, "[REDACTED_PATH]")
     .replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_SECRET]")
-    .replace(/bearer\s+[a-zA-Z0-9_\-\.]+/gi, "bearer [REDACTED_TOKEN]");
+    .replace(/bearer\s+[a-zA-Z0-9_\-.]+/gi, "bearer [REDACTED_TOKEN]");
 }

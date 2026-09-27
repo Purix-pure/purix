@@ -12,32 +12,52 @@ if (!existsSync(cliPath)) {
   process.exit(1);
 }
 
+// COMMAND-SURFACE FIX (2026-09-24): the command names below used to be
+// the flat, pre-regroup, hyphenated top-level commands (accept-drift,
+// migration-activate, migration-rollback, migrations, audit-trail,
+// audit-verify, secret-set, secret-rotate, secret-remove, secrets-status,
+// provider-set, provider-status, provider-list, restore) that the
+// 2026-09-22 CLI/MCP command-standard pass regrouped into noun-then-verb
+// subcommand trees (`migration accept-drift|activate|rollback|list`,
+// `audit-log trail|verify`, `secret set|rotate|remove|status`,
+// `provider set|status|list`, `backup create|restore`) — see
+// security.ts's comment for the standard this follows. This benchmark
+// script was never updated to match, so it was silently timing `--help`
+// against command names that no longer exist. Re-verified against the
+// live registrations in cli.ts / cli/commands/*.ts (see
+// COMMAND_REGISTRY_SPECS and each file's `.command(...)` calls) rather
+// than assumed from the regroup description alone. `mcp-add` / `mcp-remove`
+// / `mcp-list` / `mcp-tools` / `mcp-call` and `dev scaffold-language` are
+// intentionally excluded — cli.ts leaves their registration commented out
+// (ADR-018 deferral / internal-only), so they aren't real commands to
+// benchmark.
 const commandSpecs = [
   "create",
   "modify",
+  "change",
   "ingest",
   "delete",
-  "accept-drift",
-  "migration-activate",
-  "migration-rollback",
-  "migrations",
+  "migration accept-drift",
+  "migration activate",
+  "migration rollback",
+  "migration list",
   "status",
   "library",
   "stats",
   "audit",
-  "audit-trail",
-  "audit-verify",
+  "audit-log trail",
+  "audit-log verify",
   "diagnostics",
-  "secret-set",
-  "secret-rotate",
-  "secret-remove",
-  "secrets-status",
-  "provider-set",
-  "provider-status",
-  "provider-list",
+  "secret set",
+  "secret rotate",
+  "secret remove",
+  "secret status",
+  "provider set",
+  "provider status",
+  "provider list",
   "tier-status",
-  "backup",
-  "restore",
+  "backup create",
+  "backup restore",
   "reconcile",
   "remember",
   "tools",

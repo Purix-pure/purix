@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { appendAuditRecord, verifyAuditChain, exportAuditChainJson } from "./audit_tamper_evidence";
 import { closeDb, getDbCompat as getDb } from "../manifest/store";
 
-describe("ADR-042 Audit Log Tamper-Evidence & Retention", () => {
+describe("ADR-037 Audit Log Tamper-Evidence & Retention", () => {
   let originalCwd: string;
   let tmpDir: string;
 

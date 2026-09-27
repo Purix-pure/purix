@@ -1,10 +1,11 @@
 // packages/core/src/state/repo_lock.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireRepoLock, releaseRepoLock } from "./repo_lock";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("Repository Advisory Lock", () => {
   let tmpDir: string;
@@ -14,7 +15,7 @@ describe("Repository Advisory Lock", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("acquires lock when free and releases successfully", () => {
@@ -81,6 +82,6 @@ describe("Repository Advisory Lock", () => {
     // acquire attempt above threw), so releaseRepoLock would no-op anyway
     // since releaseRepoLock only removes a lock whose pid === process.pid.
     // Clean up directly instead of pretending we hold it.
-    rmSync(join(purixDir, "repo.lock"), { force: true });
+    safeRmSync(join(purixDir, "repo.lock"), { force: true });
   });
 });

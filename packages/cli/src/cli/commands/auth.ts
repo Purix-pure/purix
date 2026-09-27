@@ -4,7 +4,6 @@
 // for email then a 6-digit code, both over stdin/stdout, so this works
 // over SSH exactly like the rest of the CLI.
 import type { Command } from "commander";
-import * as readline from "node:readline/promises";
 
 async function loadAuthRuntime() {
   const [apiClientModule, sessionModule, licensingModule, projectIdModule, machineIdModule, budgetModule] = await Promise.all([
@@ -31,12 +30,9 @@ async function loadAuthRuntime() {
 }
 
 async function prompt(question: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await rl.question(question)).trim();
-  } finally {
-    rl.close();
-  }
+  // Shared reader (core/cli-io/confirm.ts): resolves null at EOF instead of hanging (F6).
+  const { promptLine } = await import("@purix/core/cli-io/confirm");
+  return ((await promptLine(question)) ?? "").trim();
 }
 
 export function registerAuthCommands(program: Command) {
@@ -64,7 +60,7 @@ export function registerAuthCommands(program: Command) {
         // Part 3: "if email delivery fails, return a real error to the
         // CLI, never a silent 'check your email'" — surfaced verbatim
         // here, not swallowed into a generic message.
-        console.error(`Couldn't send a login code: ${err instanceof Error ? err.message : err}`);
+        console.error(`Couldn't send a login code: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
         return;
       }
@@ -77,7 +73,7 @@ export function registerAuthCommands(program: Command) {
         const result = await runtime.apiClient.verifyCode(email, code);
         token = result.token;
       } catch (err) {
-        console.error(`Login failed: ${err instanceof Error ? err.message : err}`);
+        console.error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
         return;
       }
@@ -115,14 +111,14 @@ export function registerAuthCommands(program: Command) {
         // login itself, log and retry the sync on next invocation
         // instead of blocking session issuance on it." Login has already
         // succeeded above; this failure is logged, not fatal.
-        console.warn(`  (savings sync didn't complete — will retry on a future run: ${err instanceof Error ? err.message : err})`);
+        console.warn(`  (savings sync didn't complete — will retry on a future run: ${err instanceof Error ? err.message : String(err)})`);
       }
 
       try {
         await runtime.refreshEntitlements();
       } catch (err) {
         if (!(err instanceof runtime.ApiUnreachableError)) {
-          console.warn(`  (couldn't fetch entitlements yet: ${err instanceof Error ? err.message : err})`);
+          console.warn(`  (couldn't fetch entitlements yet: ${err instanceof Error ? err.message : String(err)})`);
         }
       }
     });
@@ -144,7 +140,7 @@ export function registerAuthCommands(program: Command) {
         // succeed even offline, or a user with no connectivity could
         // never log out of a machine.
         if (!(err instanceof runtime.ApiUnreachableError)) {
-          console.warn(`  (server logout didn't complete: ${err instanceof Error ? err.message : err})`);
+          console.warn(`  (server logout didn't complete: ${err instanceof Error ? err.message : String(err)})`);
         }
       }
 

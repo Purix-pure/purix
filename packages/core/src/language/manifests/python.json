@@ -1,0 +1,13 @@
+{
+  "id": "python",
+  "minSupportedVersion": "3.10.0",
+  "tier": "pro",
+  "scaffoldExtensions": [".py"],
+  "capabilities": {
+    "compileOrTypeCheck": true,
+    "testExecution": true,
+    "testIntegrityCheck": true,
+    "idiomCheck": true,
+    "dependencyVulnScan": true
+  }
+}

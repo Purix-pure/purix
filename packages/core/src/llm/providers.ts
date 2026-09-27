@@ -225,7 +225,7 @@ function resolveKey(envVarName: string, providerLabel: string): string {
   if (!key) {
     throw new Error(
       `${envVarName} isn't available. Purix does not ship or bill against a shared key — ` +
-        `bring your own for ${providerLabel}. Run "purix secret-set ${envVarName} <value>" (stored ` +
+        `bring your own for ${providerLabel}. Run "purix secret set ${envVarName} <value>" (stored ` +
         `encrypted locally, never leaves the machine except in the request to ${providerLabel} itself), ` +
         `or set it in a local .env for quick dev (never commit it).`
     );
@@ -274,7 +274,7 @@ function openAiCompatibleAdapter(def: ProviderDefinition): LlmProvider {
         err.status = res.status;
         throw err;
       }
-      const data = (await res.json()) as any;
+      const data = (await res.json());
       return {
         text: data.choices?.[0]?.message?.content ?? "",
         usage: {
@@ -338,7 +338,7 @@ function anthropicAdapter(def: ProviderDefinition): LlmProvider {
         err.status = res.status;
         throw err;
       }
-      const data = (await res.json()) as any;
+      const data = (await res.json());
       const text = (data.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
       return {
         text,
@@ -370,7 +370,7 @@ export function priceFor(providerId: string, tier: ModelTier) {
 // ---------------------------------------------------------------------------
 // Persisted provider choice, including a fully custom (unregistered)
 // endpoint. This is the "write a single generic function and let people
-// point it at whatever" escape hatch: `purix provider-set custom` with
+// point it at whatever" escape hatch: `purix provider set custom` with
 // --base-url/--key-env/--model-low/--model-high covers vendor #101 (and
 // #102, #103...) without ever touching this file again.
 // ---------------------------------------------------------------------------
@@ -395,7 +395,7 @@ function readPersistedConfig(): PersistedProviderConfig | null {
 
 // Part 2 (hot reload): mtimeMs of provider-config.json at the moment it was
 // last read, or null if the file doesn't exist. Used below to detect a
-// change made by ANOTHER process (e.g. `purix provider-set custom ...` run
+// change made by ANOTHER process (e.g. `purix provider set custom ...` run
 // in a different terminal, or a long-lived process like the MCP server
 // picking up a change without restarting) so getProvider()'s cache can be
 // invalidated on the next call instead of serving a stale adapter forever.
@@ -413,8 +413,8 @@ export function activeProviderId(): string {
   const config = readPersistedConfig();
   if (!config) {
     throw new Error(
-      `No LLM provider is configured. Run "purix provider-list" to see the registry, ` +
-      `and "purix provider-set <id>" to configure one.`
+      `No LLM provider is configured. Run "purix provider list" to see the registry, ` +
+      `and "purix provider set <id>" to configure one.`
     );
   }
   return config.provider;
@@ -439,7 +439,7 @@ let _customConfigMtimeAtBuild: number | null = null;
  * closed over inside the adapter's generate() function. A long-lived
  * process (the MCP server, or any future daemon/scheduler) that calls
  * getProvider("custom") once and then again later would keep returning
- * that first snapshot forever — even after a separate `purix provider-set
+ * that first snapshot forever — even after a separate `purix provider set
  * custom --base-url ...` invocation (a different OS process) rewrote the
  * file out from under it — because `_activeId === wanted` short-circuited
  * before ever looking at the file's contents again.
@@ -466,7 +466,7 @@ export function getProvider(id?: string): LlmProvider {
     const cfg = readPersistedConfig();
     if (!cfg?.custom) {
       throw new Error(
-        `No custom provider is configured. Run: purix provider-set custom --base-url <url> ` +
+        `No custom provider is configured. Run: purix provider set custom --base-url <url> ` +
           `--key-env <ENV_VAR_NAME> --model-low <id> --model-high <id>`
       );
     }
@@ -487,8 +487,8 @@ export function getProvider(id?: string): LlmProvider {
   const def = REGISTRY_BY_ID.get(wanted);
   if (!def) {
     throw new Error(
-      `Unknown LLM provider "${wanted}". Run "purix provider-list" to see the registry, or ` +
-        `"purix provider-set custom ..." to point at any OpenAI-compatible endpoint not yet in it.`
+      `Unknown LLM provider "${wanted}". Run "purix provider list" to see the registry, or ` +
+        `"purix provider set custom ..." to point at any OpenAI-compatible endpoint not yet in it.`
     );
   }
   _active = buildAdapter(def);
@@ -499,7 +499,7 @@ export function getProvider(id?: string): LlmProvider {
 
 export function persistProviderChoice(id: string): void {
   if (id !== "custom" && !REGISTRY_BY_ID.has(id)) {
-    throw new Error(`Unknown provider "${id}". Run "purix provider-list" to see supported ids.`);
+    throw new Error(`Unknown provider "${id}". Run "purix provider list" to see supported ids.`);
   }
   const dir = join(process.cwd(), ".purix");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -531,7 +531,7 @@ export function listProviders(): { id: string; label: string; keyEnvVar: string 
     {
       id: "custom",
       label: "Any OpenAI-compatible endpoint (bring your own base URL + key)",
-      keyEnvVar: "(configured via provider-set custom)",
+      keyEnvVar: "(configured via provider set custom)",
     },
   ];
 }

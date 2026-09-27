@@ -1,12 +1,13 @@
 // packages/core/src/manifest/indexer.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runIndex } from "./indexer";
 import { readManifest, closeDb } from "./store";
 import { migrateManifestEntry } from "./schema_migrations";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 let originalCwd: string;
 let tmpDir: string;
@@ -28,7 +29,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("Purix Indexer & Components Sync", () => {

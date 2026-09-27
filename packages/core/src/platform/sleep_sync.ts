@@ -1,6 +1,6 @@
 // src/platform/sleep_sync.ts
 //
-// Runtime migration (ADR-009): `Bun.sleepSync(ms)` was a Bun global with
+// Runtime migration (ADR-048): `Bun.sleepSync(ms)` was a Bun global with
 // no direct Node equivalent. Node has no built-in synchronous sleep —
 // `setTimeout` is always async — but `Atomics.wait` blocking on a scratch
 // SharedArrayBuffer is the standard, well-established technique for one:

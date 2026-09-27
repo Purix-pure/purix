@@ -47,7 +47,7 @@ export function evaluateModelBaseline(fixture: ModelBaselineFixture, responseTex
         model: fixture.model,
         missingKeywords,
       });
-    } catch {}
+    } catch { /* best-effort fixture check */ }
   }
 
   return {

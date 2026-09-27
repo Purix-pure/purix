@@ -1,5 +1,6 @@
 // src/sandbox/sandbox.ts
-import { mkdtempSync, rmSync, cpSync, mkdirSync, writeFileSync, symlinkSync, existsSync, realpathSync } from "node:fs";
+import { mkdtempSync, cpSync, mkdirSync, writeFileSync, symlinkSync, existsSync, realpathSync } from "node:fs";
+import { safeRmSync } from "../platform/fs_retry.js";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { scanForSecrets } from "../security/secrets.js";
@@ -30,7 +31,7 @@ const openTempRoots = new Set<string>();
 // order, with no async gap for process.exit() to race against.
 export function cleanupSandboxTempRoots(): void {
   for (const root of openTempRoots) {
-    rmSync(root, { recursive: true, force: true });
+    safeRmSync(root);
   }
   openTempRoots.clear();
 }
@@ -110,7 +111,7 @@ export function verifyInSandbox(
     if (existsSync(realNodeModules)) {
       try {
         realNodeModules = realpathSync(realNodeModules);
-      } catch {}
+      } catch { /* realpath is a best-effort resolution; fall back to the original path on failure */ }
       try {
         symlinkSync(realNodeModules, join(tmpRoot, "node_modules"), "junction");
       } catch (err) {
@@ -239,7 +240,7 @@ export function verifyInSandbox(
     // never happened.
     return { status: "pass", idiomFindings: allIdiomFindings, isolation: overallIsolation ?? "none" };
   } finally {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    safeRmSync(tmpRoot);
     openTempRoots.delete(tmpRoot);
   }
 }

@@ -9,10 +9,11 @@
 // bug hiding behind this test's premise, not just the missing export.
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getMachineId } from "./machine_id";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 let dir: string;
 
@@ -21,7 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  safeRmSync(dir);
 });
 
 describe("getMachineId", () => {
@@ -62,7 +63,7 @@ describe("getMachineId", () => {
       const id = getMachineId(filePath); // ".purix" under a path that's actually a file
       expect(id).toMatch(/^[0-9a-f-]{36}$/);
     } finally {
-      rmSync(blockedParent, { recursive: true, force: true });
+      safeRmSync(blockedParent);
     }
   });
 });

@@ -2,10 +2,10 @@
 
 const PATTERNS: { name: string; re: RegExp }[] = [
   { name: "AWS Access Key", re: /AKIA[0-9A-Z]{16}/ },
-  { name: "Google/Gemini API key", re: /AIza[0-9A-Za-z_\-]{35}/ },
+  { name: "Google/Gemini API key", re: /AIza[0-9A-Za-z_-]{35}/ },
   { name: "Private key block", re: /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { name: "Generic bearer token", re: /Bearer\s+[A-Za-z0-9_\-.]{20,}/ },
-  { name: "Generic key/secret assignment", re: /(api|secret|access)[_-]?key\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]/i },
+  { name: "Generic key/secret assignment", re: /(api|secret|access)[_-]?key\s*[:=]\s*['"][A-Za-z0-9_-]{16,}['"]/i },
 ];
 
 function shannonEntropy(str: string): number {
@@ -67,7 +67,7 @@ export function scrubSecrets(files: { path: string; content: string }[]): Scrubb
           return `[REDACTED:${name}]`;
         });
       }
-      scrubbedLine = scrubbedLine.replace(/(['"])([A-Za-z0-9+/_\-]{24,})(['"])/g, (whole, q1, bare, q2) => {
+      scrubbedLine = scrubbedLine.replace(/(['"])([A-Za-z0-9+/_-]{24,})(['"])/g, (whole, q1, bare, q2) => {
         if (shannonEntropy(bare) <= 4.0) return whole;
         scrubbedCount++;
         return `${q1}[REDACTED:high-entropy]${q2}`;
@@ -95,7 +95,7 @@ export function scanForSecrets(files: { path: string; content: string }[]): Secr
         const m = line.match(re);
         if (m) findings.push({ path: file.path, line: i + 1, match: redact(m[0]), reason: name });
       }
-      const tokenMatches = line.match(/['"]([A-Za-z0-9+/_\-]{24,})['"]/g);
+      const tokenMatches = line.match(/['"]([A-Za-z0-9+/_-]{24,})['"]/g);
       if (tokenMatches) {
         for (const tok of tokenMatches) {
           const bare = tok.slice(1, -1);

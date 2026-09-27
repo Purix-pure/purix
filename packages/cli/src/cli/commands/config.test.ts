@@ -7,11 +7,12 @@
 // config.ts-specific tests of its own.
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectAgent } from "./connect_agent";
 import { agents, getAgentTypes } from "add-mcp";
+import { safeRmSync } from "@purix/core/platform/fs_retry";
 
 // add-mcp resolves each agent's global configPath from os.homedir() once,
 // at module-evaluation time — so mutating process.env.HOME from inside a
@@ -28,7 +29,7 @@ describe("connectAgent", () => {
   });
 
   afterEach(() => {
-    rmSync(cwd, { recursive: true, force: true });
+    safeRmSync(cwd);
   });
 
   test("registers purix with Claude Code by writing a real project-scoped .mcp.json", () => {

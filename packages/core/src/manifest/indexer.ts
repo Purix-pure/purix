@@ -6,6 +6,7 @@ import { writeManifest, listManifest } from "./store.js";
 import { resolveLanguage, getLanguageProvider } from "../language/registry.js";
 import { requireLanguage } from "../licensing/tier.js";
 import type { ComponentRecord, ManifestEntry } from "./schema.js";
+import { computeSyncHash } from "../state/hash.js";
 
 export interface IndexOptions {
   full?: boolean;
@@ -53,7 +54,7 @@ function loadIgnorePatterns(baseDir: string): string[] {
             patterns.push(trimmed);
           }
         }
-      } catch {}
+      } catch { /* best-effort ignore-pattern parse */ }
     }
   }
   return patterns;
@@ -140,10 +141,13 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
 
   let fileCount = 0;
   const allComponents: ComponentRecord[] = [];
+  // Exactly the files this run indexed, with the content it read — the source
+  // of truth for the manifest entry's tracked file list and its drift baseline.
+  const indexedFiles: { path: string; content: string }[] = [];
 
   for (const absPath of files) {
     const relPath = relative(baseDir, absPath);
-    let lang = "typescript";
+    let lang: string;
     if (relPath.endsWith(".py")) lang = "python";
     else {
       try {
@@ -163,6 +167,7 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
 
     fileCount++;
     const content = readFileSync(absPath, "utf-8");
+    indexedFiles.push({ path: relPath, content });
 
     // Verification dispatch trace: CLI -> runIndex -> verifyInSandbox -> provider.verify -> runTests -> checkIdiom
     // BUG FIX: `comp-${fileCount}` is a synthetic ID that can never match a
@@ -213,6 +218,14 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
   }
   manifestEntry.dependencies = dependencies;
   manifestEntry.components = allComponents;
+  // TEST-REPORT F25: an existing entry used to keep the file list from the
+  // FIRST index forever, so files added later showed up in components.json but
+  // were invisible to delete/drift/backup. Refresh it on every run.
+  manifestEntry.files = indexedFiles.map((f) => f.path);
+  // TEST-REPORT F3: this used to stay null, and checkDrift() treats a null
+  // hash as "never drifted", so hand-edited indexed files were never flagged.
+  // Indexing records the current state as the baseline; later edits drift.
+  manifestEntry.last_synced_hash = computeSyncHash(indexedFiles);
   manifestEntry.current_version += 1;
   manifestEntry.version_history.push({
     version: manifestEntry.current_version,

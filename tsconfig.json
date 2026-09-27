@@ -7,5 +7,6 @@
   // package.
   "extends": "./tsconfig.base.json",
   "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
+  "exclude": ["**/dist/**", "**/language/conformance/fixtures/**"],
   "compilerOptions": {}
 }

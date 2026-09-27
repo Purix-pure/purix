@@ -52,7 +52,7 @@ export async function runSelfHealingLoop(
     try {
       repair = await classifyRepair(componentId, operation, failingSnapshot, lastReason, attempt);
     } catch (err) {
-      const reason = `repair classification threw: ${err instanceof Error ? err.message : err}`;
+      const reason = `repair classification threw: ${err instanceof Error ? err.message : String(err)}`;
       console.log(`   ❌ ${reason}`);
       attempts.push({ attempt, result: "fail", reason });
       continue;

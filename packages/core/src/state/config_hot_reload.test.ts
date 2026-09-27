@@ -11,11 +11,12 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigStore } from "./config";
 import { resolveTsxCommand } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 // Root cause (found via live process-tree inspection, not inferred): the
 // worker below is launched as `tsxCommand` (the tsx CLI/shim), which itself
@@ -25,7 +26,7 @@ import { resolveTsxCommand } from "../test-support/real_node_modules";
 // shim died, `child.on("exit")` fired, and both assertions below "passed"
 // — but the real worker (a grandchild) was silently orphaned under PID 1,
 // still holding its inherited stdio pipe and still writing into `dir` at
-// ~93% CPU. That orphan (a) raced `afterEach`'s `rmSync(dir, ...)` on the
+// ~93% CPU. That orphan (a) raced `afterEach`'s `safeRmSync(dir, ...)` on the
 // exact directory it was still writing into, confirmed by leftover
 // `purix-config-hot-reload-*` tmpdirs surviving on disk well after their
 // test had already reported done, and (b) kept the OUTER `node --test`
@@ -64,7 +65,7 @@ function killProcessTree(child: Pick<ChildProcess, "pid" | "kill">): void {
       // before this ran) — fall back to a direct kill so we still try.
       try {
         child.kill("SIGKILL");
-      } catch {}
+      } catch { /* test cleanup — child may already be dead */ }
     }
   }
 }
@@ -80,7 +81,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  safeRmSync(dir);
 });
 
 function sleep(ms: number): Promise<void> {

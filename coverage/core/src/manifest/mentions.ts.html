@@ -1,0 +1,508 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for core/src/manifest/mentions.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../../prettify.css" />
+    <link rel="stylesheet" href="../../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">core/src/manifest</a> mentions.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">95.58% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>65/68</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">89.47% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>34/38</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>10/10</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>55/55</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line high'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1933x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">1103x</span>
+<span class="cline-any cline-yes">1103x</span>
+<span class="cline-any cline-yes">1103x</span>
+<span class="cline-any cline-yes">1097x</span>
+<span class="cline-any cline-yes">1097x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">411x</span>
+<span class="cline-any cline-yes">382x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">28x</span>
+<span class="cline-any cline-yes">780x</span>
+<span class="cline-any cline-yes">780x</span>
+<span class="cline-any cline-yes">763x</span>
+<span class="cline-any cline-yes">721x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">// packages/core/src/manifest/mentions.ts
+//
+// IDEA-078: deterministic mention extraction for `purix change "&lt;intent&gt;"`.
+//
+// resolveTarget() (resolver.ts) matches candidate strings against real
+// manifest data. This module produces those candidate strings from free
+// text WITHOUT any LLM call, so the common case costs nothing and is
+// fully reproducible. (The handoff floated passing the raw intent as one
+// mention; that cannot work — resolver.ts's boundary check treats a space
+// as a non-boundary, so "modify the billing-service to add X" never
+// matches "billing-service". Tokenizing is required.)
+//
+// Also here: the guard for the LLM-assisted tier (Decision 2). The LLM may
+// only PROPOSE strings; filterVerbatimMentions() keeps a proposal only if
+// it literally occurs in the intent, so a model can never introduce a
+// target the user did not actually write.
+&nbsp;
+/** Upper bounds — an intent is untrusted input; never let it fan out unboundedly. */
+export const MAX_INTENT_LENGTH = 2000;
+export const MAX_MENTIONS = 60;
+export const MAX_MENTION_LENGTH = 200;
+&nbsp;
+// Words that carry no target information. Deliberately conservative:
+// only function words, generic change verbs, and generic path noise.
+const STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "not", "no", "so", "if", "of", "to", "in", "on", "at", "by",
+  "for", "with", "from", "into", "onto", "over", "as", "is", "are", "be", "it", "its", "this", "that",
+  "these", "those", "than", "then", "when", "while", "also", "all", "any", "some", "each", "every",
+  "should", "would", "could", "can", "will", "must", "need", "needs", "want", "wants", "please",
+  "add", "fix", "update", "change", "changes", "modify", "make", "remove", "delete", "refactor",
+  "improve", "implement", "create", "use", "using", "support", "handle", "ensure", "allow", "let",
+  "file", "files", "code", "function", "functions", "class", "method", "logic", "thing", "stuff",
+  // generic path segments that would match half the repo
+  "src", "lib", "dist", "packages", "test", "tests", "index", "main",
+]);
+&nbsp;
+function stripToken(raw: string): string {
+  let t = raw.trim();
+  // Surrounding quotes/brackets/backticks and sentence punctuation.
+  t = t.replace(/^[\s"'`([{&lt;]+/, "").replace(/[\s"'`)\]}&gt;,;:!?]+$/, "");
+  // A sentence-final period, but never the dot inside "store.ts".
+  t = t.replace(/\.+$/, "");
+  // "src/a.ts:42" or "src/a.ts:42:7" → "src/a.ts"
+  t = t.replace(/^(.*\.[A-Za-z0-9]+):\d+(?::\d+)?$/, "$1");
+  return t;
+}
+&nbsp;
+function isWordToken(t: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9]*$/.test(t);
+}
+&nbsp;
+/**
+ * Deterministic candidate mentions from free text: every id-, path- or
+ * identifier-shaped token, plus 2- and 3-word joins ("billing service" →
+ * "billing-service") so a spaced phrase can still hit a kebab-case id.
+ * Stable order (first occurrence), de-duplicated case-insensitively.
+ */
+export function extractMentions(intent: string): string[] {
+  const text = intent.slice(0, MAX_INTENT_LENGTH).trim();
+  if (text.length === 0) return [];
+&nbsp;
+  const tokens = text
+    .split(/\s+/)
+    .map(stripToken)
+    .filter((t) =&gt; t.length &gt;= 2 &amp;&amp; /[A-Za-z0-9]/.test(t));
+&nbsp;
+  const out: string[] = [];
+  const seen = new Set&lt;string&gt;();
+  const push = (m: string): void =&gt; {
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (m.length &lt; 2 || m.length &gt; MAX_MENTION_LENGTH) <span class="cstat-no" title="statement not covered" >return;</span>
+    const key = m.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(m);
+  };
+&nbsp;
+  for (const t of tokens) {
+    if (STOPWORDS.has(t.toLowerCase())) continue;
+    push(t);
+  }
+&nbsp;
+  // n-gram joins over plain words; skip a gram that starts or ends on a stopword.
+  for (const n of [2, 3]) {
+    for (let i = 0; i + n &lt;= tokens.length; i++) {
+      const gram = tokens.slice(i, i + n);
+      if (!gram.every(isWordToken)) continue;
+      if (STOPWORDS.has(gram[0]!.toLowerCase()) || STOPWORDS.has(gram[n - 1]!.toLowerCase())) continue;
+      push(gram.join("-"));
+    }
+  }
+&nbsp;
+  return out.slice(0, MAX_MENTIONS);
+}
+&nbsp;
+const canon = (s: string): string =&gt; s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+&nbsp;
+/**
+ * Decision-2 guard for LLM-proposed mentions: keep a proposal only if its
+ * canonical form (lowercased, punctuation collapsed to single spaces)
+ * appears as whole words inside the canonical intent. Each accepted
+ * proposal is returned as-written plus a kebab-case variant, so
+ * "billing service" can meet the id "billing-service". Anything that is
+ * not a string, is empty, or is over-long is dropped.
+ */
+export function filterVerbatimMentions(intent: string, proposed: unknown): string[] {
+  if (!Array.isArray(proposed)) return [];
+  const haystack = ` ${canon(intent.slice(0, MAX_INTENT_LENGTH))} `;
+  const out: string[] = [];
+  const seen = new Set&lt;string&gt;();
+  for (const p of proposed) {
+    if (typeof p !== "string") continue;
+    const m = p.trim();
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (m.length &lt; 2 || m.length &gt; MAX_MENTION_LENGTH) <span class="cstat-no" title="statement not covered" >continue;</span>
+    const c = canon(m);
+    if (c.length === 0 || !haystack.includes(` ${c} `)) continue;
+    for (const variant of [m, c.replace(/ /g, "-")]) {
+      const key = variant.toLowerCase();
+      <span class="missing-if-branch" title="else path not taken" >E</span>if (!seen.has(key)) {
+        seen.add(key);
+        out.push(variant);
+      }
+    }
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (out.length &gt;= MAX_MENTIONS) <span class="cstat-no" title="statement not covered" >break;</span>
+  }
+  return out.slice(0, MAX_MENTIONS);
+}
+&nbsp;
+/**
+ * Deterministic kebab-case component name seed for `change`'s
+ * create-proposal branch (no match found). classifyGreenfield() still
+ * chooses the final component_id; this only gives it a stable starting
+ * name and lets the CLI/MCP fail early on an obvious collision.
+ */
+export function deriveComponentName(intent: string): string {
+  const words = intent
+    .slice(0, MAX_INTENT_LENGTH)
+    .split(/\s+/)
+    .map((w) =&gt; w.toLowerCase().replace(/[^a-z0-9]+/g, ""))
+    .filter((w) =&gt; w.length &gt;= 2 &amp;&amp; !STOPWORDS.has(w));
+  const name = words.slice(0, 4).join("-").slice(0, 40).replace(/-+$/, "");
+  return name.length &gt;= 2 ? name : "new-component";
+}</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-09-26T08:43:26.726Z
+            </div>
+        <script src="../../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../../sorter.js"></script>
+        <script src="../../../block-navigation.js"></script>
+    </body>
+</html>
+    

@@ -10,7 +10,7 @@ export function registerMcpServeCommand(program: Command) {
       try {
         await runMcpServer();
       } catch (err) {
-        console.error(`🛑 MCP server error: ${err instanceof Error ? err.message : err}`);
+        console.error(`🛑 MCP server error: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
       }
     });

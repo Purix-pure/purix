@@ -23,7 +23,7 @@ export function registerTierCommands(program: Command) {
         // through to printing whatever's cached below, rather than
         // aborting the whole command — tier-status should always show
         // *something*, even a stale answer with a warning.
-        console.warn(`  (couldn't refresh from the server: ${err instanceof Error ? err.message : err})`);
+        console.warn(`  (couldn't refresh from the server: ${err instanceof Error ? err.message : String(err)})`);
       }
       const ent = getEntitlements();
       console.log(`Tier: ${ent.tier}`);

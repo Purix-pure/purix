@@ -31,7 +31,7 @@ function ensureTable(): void {
   `);
   try {
     db.run(`ALTER TABLE operation_library ADD COLUMN language TEXT NOT NULL DEFAULT 'typescript'`);
-  } catch {}
+  } catch { /* column already exists on a previously-migrated DB — ignore */ }
 }
 
 export function computeTaskSignature(componentId: string, operation: string, instruction: string): string {
@@ -109,7 +109,7 @@ export function promoteOperation(entry: {
   } catch (err) {
     try {
       dbRaw.exec("ROLLBACK");
-    } catch {}
+    } catch { /* already failing — rollback is best-effort, the original error still propagates */ }
     throw err;
   }
 }

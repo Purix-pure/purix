@@ -51,7 +51,7 @@ export function appendAuditRecord(payload: object): TamperEvidenceRecord {
   return { id: "latest", payload: payloadStr, timestamp, prev_hash: prevHash, hash };
 }
 
-export function verifyAuditChain(): { valid: boolean; compromisedIndex?: number; reason?: string } {
+export function verifyAuditChain(): { valid: boolean; compromisedIndex?: number; reason?: string; recordCount?: number } {
   ensureTable();
   const db = getDb();
   const rows = db.query(`SELECT id, payload, timestamp, prev_hash, hash FROM audit_chain ORDER BY id ASC`).all() as any[];
@@ -81,14 +81,15 @@ export function verifyAuditChain(): { valid: boolean; compromisedIndex?: number;
     }
     expectedPrevHash = row.hash;
   }
-  return { valid: true };
+  // recordCount lets callers tell "verified N records" from a vacuous pass on an empty chain.
+  return { valid: true, recordCount: rows.length };
 }
 
 export function pruneAuditChain(olderThanMs: number): void {
   ensureTable();
   const db = getDb();
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-  const targetRows = db.query(`SELECT id, hash FROM audit_chain WHERE timestamp < ? ORDER BY id ASC`).all() as { id: number; hash: string }[];
+  const targetRows = db.query(`SELECT id, hash FROM audit_chain WHERE timestamp < ? ORDER BY id ASC`).all(cutoff) as { id: number; hash: string }[];
   if (targetRows.length === 0) return;
 
   const lastPruned = targetRows[targetRows.length - 1]!;

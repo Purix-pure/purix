@@ -7,10 +7,11 @@
 // §7) — these tests are only possible at all because of that fix.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addServer, removeServer, getServer, listServers } from "./mcp_registry";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("mcp_registry", () => {
   let dir: string;
@@ -20,7 +21,7 @@ describe("mcp_registry", () => {
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    safeRmSync(dir);
   });
 
   it("addServer then getServer round-trips with the given baseDir, without touching any other directory", () => {
@@ -77,7 +78,7 @@ describe("mcp_registry", () => {
       expect(getServer("only-in-dir1", dir)?.url).toBe("https://one.example.com");
       expect(getServer("only-in-dir2", dir2)?.url).toBe("https://two.example.com");
     } finally {
-      rmSync(dir2, { recursive: true, force: true });
+      safeRmSync(dir2);
     }
   });
 

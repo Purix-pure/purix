@@ -62,6 +62,21 @@ function analyzeTestFile(content: string, path: string): TestFileProfile | null 
       return;
     }
 
+    // TEST-REPORT F5: node:assert / chai-style assertions, which this check
+    // used to ignore entirely — deleting `assert.equal(...)` from a node:test
+    // file (a runner verify/tests.ts supports first-class) went unflagged.
+    // Matches the *callee expression* (a short identifier chain, so comments
+    // and string literals still can't be counted): assert(x), assert.ok(x),
+    // assert.equal(a, b), assert.strict.deepEqual(a, b), and node:test's
+    // t.assert.equal(a, b).
+    const calleeText = expr.getText();
+    if (/^assert(\.\w+)*$/.test(calleeText) || /\.assert(\.\w+)+$/.test(calleeText)) {
+      const args = node.getArguments();
+      assertionCount += 1;
+      assertionTargets.push(args.length > 0 ? args[0]!.getText() : "(no argument)");
+      return;
+    }
+
     // it.skip(...), test.skip(...), describe.skip(...), it.todo(...)
     if (Node.isPropertyAccessExpression(expr) && SKIP_CALLEE_SUFFIXES.has(expr.getName())) {
       skipCount += 1;

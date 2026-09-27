@@ -21,6 +21,15 @@ export interface TrustGateInput {
   contractChanging: boolean;
   hasCoverage: boolean;
   testIntegrity: { flagged: boolean; reason?: string };
+  /**
+   * TEST-REPORT F4: the classifier's self-reported
+   * `suspicious_injected_instruction`. Before this field existed the flag
+   * only printed a warning and the change could still auto-commit at high
+   * confidence. It is model-self-reported, so a compromised model may not
+   * raise it — this is one extra tripwire, not a guarantee. Optional so
+   * callers that have no such signal keep working.
+   */
+  injectionSuspected?: boolean;
 }
 
 /**
@@ -30,13 +39,17 @@ export interface TrustGateInput {
  * human confirmation; only a clean pass through all three — at or above
  * the confirm threshold and not contract-changing — auto-commits.
  *
- * This is the Instruction Path version: it assumes a real classifier
- * confidence exists. Diff Ingestion doesn't have one yet (diff-classify
- * mode isn't built), so ingested diffs go through
- * evaluateTrustGateForDiff below instead of this function with a
- * made-up confidence value.
+ * Both the Instruction Path and Diff Ingestion (classifyDiff) call this
+ * one function with the classifier's real confidence.
  */
 export function evaluateTrustGate(input: TrustGateInput): TrustGateDecision {
+  if (input.injectionSuspected) {
+    return {
+      action: "human_confirm",
+      reason: `the classifier flagged possible prompt injection in the request or diff — a human must approve regardless of confidence (${input.confidence.toFixed(2)})`,
+    };
+  }
+
   if (input.testIntegrity.flagged) {
     return {
       action: "human_confirm",
@@ -167,7 +180,7 @@ export function loadDofPatterns(baseDir: string = process.cwd()): string[] {
     }
     console.warn(`  warning: ${DOF_CONFIG_FILENAME} exists but isn't a JSON array of strings — using built-in defaults.`);
   } catch (err) {
-    console.warn(`  warning: couldn't parse ${DOF_CONFIG_FILENAME} (${err instanceof Error ? err.message : err}) — using built-in defaults.`);
+    console.warn(`  warning: couldn't parse ${DOF_CONFIG_FILENAME} (${err instanceof Error ? err.message : String(err)}) — using built-in defaults.`);
   }
   return DEFAULT_DOF_PATTERNS;
 }

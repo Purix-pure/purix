@@ -1,9 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "path";
 import { typescriptProvider } from "./typescript";
+import { safeRmSync } from "../../platform/fs_retry.js";
 
 describe("TypeScript Provider", () => {
   let tmpDir: string;
@@ -13,7 +14,7 @@ describe("TypeScript Provider", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("detect() returns true with tsconfig", () => {

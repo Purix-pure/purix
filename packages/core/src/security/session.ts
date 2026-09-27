@@ -31,10 +31,10 @@ export interface StoredSession {
 }
 
 export interface SessionStore {
-  saveSession(token: string, email: string): void;
-  loadSession(): StoredSession | null;
-  clearSession(): void;
-  isLoggedIn(): boolean;
+  saveSession(this: void, token: string, email: string): void;
+  loadSession(this: void): StoredSession | null;
+  clearSession(this: void): void;
+  isLoggedIn(this: void): boolean;
 }
 
 /**

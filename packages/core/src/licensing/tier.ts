@@ -283,9 +283,9 @@ export function requireLanguage(langId: string): void {
 }
 
 /**
- * ADR-040: Local capacity enforcement is a footgun-prevention mechanism,
+ * ADR-035: Local capacity enforcement is a footgun-prevention mechanism,
  * not a security boundary — the real backstop is server-side verification
- * at checkout and via webhook-driven entitlement grants (ADR-017).
+ * at checkout and via webhook-driven entitlement grants (ADR-032).
  */
 export function checkComponentLimit(currentCount: number): void {
   const ent = getEntitlements();

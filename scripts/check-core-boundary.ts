@@ -51,6 +51,7 @@ for (const file of walk(CORE_ROOT)) {
   lines.forEach((line, i) => {
     for (const match of line.matchAll(SPECIFIER_PATTERN)) {
       const specifier = match[1];
+      if (specifier === undefined) continue;
       const hit =
         FORBIDDEN_SPECIFIERS.find((s) => specifier.startsWith(s)) ??
         FORBIDDEN_PATH_FRAGMENTS.find((s) => specifier.includes(s));

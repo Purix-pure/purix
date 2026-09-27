@@ -1,0 +1,13 @@
+{
+  "id": "typescript",
+  "minSupportedVersion": "5.0.0",
+  "tier": "free",
+  "scaffoldExtensions": [".ts", ".tsx"],
+  "capabilities": {
+    "compileOrTypeCheck": true,
+    "testExecution": true,
+    "testIntegrityCheck": true,
+    "idiomCheck": true,
+    "dependencyVulnScan": true
+  }
+}

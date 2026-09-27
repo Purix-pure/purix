@@ -9,11 +9,12 @@ import {
   persistCustomProvider,
   activeProviderId,
 } from "./providers";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { resolveTsxCommand } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const tsxCommand = resolveTsxCommand();
 
@@ -31,7 +32,7 @@ describe("LLM Providers & Pricing", () => {
 
   afterEach(() => {
     process.chdir(oldCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
     globalThis.fetch = originalFetch;
     delete process.env.PURIX_LLM_PROVIDER;
     delete process.env.OPENAI_API_KEY;
@@ -68,7 +69,7 @@ describe("LLM Providers & Pricing", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const providers = listProviders();
     for (const p of providers) {
@@ -81,7 +82,7 @@ describe("LLM Providers & Pricing", () => {
       expect(typeof prov.isTransientError({ status: 429 })).toBe("boolean");
       try {
         await prov.generate("hello", "low");
-      } catch {}
+      } catch { /* expected to throw for some providers under test — asserted above via isTransientError */ }
     }
 
     expect(() => getProvider("nonexistent")).toThrow(/Unknown LLM provider/);
@@ -144,7 +145,7 @@ describe("LLM Providers & Pricing", () => {
   it("throws when custom provider is used but not configured", () => {
     persistProviderChoice("custom");
     // clear config
-    rmSync(join(tmpDir, ".purix"), { recursive: true, force: true });
+    safeRmSync(join(tmpDir, ".purix"), { recursive: true, force: true });
     expect(() => getProvider("custom")).toThrow(/No custom provider is configured/);
   });
 
@@ -152,7 +153,7 @@ describe("LLM Providers & Pricing", () => {
     process.env.OPENAI_API_KEY = "test_key";
     globalThis.fetch = (async () => {
       return new Response("Unauthorized", { status: 401 });
-    }) as typeof fetch;
+    });
 
     const provider = getProvider("openai");
     await expect(provider.generate("prompt", "low")).rejects.toThrow(/OpenAI 401/);
@@ -180,7 +181,7 @@ describe("LLM Providers & Pricing", () => {
     expect(capturedHeaders["anthropic-version"]).toBe("2023-06-01");
 
     // Non-ok response
-    globalThis.fetch = (async () => new Response("Error", { status: 500 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response("Error", { status: 500 }));
     await expect(provider.generate("hello", "high")).rejects.toThrow(/Anthropic 500/);
   });
 

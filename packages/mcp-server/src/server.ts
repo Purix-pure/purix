@@ -5,7 +5,6 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import {
   listManifest,
   readManifest,
-  writeManifest,
   writeManifestWithLimitCheck,
   linkComponents,
   deleteManifestEntry,
@@ -14,6 +13,7 @@ import {
   exportManifestData,
 } from "@purix/core/manifest/store";
 import { recordEvent } from "@purix/core/manifest/events";
+import { PURIX_VERSION } from "./version.js";
 
 /**
  * Fix (2026-09-13): confirmGated()/confirm() opens its own readline
@@ -53,11 +53,12 @@ import { recordEvent } from "@purix/core/manifest/events";
  * keeping its scope — an operator's explicit choice when launching
  * `purix mcp-serve` — entirely separate from the CLI's own bypass.
  */
-async function mcpConfirmGated(
+function mcpConfirmGated(
   message: string,
   checkpointKind: string,
   componentId: string | null
 ): Promise<boolean> {
+  return Promise.resolve((() => {
   if (process.env.PURIX_MCP_AUTO_APPROVE === "1") {
     recordEvent("confirm_response", {
       component_id: componentId,
@@ -70,6 +71,7 @@ async function mcpConfirmGated(
     detail: { checkpoint_kind: checkpointKind, approved: false, reason: "mcp_no_elicitation_support" },
   });
   return false;
+  })());
 }
 
 type GatedActionBudget = ReturnType<typeof createGatedActionBudget>;
@@ -125,16 +127,28 @@ async function requireGatedApproval(
   return { approved: true };
 }
 import { runIndex } from "@purix/core/manifest/indexer";
-import { verifyInSandbox } from "@purix/core/sandbox/sandbox";
 import { readComponentFiles } from "@purix/core/entrypoints/modify";
 import { ingestDiffFromFile } from "@purix/core/entrypoints/ingest";
-import { classifyModification, classifyGreenfield } from "@purix/core/llm/classify";
+import {
+  classifyModification,
+  classifyGreenfield,
+  classifyDiff,
+  scanFilesForInjectionAttempts,
+  scanDiffForInjectionAttempts,
+} from "@purix/core/llm/classify";
+import { scanForInjectionAttempts } from "@purix/core/llm/injection";
 import { scrubSecrets } from "@purix/core/security/secrets";
 import { buildManifestEntry, writeScaffold } from "@purix/core/entrypoints/scaffold";
 import { computeSyncHash } from "@purix/core/state/hash";
 import { assertAuthorizedToApprove } from "@purix/core/security/auth";
 import { checkDrift, acceptDrift } from "@purix/core/state/drift";
-import { activateMigration, rollbackMigration } from "@purix/core/state/migration";
+import { activateMigration, rollbackMigration, buildMigrationPlan, stageMigration } from "@purix/core/state/migration";
+import { compilePatch } from "@purix/core/verify/compile";
+import { runEscalation } from "@purix/core/recovery/escalate";
+import { resolveVerification } from "@purix/core/recovery/resolve_verification";
+import { evaluateTrustGate, hasTestCoverage, checkDeterministicOverrideFloor, loadDofPatterns } from "@purix/core/gates/trustgate";
+import { resolveLanguage, getLanguageProvider } from "@purix/core/language/registry";
+import { commitVersionedChange, reVerifyCascadeDependents } from "@purix/core/manifest/commit_and_cascade";
 import { listMigrations } from "@purix/core/manifest/migrations";
 import { listLibrary } from "@purix/core/manifest/library";
 import { buildObservabilityReport, formatObservabilityReport } from "@purix/core/manifest/observability";
@@ -147,7 +161,12 @@ import { requireEntitlement } from "@purix/core/licensing/tier";
 import { reconcilePendingOperations } from "@purix/core/state/reconcile";
 import { existsSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { resolve, join, relative, isAbsolute } from "node:path";
+import { formatChangeSetDiff } from "@purix/core/cli-io/diff_format";
+import { resolveChangeTarget } from "@purix/core/manifest/change_target";
+import { resolveTarget, describeMatch } from "@purix/core/manifest/resolver";
+import { extractMentions, deriveComponentName } from "@purix/core/manifest/mentions";
+import { extractMentionCandidates } from "@purix/core/llm/classify";
 
 // --- Beta-readiness gap-closure (2026-09-03): this file previously had no
 // agent identity, no DLP scrub, and no cap on gated-action attempts — see
@@ -176,12 +195,12 @@ import { resolve, join } from "node:path";
 // Deliberately NOT added here, and not silently — each is either
 // account/credential surface, or a separate governance decision that
 // belongs to a human, not a "just wire it up" call:
-//   - secret-set / secret-rotate / secret-remove / secrets-status: credential
+//   - secret set / secret rotate / secret remove / secret status: credential
 //     management. An unattended coding agent should never hold the ability
 //     to read, rotate, or delete stored secrets.
-//   - auth login / auth logout: interactive account/session flow, not a
+//   - login / logout: interactive account/session flow, not a
 //     stdio tool call.
-//   - provider-set: changes which LLM provider this whole install bills
+//   - provider set: changes which LLM provider this whole install bills
 //     against — an operator decision, not a per-task one.
 //   - backup restore: replaces the ENTIRE manifest across every component
 //     in one shot (see backup.ts's own "DESTRUCTIVE" label) — a strictly
@@ -193,11 +212,15 @@ import { resolve, join } from "node:path";
 //     internal contributor-only tool, never shipped to end users.
 //   - mcp-add / mcp-remove / mcp-list / mcp-tools / mcp-call (Purix acting
 //     as an MCP *client*): cli.ts leaves registerMcpCommands() unwired on
-//     purpose, citing ADR-057 ("MCP Client Commands Governance
+//     purpose, citing ADR-018 ("MCP Client Commands Governance
 //     Deferral") until identity/DLP/budget hardening lands. That hardening
-//     is what THIS file now has — but ADR-057 governs a different surface
+//     is what THIS file now has — but ADR-018 governs a different surface
 //     (Purix reaching out to arbitrary other MCP servers) and re-enabling
 //     it is its own decision, not a side effect of this pass.
+//     (Corrected 2026-09-24: this comment previously cited "ADR-057" —
+//     the corpus has no such ADR; cli.ts's own comment at the
+//     registerMcpCommands call site cites ADR-018 for this exact
+//     deferral, confirmed by direct read.)
 //   - diagnostics: reads ~/.purix/logs via getRecentLogs/redactLogContent,
 //     which live in packages/cli/src/telemetry/, not packages/core. This
 //     package only depends on @purix/core (see package.json) — wiring
@@ -250,6 +273,67 @@ function maxGatedActionsPerSession(): number {
  * so a "no" answer still consumes budget — the risk is prompt-spam, not
  * just successful writes.
  */
+/**
+ * Tool metadata (MCP 2025-06-18+ tool annotations, per Standard 10 §2).
+ * Unset hints fall back to the spec's CONSERVATIVE defaults (destructive,
+ * open-world, not read-only), which makes clients prompt for everything —
+ * so every tool sets all four hints explicitly, and listing throws if a
+ * tool is missing from this table. Hints are advisory to the client; the
+ * real safety controls remain the gated-approval checkpoints below.
+ *   readOnly    — changes nothing in its environment.
+ *   destructive — may overwrite or remove existing state (only meaningful
+ *                 when not read-only; false = purely additive).
+ *   idempotent  — repeating the same call has no additional effect.
+ *   openWorld   — talks to systems outside this project (LLM provider,
+ *                 npm registry).
+ */
+export interface ToolMeta {
+  title: string;
+  readOnly: boolean;
+  destructive: boolean;
+  idempotent: boolean;
+  openWorld: boolean;
+}
+export const TOOL_METADATA: Record<string, ToolMeta> = {
+  purix_status: { title: "List components", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_find: { title: "Find component from text", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_create: { title: "Create component", readOnly: false, destructive: false, idempotent: false, openWorld: true },
+  purix_modify: { title: "Modify component", readOnly: false, destructive: true, idempotent: false, openWorld: true },
+  purix_change: { title: "Change component from plain-language intent", readOnly: false, destructive: true, idempotent: false, openWorld: true },
+  purix_delete: { title: "Delete component", readOnly: false, destructive: true, idempotent: true, openWorld: false },
+  purix_index: { title: "Index codebase", readOnly: false, destructive: false, idempotent: true, openWorld: false },
+  purix_ingest: { title: "Ingest external diff", readOnly: false, destructive: true, idempotent: false, openWorld: true },
+  purix_accept_drift: { title: "Accept drift", readOnly: false, destructive: true, idempotent: true, openWorld: false },
+  purix_migrations_list: { title: "List migrations", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_migration_activate: { title: "Activate migration", readOnly: false, destructive: true, idempotent: false, openWorld: false },
+  purix_migration_rollback: { title: "Roll back migration", readOnly: false, destructive: true, idempotent: false, openWorld: false },
+  purix_stats: { title: "Show observability stats", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_library: { title: "List reusable library", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_audit: { title: "Run security audit", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_audit_trail: { title: "Export audit trail", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_audit_verify: { title: "Verify audit chain", readOnly: true, destructive: false, idempotent: true, openWorld: false },
+  purix_remember: { title: "Record repository memory", readOnly: false, destructive: false, idempotent: false, openWorld: false },
+  purix_tools: { title: "Suggest vetted packages", readOnly: true, destructive: false, idempotent: true, openWorld: true },
+  purix_backup: { title: "Back up manifest", readOnly: false, destructive: true, idempotent: true, openWorld: false },
+  purix_reconcile: { title: "Reconcile interrupted operations", readOnly: false, destructive: true, idempotent: true, openWorld: false },
+};
+
+function withToolMetadata<T extends { name: string }>(tools: T[]): (T & { title: string; annotations: Record<string, boolean | string> })[] {
+  return tools.map((t) => {
+    const m = TOOL_METADATA[t.name];
+    if (!m) throw new Error(`Tool "${t.name}" has no entry in TOOL_METADATA — add title and all four annotation hints before shipping it.`);
+    return {
+      ...t,
+      title: m.title,
+      annotations: { title: m.title, readOnlyHint: m.readOnly, destructiveHint: m.destructive, idempotentHint: m.idempotent, openWorldHint: m.openWorld },
+    };
+  });
+}
+
+/** Module-private key: carries `change`'s original intent into the create handler without exposing a public parameter. */
+const CHANGE_INTENT = Symbol("purix.change.intent");
+const MAX_CHANGE_INTENT_LENGTH = 4000;
+
 function createGatedActionBudget() {
   let used = 0;
   const max = maxGatedActionsPerSession();
@@ -273,7 +357,7 @@ export function createPurixMcpServer(): Server {
   const server = new Server(
     {
       name: "purix-mcp-server",
-      version: "0.2.0-beta.0",
+      version: PURIX_VERSION,
     },
     {
       capabilities: {
@@ -282,9 +366,9 @@ export function createPurixMcpServer(): Server {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
+  server.setRequestHandler(ListToolsRequestSchema, () => {
+    return Promise.resolve({
+      tools: withToolMetadata([
         {
           name: "purix_status",
           description: "List all registered manifest components and their verification status.",
@@ -294,12 +378,37 @@ export function createPurixMcpServer(): Server {
           },
         },
         {
+          name: "purix_find",
+          description:
+            "Read-only: given plain text (a component name, a file path, a function name, or a sentence containing one), report which tracked component(s) it points to. Uses exact matching against the manifest only — no model call, nothing changes. Use it to check a target before purix_change or purix_modify. Returns outcome single, multiple (with candidates), or none.",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string", description: "Text mentioning a component id, file path, or symbol name" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "purix_change",
+          description:
+            "Describe a change in plain language and let Purix work out which component you mean, then modify it (or, if nothing matches, propose a new component). If more than one component matches, nothing runs: the candidates are returned and you should call again with componentId set. Use this when you do not already know the exact component id; use purix_modify when you do. Applying needs operator approval; set dryRun=true to see the diff first (no approval needed, nothing written).",
+          inputSchema: {
+            type: "object",
+            properties: {
+              intent: { type: "string", description: "What should change, in plain language (max 4000 chars)" },
+              componentId: { type: "string", description: "Optional exact component id — skips matching" },
+              dryRun: { type: "boolean", description: "If true, return the planned diff and gate decision; write nothing" },
+            },
+            required: ["intent"],
+          },
+        },
+        {
           name: "purix_create",
           description: "Scaffold a brand-new component from a name (Greenfield path; requires gated confirmation checkpoint). Fails if the component already exists — use purix_modify for existing components.",
           inputSchema: {
             type: "object",
             properties: {
               name: { type: "string", description: "New component name/id" },
+              dryRun: { type: "boolean", description: "If true, return the proposed files without writing or requesting approval" },
             },
             required: ["name"],
           },
@@ -312,6 +421,7 @@ export function createPurixMcpServer(): Server {
             properties: {
               componentId: { type: "string", description: "Component ID to modify" },
               instruction: { type: "string", description: "Modification instruction" },
+              dryRun: { type: "boolean", description: "If true, return the real diff and the TrustGate decision without writing or requesting approval (counts against the session budget)" },
             },
             required: ["componentId", "instruction"],
           },
@@ -344,14 +454,15 @@ export function createPurixMcpServer(): Server {
         },
         {
           name: "purix_ingest",
-          description: "Ingest an external diff patch file and verify in sandbox.",
+          description: "Ingest an external diff patch file against a tracked component, verify in sandbox, and commit for real if it passes.",
           inputSchema: {
             type: "object",
             properties: {
+              componentId: { type: "string", description: "The tracked component this diff applies to (required — ingest commits against this component's manifest entry, the same way \"purix ingest\" does)" },
               diffFilePath: { type: "string", description: "Path to diff/patch file" },
               sourceAgent: { type: "string", description: "Source agent name" },
             },
-            required: ["diffFilePath"],
+            required: ["componentId", "diffFilePath"],
           },
         },
         {
@@ -484,8 +595,8 @@ export function createPurixMcpServer(): Server {
             properties: {},
           },
         },
-      ],
-    };
+      ]),
+    });
   });
 
   server.setRequestHandler(CallToolRequestSchema, (request: any) => handleToolCall(request, gatedActionBudget));
@@ -520,7 +631,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_create") {
-        const componentName = (args as any)?.name;
+        const componentName = (args)?.name;
         if (!componentName) {
           throw new Error("name is required");
         }
@@ -529,8 +640,20 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           return textContent(`Component "${componentName}" already exists in the manifest. Use purix_modify instead.`);
         }
 
+        const dryRun = (args)?.dryRun === true;
+        const changeIntent = (args)?.[CHANGE_INTENT] as string | undefined;
+        if (dryRun && !gatedActionBudget.tryConsume("mcp_create_dry_run", componentName)) {
+          return textContent("Dry-run limit for this session reached — no further previews. Ask the operator to raise it or run the CLI equivalent.");
+        }
+
         const agentId = getAgentId();
-        const plan = await classifyGreenfield(componentName);
+        const plan = await classifyGreenfield(componentName, changeIntent);
+
+        // The model chooses plan.component_id, which can differ from the
+        // requested name; re-check the id that would actually be written.
+        if (plan.component_id !== componentName && readManifest(plan.component_id)) {
+          return textContent(`The planned component id "${plan.component_id}" already exists in the manifest — nothing written. Use purix_modify with componentId "${plan.component_id}".`);
+        }
 
         const noteLines: string[] = [];
         noteLines.push(`Proposed component: ${plan.component_id} (${plan.component_type})`);
@@ -553,10 +676,17 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           noteLines.push(formatSuggestions(toolSuggestions));
         }
 
+        // Show exactly what would be written (no "before" state for a new file).
+        noteLines.push(`\nFiles to be written:\n${formatChangeSetDiff(plan.files.map((f) => ({ path: f.path, before: null, after: f.starter_content })))}`);
+
+        if (dryRun) {
+          return textContent(`Dry run — nothing written, no approval requested.\n${noteLines.join("\n")}`);
+        }
+
         try {
           await assertAuthorizedToApprove();
         } catch (err) {
-          return textContent(`Rejected: ${err instanceof Error ? err.message : err}`);
+          return textContent(`Rejected: ${err instanceof Error ? err.message : String(err)}`);
         }
 
         const gate = await requireGatedApproval(
@@ -595,8 +725,8 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_modify") {
-        const componentId = (args as any)?.componentId;
-        const instruction = (args as any)?.instruction;
+        const componentId = (args)?.componentId;
+        const instruction = (args)?.instruction;
         if (!componentId || !instruction) {
           throw new Error("componentId and instruction are required");
         }
@@ -606,31 +736,80 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           throw new Error(`Component "${componentId}" not found in manifest.`);
         }
 
+        const dryRun = (args)?.dryRun === true;
         const agentId = getAgentId();
 
-        // Audit-trail parity fix (ADR-058's own caveat): CLI's lifecycle.ts
+        // Audit-trail parity fix (ADR-028's own caveat): CLI's lifecycle.ts
         // records "request" at the moment a modify invocation reaches the
         // pipeline. The MCP path previously skipped this entirely, meaning
         // an MCP-initiated modification left no trace in the same event
         // stream §10's observability report is built from. Mirror it here.
-        recordEvent("request", { component_id: componentId, detail: { instruction, source: "mcp", agent_id: agentId } });
+        recordEvent("request", { component_id: componentId, detail: { instruction, source: "mcp", agent_id: agentId, ...(dryRun ? { dry_run: true } : {}) } });
 
-        const gate = await requireGatedApproval(
-          gatedActionBudget,
-          "mcp_modify",
-          componentId,
-          `MCP Agent "${agentId}" requests modification on "${componentId}": "${instruction}". Approve?`,
-          `"purix modify ${componentId} <instruction>"`,
-          "Modification"
-        );
-        if (!gate.approved) {
-          return textContent(gate.rejectionMessage);
+        if (dryRun) {
+          // Dry run writes nothing, so it needs no approval — but each one
+          // still spends LLM budget and repo content goes to the provider,
+          // so it counts against the same per-session cap (MCP guidance:
+          // servers must rate-limit tool invocations).
+          if (!gatedActionBudget.tryConsume("mcp_modify_dry_run", componentId)) {
+            return textContent("Dry-run limit for this session reached — no further previews. Ask the operator to raise it or run the CLI equivalent.");
+          }
+        } else {
+          const gate = await requireGatedApproval(
+            gatedActionBudget,
+            "mcp_modify",
+            componentId,
+            `MCP Agent "${agentId}" requests modification on "${componentId}": "${instruction}". Approve?`,
+            `"purix modify ${componentId} <instruction>"`,
+            "Modification"
+          );
+          if (!gate.approved) {
+            return textContent(gate.rejectionMessage);
+          }
         }
 
-        const files = await readComponentFiles(entry, process.cwd());
-        const candidateFiles = files.map((f) => ({ path: f.path, new_content: f.content }));
-        
-        const verdict = await classifyModification(componentId, instruction, files.map(f => ({ path: f.path, content: f.content })));
+        // REAL FIX (2026-09-19, replaces the no-op write path): everything
+        // from here down mirrors lifecycle.ts's real `purix modify` command
+        // — same core functions (compilePatch / runEscalation /
+        // resolveVerification / evaluateTrustGate / commitVersionedChange),
+        // not a reimplementation of them — because the previous version of
+        // this handler built candidateFiles straight from the files'
+        // UNCHANGED existing content and never called anything that writes
+        // to disk, so a "pass" here verified nothing and committed nothing
+        // real. See PURIX-CODE-VERIFIED-GAP-REPORT-2026-09-19.md for the
+        // three-point trace of why that was true.
+        const originalFiles = await readComponentFiles(entry, process.cwd());
+
+        // §9.3 injection scanning, same as lifecycle.ts. The CLI can show a
+        // finding and ask a human whether to proceed anyway; this server has
+        // no elicitation capability (see mcpConfirmGated's own header
+        // comment), so there's no safe way to ask that question here. Fail
+        // closed instead of silently proceeding past a real finding.
+        const instructionInjectionHits = scanForInjectionAttempts(instruction);
+        if (instructionInjectionHits.length > 0) {
+          recordEvent("verification_failure", {
+            component_id: componentId,
+            operation: "instruction",
+            detail: { stage: "mcp_modify", reason: "injection_risk_in_instruction", hits: instructionInjectionHits, source: "mcp", agent_id: agentId },
+          });
+          return textContent(
+            `Refused: instruction-like text found inside the developer instruction itself (§9.3): ${instructionInjectionHits.map((h) => `"${h}"`).join("; ")}. ` +
+              `This server has no way to ask a human whether to proceed anyway, so it refuses rather than guess. Run "purix modify ${componentId} <instruction>" directly to review and confirm.`
+          );
+        }
+        const fileInjectionFindings = scanFilesForInjectionAttempts(originalFiles);
+        if (fileInjectionFindings.length > 0) {
+          recordEvent("verification_failure", {
+            component_id: componentId,
+            operation: "instruction",
+            detail: { stage: "mcp_modify", reason: "injection_risk_in_files", findings: fileInjectionFindings, source: "mcp", agent_id: agentId },
+          });
+          return textContent(
+            `Refused: instruction-like text found inside "${componentId}"'s existing file content (§9.3). This server has no way to ask a human whether to proceed anyway, so it refuses rather than guess. Run "purix modify ${componentId} <instruction>" directly to review and confirm.`
+          );
+        }
+
+        const verdict = await classifyModification(componentId, instruction, originalFiles.map((f) => ({ path: f.path, content: f.content })));
         const contractChanged = verdict.contract_changing;
 
         // Same parity fix: lifecycle.ts records "classification" with the
@@ -643,61 +822,245 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           detail: { confidence: verdict.confidence, contract_changing: contractChanged, source: "mcp", agent_id: agentId },
         });
 
-        const sandboxResult = verifyInSandbox(componentId, candidateFiles, process.cwd());
+        // Node 4: Patch Compiler — the step the old handler skipped
+        // entirely. `compiled.ok` means a deterministic transform exists;
+        // otherwise fall through to escalation, exactly like lifecycle.ts.
+        const compiled = compilePatch(verdict, originalFiles);
+        let finalFiles: { path: string; new_content: string }[];
+        let fromEscalation = false;
+        let isolationForResponse: string | undefined;
 
-        if (sandboxResult.status === "fail") {
+        if (!compiled.ok) {
+          const compileReason = (compiled).reason;
+          const esc = await runEscalation(componentId, verdict.operation, instruction, originalFiles, compileReason, process.cwd());
+          if (!esc.ok) {
+            recordEvent("verification_failure", {
+              component_id: componentId,
+              operation: verdict.operation,
+              detail: { stage: "mcp_modify", reason: esc.reason, source: "mcp", agent_id: agentId },
+            });
+            return textContent(`Escalation failed: ${esc.reason}. No real files were touched.`);
+          }
+          finalFiles = esc.files!.map((f) => ({ path: f.path, new_content: f.new_content }));
+          fromEscalation = true;
+        } else {
+          const candidateFiles = originalFiles.map((f) => {
+            const changed = compiled.files.find((c) => c.path === f.path);
+            return { path: f.path, new_content: changed ? changed.new_content : f.content };
+          });
+          const resolved = await resolveVerification(
+            componentId,
+            verdict.operation,
+            originalFiles,
+            candidateFiles,
+            "mcp_modify",
+            instruction,
+            process.cwd()
+          );
+          if (!("finalFiles" in resolved)) {
+            recordEvent("verification_failure", {
+              component_id: componentId,
+              operation: verdict.operation,
+              detail: { stage: "mcp_modify", reason: resolved.reason, source: "mcp", agent_id: agentId },
+            });
+            return textContent(`Sandbox verification and escalation both failed: ${resolved.reason ?? "unknown reason"}. No real files were touched.`);
+          }
+          finalFiles = resolved.finalFiles;
+          fromEscalation = resolved.fromEscalation;
+          if (resolved.verification.status === "pass") {
+            isolationForResponse = resolved.verification.isolation;
+          }
+        }
+
+        // Node 3c: Test-Integrity Check — same gate lifecycle.ts runs before TrustGate.
+        const changedFiles = finalFiles.filter((f) => {
+          const orig = originalFiles.find((o) => o.path === f.path);
+          return orig ? orig.content !== f.new_content : true;
+        });
+        const lang = resolveLanguage(componentId, process.cwd());
+        const provider = getLanguageProvider(lang);
+        const testIntegrityChecker = await provider?.getTestIntegrityChecker?.();
+        const testFilesBefore = originalFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
+        const testFilesAfter = finalFiles
+          .filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."))
+          .map((f) => ({ path: f.path, content: f.new_content }));
+        const testIntegrity = testIntegrityChecker
+          ? testIntegrityChecker.check(testFilesBefore, testFilesAfter)
+          : { flagged: true, findings: [{ path: "unknown", reason: `no test integrity checker registered for language ${lang} — failing closed` }] };
+        if (testIntegrity.flagged) {
+          recordEvent("test_integrity_flag", { component_id: componentId, operation: verdict.operation, detail: { findings: testIntegrity.findings, source: "mcp", agent_id: agentId } });
+        }
+
+        const hasCoverage = hasTestCoverage(changedFiles, process.cwd());
+        if (!hasCoverage) {
+          recordEvent("coverage_gate_flag", { component_id: componentId, operation: verdict.operation, detail: { changed_files: changedFiles.map((f) => f.path), source: "mcp", agent_id: agentId } });
+        }
+        recordEvent("gate_evaluation", { component_id: componentId, operation: verdict.operation, detail: { path: "instruction", source: "mcp", agent_id: agentId } });
+
+        // TrustGate (§6.2), same function lifecycle.ts uses, plus the same
+        // Deterministic Override Floor check and the same "an
+        // escalation-authored fix never auto-commits" rule.
+        const dofPatterns = loadDofPatterns(process.cwd());
+        const dof = checkDeterministicOverrideFloor(entry.files, dofPatterns);
+        let decision = evaluateTrustGate({
+          confidence: verdict.confidence,
+          contractChanging: verdict.contract_changing,
+          injectionSuspected: verdict.suspicious_injected_instruction,
+          hasCoverage,
+          testIntegrity: { flagged: testIntegrity.flagged, reason: testIntegrity.findings.map((f) => `${f.path}: ${f.reason}`).join("; ") || undefined },
+        });
+        if (fromEscalation && decision.action === "auto_commit") {
+          decision = { action: "human_confirm", reason: `escalation-authored fix always requires confirmation, regardless of the original classifier confidence` };
+        }
+        if (dof.hit && decision.action === "auto_commit") {
+          decision = { action: "human_confirm", reason: `touches a Deterministic Override Floor path ("${dof.matchedPath}" matches "${dof.matchedPattern}") — always requires confirmation regardless of confidence (§E-DOF)` };
+        }
+
+        if (dryRun) {
+          const diff = formatChangeSetDiff(
+            finalFiles.map((f) => ({
+              path: f.path,
+              before: originalFiles.find((o) => o.path === f.path)?.content ?? null,
+              after: f.new_content,
+            }))
+          );
+          return textContent(
+            `Dry run — nothing written, no approval requested.\nTrustGate: ${decision.action} — ${decision.reason}\n` +
+              (decision.action === "abort" ? "A real run would stop here.\n" : `A real run would: ${decision.action}${decision.action === "human_confirm" ? " (operator approval required)" : ""}.\n`) +
+              `\nDiff:\n${diff}`
+          );
+        }
+
+        if (decision.action === "abort") {
           recordEvent("verification_failure", {
             component_id: componentId,
             operation: verdict.operation,
-            detail: { stage: "mcp_modify", reason: sandboxResult.reason, source: "mcp", agent_id: agentId },
+            detail: { stage: "mcp_modify", reason: decision.reason, source: "mcp", agent_id: agentId },
           });
-          return textContent(`Sandbox verification failed: ${sandboxResult.reason}`);
+          return textContent(`TrustGate aborted: ${decision.reason}. No real files were touched. Rephrase the instruction and try again.`);
         }
+        // decision.action is "human_confirm" or "auto_commit" here. This
+        // server has no interactive elicitation, so a "human_confirm"
+        // outcome is treated as satisfied by the gated approval already
+        // obtained above (requireGatedApproval, before this handler did any
+        // real work) — that approval covers the action a human is being
+        // asked to confirm; it doesn't invent a second, silent auto-approve
+        // for something nobody agreed to yet.
 
-        if (sandboxResult.status === "not_installed") {
-          recordEvent("verification_failure", {
-            component_id: componentId,
-            operation: verdict.operation,
-            detail: { stage: "mcp_modify", reason: sandboxResult.reason, not_installed: true, source: "mcp", agent_id: agentId },
-          });
-          return textContent(`Tooling not installed: ${sandboxResult.reason} (${sandboxResult.actionHint ?? ""})`);
-        }
-
-        recordEvent("verification_pass", {
-          component_id: componentId,
+        const beforeSnapshot = originalFiles.map((f) => ({ path: f.path, content: f.content }));
+        const result = await commitVersionedChange({
+          componentId,
+          entry,
+          beforeSnapshot,
+          finalFiles,
           operation: verdict.operation,
-          detail: { stage: "mcp_modify", source: "mcp", agent_id: agentId, isolation: sandboxResult.isolation },
-        });
-
-        entry.current_version += 1;
-        entry.version_history.push({
-          version: entry.current_version,
-          operation: "mcp_modify",
-          patch_ref: instruction,
-          contract_changed: contractChanged,
-          timestamp: new Date().toISOString(),
+          patchRef: `v${entry.current_version + 1}-${verdict.operation}`,
+          contractChanged,
           provenance: { source_type: "instruction", source_agent: agentId },
+          targetDir: process.cwd(),
+          reRunCommandHint: `"purix modify ${componentId} <instruction>"`,
         });
-        writeManifest(entry);
+        // commitVersionedChange is shared with the CLI and sets
+        // process.exitCode on its failure paths, which is meaningless (and
+        // actively wrong) in this long-running server process — reset it
+        // immediately so a failed commit here can never leak into the exit
+        // code of a later, unrelated process shutdown.
+        process.exitCode = undefined;
+        if (!result.ok) {
+          return textContent(`Commit failed for "${componentId}" — no real files were touched, or a conflicting write was rolled back. Re-run "purix modify ${componentId} <instruction>" against current state.`);
+        }
+        const newVersion = result.newVersion;
 
-        // BUG FIX (GAPS-REPORT §2.3): a "pass" reached with no sandbox
-        // isolation (isolation: "none" — no bwrap/sandbox-exec available,
-        // or, for TypeScript's tsc step specifically, a check that never
-        // runs through the sandbox layer at all) is a materially weaker
-        // guarantee than one reached under real containment, and an
-        // agent reading this response has no other way to tell the
-        // difference between the two.
+        if (contractChanged) {
+          const plan = buildMigrationPlan(componentId, verdict.operation, beforeSnapshot, finalFiles.map((f) => ({ path: f.path, content: f.new_content })));
+          stageMigration(componentId, verdict.operation, newVersion - 1, newVersion, beforeSnapshot, finalFiles.map((f) => ({ path: f.path, content: f.new_content })));
+          reVerifyCascadeDependents(entry, process.cwd());
+          void plan;
+        }
+
         const isolationNote =
-          sandboxResult.isolation === "none" ? " (⚠ isolation: none — this check ran without sandbox containment)" : "";
+          isolationForResponse === "none" ? " (⚠ isolation: none — this check ran without sandbox containment)" : "";
         return textContent(
-          `Modification verified and committed for "${componentId}" (v${entry.current_version}, contract_changed: ${contractChanged}). Sandbox execution passed successfully.${isolationNote}`
+          `Modification verified and committed for "${componentId}" (v${newVersion}, contract_changed: ${contractChanged}, files_written: ${finalFiles.length}).${isolationNote}`
         );
       }
 
+      if (name === "purix_find") {
+        const query = (args)?.query;
+        if (typeof query !== "string" || query.trim() === "") throw new Error("query is required");
+        const r = resolveTarget({ mentions: extractMentions(query), manifest: listManifest() });
+        const brief = (c: { componentId: string; reason: string; matchedOn: string }) => ({ componentId: c.componentId, reason: c.reason, matchedOn: c.matchedOn });
+        return textContent(
+          JSON.stringify(
+            r.outcome === "single"
+              ? { outcome: "single", target: brief(r.target) }
+              : r.outcome === "multiple"
+              ? { outcome: "multiple", candidates: r.candidates.slice(0, 10).map(brief), next: "Pass one of these ids as componentId to purix_change or purix_modify." }
+              : { outcome: "none", next: "No tracked component matches. purix_change would propose a new component." },
+            null,
+            2
+          )
+        );
+      }
+
+      if (name === "purix_change") {
+        const intent = (args)?.intent;
+        const componentId = (args)?.componentId;
+        const dryRun = (args)?.dryRun === true;
+        if (typeof intent !== "string" || intent.trim() === "") throw new Error("intent is required");
+        if (intent.length > MAX_CHANGE_INTENT_LENGTH) throw new Error(`intent is too long (max ${MAX_CHANGE_INTENT_LENGTH} characters)`);
+        if (componentId !== undefined && typeof componentId !== "string") throw new Error("componentId must be a string");
+
+        const result = await resolveChangeTarget({
+          intent,
+          manifest: listManifest(),
+          componentId,
+          // The model-assisted tier runs only when exact matching found
+          // nothing; it sends the intent text only, and each use counts
+          // against the session budget.
+          extractWithLlm: (text) => {
+            if (!gatedActionBudget.tryConsume("mcp_change_llm_match", null)) {
+              throw new Error("session limit for model-assisted matching reached");
+            }
+            return extractMentionCandidates(text);
+          },
+        });
+
+        if (result.outcome === "multiple") {
+          return textContent(
+            JSON.stringify(
+              {
+                outcome: "multiple",
+                candidates: result.candidates.slice(0, 10).map((c) => ({ componentId: c.componentId, matchedOn: describeMatch(c) })),
+                next: "Nothing was changed. Call purix_change again with componentId set to the one you mean.",
+              },
+              null,
+              2
+            )
+          );
+        }
+
+        if (result.outcome === "single") {
+          const why = result.source === "override" ? "given componentId" : describeMatch(result.target);
+          const inner: any = await handleToolCall(
+            { params: { name: "purix_modify", arguments: { componentId: result.target.componentId, instruction: intent, dryRun } } },
+            gatedActionBudget
+          );
+          return textContent(`Target: ${result.target.componentId} (${why})\n${inner.content[0]?.text ?? ""}`);
+        }
+
+        const derived = deriveComponentName(intent);
+        const inner: any = await handleToolCall(
+          { params: { name: "purix_create", arguments: { name: derived, dryRun, [CHANGE_INTENT]: intent } } },
+          gatedActionBudget
+        );
+        return textContent(`No tracked component matches this intent — proposing a new one.\n${inner.content[0]?.text ?? ""}`);
+      }
+
       if (name === "purix_delete") {
-        const componentId = (args as any)?.componentId;
-        const force = Boolean((args as any)?.force);
-        const deleteFiles = Boolean((args as any)?.deleteFiles);
+        const componentId = (args)?.componentId;
+        const force = Boolean((args)?.force);
+        const deleteFiles = Boolean((args)?.deleteFiles);
         if (!componentId) {
           throw new Error("componentId is required");
         }
@@ -715,13 +1078,24 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           );
         }
 
+        // TEST-REPORT F1: same guard as the CLI's `delete --files` — the
+        // whole-codebase index component tracks every project file, so
+        // deleteFiles on it would erase the project. Refuse outright.
+        if (deleteFiles && entry.component_type === "codebase_index") {
+          return textContent(
+            `Refused: "${componentId}" is the whole-codebase index — deleteFiles would delete all ${entry.files.length} tracked file(s) in the project. ` +
+              `Delete the manifest entry without deleteFiles, or remove files yourself.`
+          );
+        }
+        const filesOnDiskCount = deleteFiles ? entry.files.filter((relPath) => existsSync(join(process.cwd(), relPath))).length : 0;
+
         const agentId = getAgentId();
 
         const gate = await requireGatedApproval(
           gatedActionBudget,
           "mcp_delete",
           componentId,
-          `MCP Agent "${agentId}" requests permanent deletion of "${componentId}" from the manifest${deleteFiles ? " and its files from disk" : ""}. This cannot be undone. Approve?`,
+          `MCP Agent "${agentId}" requests permanent deletion of "${componentId}" from the manifest${deleteFiles ? ` and ${filesOnDiskCount} file(s) from disk (${entry.files.slice(0, 5).join(", ")}${entry.files.length > 5 ? ", …" : ""})` : ""}. This cannot be undone. Approve?`,
           `"purix delete ${componentId}"`,
           "Deletion"
         );
@@ -746,7 +1120,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
               try {
                 rmSync(fullPath);
               } catch (err) {
-                fileWarnings.push(`couldn't remove ${relPath}: ${err instanceof Error ? err.message : err}`);
+                fileWarnings.push(`couldn't remove ${relPath}: ${err instanceof Error ? err.message : String(err)}`);
               }
             }
           }
@@ -765,7 +1139,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_index") {
-        const full = Boolean((args as any)?.full);
+        const full = Boolean((args)?.full);
         const agentId = getAgentId();
         if (full) {
           const gate = await requireGatedApproval(
@@ -780,79 +1154,248 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
             return textContent(gate.rejectionMessage);
           }
         }
-        const baseDir = (args as any)?.path ? resolve(process.cwd(), (args as any).path) : process.cwd();
-        const langs = (args as any)?.languages ? String((args as any).languages).split(",") : undefined;
+        const baseDir = (args)?.path ? resolve(process.cwd(), (args).path) : process.cwd();
+        const langs = (args)?.languages ? String((args).languages).split(",") : undefined;
         const result = await runIndex(baseDir, { full, languages: langs });
         return textContent(JSON.stringify(result, null, 2));
       }
 
       if (name === "purix_ingest") {
-        const diffFilePath = (args as any)?.diffFilePath;
+        const componentId = (args)?.componentId;
+        const diffFilePath = (args)?.diffFilePath;
         const agentId = getAgentId();
         // sourceAgent is caller-supplied app-level provenance about who
         // authored the diff (may be arbitrary/unverified text); agentId
         // above is this MCP session's own identity and is recorded
         // alongside it so the two are never conflated in the audit trail.
-        const sourceAgent = (args as any)?.sourceAgent ?? agentId;
-        if (!diffFilePath) {
-          throw new Error("diffFilePath is required");
+        const sourceAgent = (args)?.sourceAgent ?? agentId;
+        if (!componentId || !diffFilePath) {
+          throw new Error("componentId and diffFilePath are required");
         }
 
+        // REAL FIX (2026-09-19, replaces the no-op write path): the
+        // previous version of this handler verified real diff content in
+        // the sandbox but never called anything that writes to disk or
+        // updates the manifest — a "pass" here committed nothing. This
+        // mirrors lifecycle.ts's real `purix ingest` command, which is why
+        // componentId is now required (the CLI command ingests against a
+        // tracked component's manifest entry; there's no real commit
+        // target without one). See
+        // PURIX-CODE-VERIFIED-GAP-REPORT-2026-09-19.md for the trace.
+        const entry = readManifest(componentId);
+        if (!entry) {
+          return textContent(`No manifest entry for "${componentId}". Run "purix create" first, or ingest against the right component.`);
+        }
+
+        const drift = await checkDrift(entry, process.cwd());
+        if (drift.drifted) {
+          return textContent(`Refused: "${componentId}" has drifted from its last known state. Run "purix migration accept-drift ${componentId}" first, then retry this ingest.`);
+        }
+        const originalFiles = drift.liveFiles;
+
         const ingestRes = await ingestDiffFromFile(diffFilePath, sourceAgent, process.cwd());
-        recordEvent("request", { component_id: null, detail: { diffFilePath, sourceAgent, source: "mcp", agent_id: agentId } });
+        recordEvent("request", { component_id: componentId, detail: { diffFilePath, sourceAgent, source: "mcp", agent_id: agentId } });
         if (!ingestRes.ok) {
           recordEvent("verification_failure", {
-            component_id: null,
+            component_id: componentId,
             operation: "diff_ingest",
             detail: { stage: "mcp_ingest", reason: ingestRes.reason, source: "mcp", agent_id: agentId },
           });
           return textContent(`Ingest failed: ${ingestRes.reason}`);
         }
 
-        const sandboxResult = verifyInSandbox("ingested-diff", ingestRes.files, process.cwd());
-        if (sandboxResult.status === "fail") {
+        const deletions = ingestRes.files.filter((f) => f.status === "deleted");
+        if (deletions.length > 0) {
+          return textContent(`Refused: this diff deletes file(s) (${deletions.map((f) => f.path).join(", ")}) — deletion isn't wired into ingest. Handle deletions via purix_delete instead.`);
+        }
+        const trackedPaths = new Set(entry.files);
+        const untrackedModified = ingestRes.files.filter((f) => f.status === "modified" && !trackedPaths.has(f.path));
+        if (untrackedModified.length > 0) {
+          return textContent(`Refused: this diff modifies file(s) not tracked by "${componentId}": ${untrackedModified.map((f) => f.path).join(", ")}. Link the right component first.`);
+        }
+        const newFilePaths = ingestRes.files.filter((f) => f.status === "added").map((f) => f.path);
+
+        // §9.3 injection scanning over the diff content — same discipline
+        // purix_modify applies above, same fail-closed reasoning (no
+        // elicitation capability here to ask a human whether to proceed).
+        const injectionFindings = scanDiffForInjectionAttempts(
+          ingestRes.files.map((f) => ({ path: f.path, old_content: null, new_content: f.new_content, status: f.status }))
+        );
+        if (injectionFindings.length > 0) {
           recordEvent("verification_failure", {
-            component_id: "ingested-diff",
+            component_id: componentId,
             operation: "diff_ingest",
-            detail: { stage: "mcp_ingest", reason: sandboxResult.reason, source: "mcp", agent_id: agentId },
+            detail: { stage: "mcp_ingest", reason: "injection_risk_in_diff", findings: injectionFindings, source: "mcp", agent_id: agentId },
           });
-          return textContent(`Sandbox verification failed on ingested diff: ${sandboxResult.reason}`);
+          return textContent(`Refused: instruction-like text found in the ingested diff content (§9.3). This server has no way to ask a human whether to proceed anyway. Run "purix ingest ${componentId} ${diffFilePath}" directly to review and confirm.`);
         }
 
-        // Bug fix (2026-09-09): verifyInSandbox has a third status —
-        // "not_installed" — that this branch previously fell straight
-        // through, past the "fail" check, and into the pass path below.
-        // That meant an ingest into a project with no detectable test
-        // framework got recorded as verification_pass and reported back
-        // as "Successfully ingested and verified" despite verification
-        // never actually running. purix_modify already handled this
-        // status correctly; this brings purix_ingest to parity with it.
-        if (sandboxResult.status === "not_installed") {
+        const diffVerdict = await classifyDiff(
+          componentId,
+          sourceAgent,
+          ingestRes.files.map((f) => ({
+            path: f.path,
+            old_content: f.status === "added" ? null : originalFiles.find((o) => o.path === f.path)?.content ?? null,
+            new_content: f.new_content,
+            status: f.status,
+          }))
+        );
+        recordEvent("classification", {
+          component_id: componentId,
+          operation: diffVerdict.operation,
+          detail: { confidence: diffVerdict.confidence, contract_changing: diffVerdict.contract_changing, path: "diff", source: "mcp", agent_id: agentId },
+        });
+
+        const candidateFinalFiles = [
+          ...originalFiles.map((f) => {
+            const changed = ingestRes.files.find((c) => c.path === f.path);
+            return { path: f.path, new_content: changed ? changed.new_content : f.content };
+          }),
+          ...ingestRes.files.filter((f) => f.status === "added").map((f) => ({ path: f.path, new_content: f.new_content })),
+        ];
+
+        const resolved = await resolveVerification(
+          componentId,
+          "diff_ingest",
+          originalFiles,
+          candidateFinalFiles,
+          "mcp_ingest",
+          `apply ingested diff from ${sourceAgent}`,
+          process.cwd()
+        );
+        if (!("finalFiles" in resolved)) {
           recordEvent("verification_failure", {
-            component_id: "ingested-diff",
+            component_id: componentId,
             operation: "diff_ingest",
-            detail: { stage: "mcp_ingest", reason: sandboxResult.reason, not_installed: true, source: "mcp", agent_id: agentId },
+            detail: { stage: "mcp_ingest", reason: resolved.reason, source: "mcp", agent_id: agentId },
           });
-          return textContent(`Tooling not installed: ${sandboxResult.reason} (${sandboxResult.actionHint ?? ""})`);
+          return textContent(`Sandbox verification and escalation both failed on ingested diff: ${resolved.reason ?? "unknown reason"}. No real files were touched.`);
+        }
+        const workingFiles = resolved.finalFiles;
+        const fromEscalation = resolved.fromEscalation;
+        const isolationForResponse = resolved.verification.status === "pass" ? resolved.verification.isolation : undefined;
+
+        const changedFiles = workingFiles.filter((f) => {
+          const orig = originalFiles.find((o) => o.path === f.path);
+          return orig ? orig.content !== f.new_content : true;
+        });
+        const lang = resolveLanguage(componentId, process.cwd());
+        const provider = getLanguageProvider(lang);
+        const testIntegrityChecker = await provider?.getTestIntegrityChecker?.();
+        const testFilesBefore = originalFiles.filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."));
+        const testFilesAfter = workingFiles
+          .filter((f) => testIntegrityChecker?.isTestFile(f.path) ?? f.path.includes(".test."))
+          .map((f) => ({ path: f.path, content: f.new_content }));
+        const testIntegrity = testIntegrityChecker
+          ? testIntegrityChecker.check(testFilesBefore, testFilesAfter)
+          : { flagged: true, findings: [{ path: "unknown", reason: `no test integrity checker registered for language ${lang} — failing closed` }] };
+        if (testIntegrity.flagged) {
+          recordEvent("test_integrity_flag", { component_id: componentId, operation: "diff_ingest", detail: { findings: testIntegrity.findings, source: "mcp", agent_id: agentId } });
+        }
+        const hasCoverage = hasTestCoverage(changedFiles, process.cwd());
+        if (!hasCoverage) {
+          recordEvent("coverage_gate_flag", { component_id: componentId, operation: "diff_ingest", detail: { changed_files: changedFiles.map((f) => f.path), source: "mcp", agent_id: agentId } });
+        }
+        recordEvent("gate_evaluation", { component_id: componentId, operation: "diff_ingest", detail: { path: "diff", source: "mcp", agent_id: agentId } });
+
+        let decision = evaluateTrustGate({
+          confidence: diffVerdict.confidence,
+          contractChanging: diffVerdict.contract_changing,
+          injectionSuspected: diffVerdict.suspicious_injected_instruction,
+          hasCoverage,
+          testIntegrity: { flagged: testIntegrity.flagged, reason: testIntegrity.findings.map((f) => `${f.path}: ${f.reason}`).join("; ") || undefined },
+        });
+        if (fromEscalation && decision.action === "auto_commit") {
+          decision = { action: "human_confirm", reason: `escalation-authored fix always requires confirmation, regardless of the original diff-classify confidence` };
+        }
+        if (decision.action === "abort") {
+          recordEvent("verification_failure", {
+            component_id: componentId,
+            operation: "diff_ingest",
+            detail: { stage: "mcp_ingest", reason: decision.reason, source: "mcp", agent_id: agentId },
+          });
+          return textContent(`TrustGate aborted: ${decision.reason}. No real files were touched — the diff was not applied.`);
+        }
+        // RESTORED 2026-09-25 (regression from the IDEA-078 merge — see the
+        // 2026-09-25 session handoff): unlike purix_modify, which calls
+        // requireGatedApproval BEFORE any verification work so a later
+        // "human_confirm" verdict is already covered by that earlier
+        // approval, purix_ingest never calls requireGatedApproval anywhere
+        // else in this handler. Without the block below, a "human_confirm"
+        // verdict (contract-changing, low-confidence, a DOF hit, or an
+        // escalation-authored diff) falls straight through to
+        // commitVersionedChange with no human ever asked. The CLI's own
+        // `purix ingest` (lifecycle.ts) doesn't have this gap — it renders
+        // the diff via formatChangeSetDiff and gates on confirmGated() per
+        // IDEA-078 Decision 1. This mirrors that path.
+        if (decision.action === "human_confirm") {
+          const diffText = formatChangeSetDiff(
+            workingFiles.map((f) => ({
+              path: f.path,
+              before: originalFiles.find((o) => o.path === f.path)?.content ?? null,
+              after: f.new_content,
+            }))
+          );
+          const checkpointKind = fromEscalation ? "escalation_fix" : "diff_ingest";
+          const gate = await requireGatedApproval(
+            gatedActionBudget,
+            checkpointKind,
+            componentId,
+            `MCP Agent "${agentId}" requests committing an ingested diff for "${componentId}" (${decision.reason}).\n\nDiff:\n${diffText}\n\nApply this change to real files now?`,
+            `"purix ingest ${componentId} ${diffFilePath}"`,
+            "Diff ingest"
+          );
+          if (!gate.approved) {
+            recordEvent("verification_failure", {
+              component_id: componentId,
+              operation: "diff_ingest",
+              detail: { stage: "mcp_ingest", reason: "human_confirm_rejected", source: "mcp", agent_id: agentId },
+            });
+            return textContent(gate.rejectionMessage);
+          }
         }
 
         recordEvent("verification_pass", {
-          component_id: "ingested-diff",
+          component_id: componentId,
           operation: "diff_ingest",
-          detail: { stage: "mcp_ingest", file_count: ingestRes.files.length, source: "mcp", agent_id: agentId, isolation: sandboxResult.isolation },
+          detail: { stage: "mcp_ingest", file_count: workingFiles.length, source: "mcp", agent_id: agentId, isolation: isolationForResponse },
         });
 
-        // BUG FIX (GAPS-REPORT §2.3): see the identical note on the
-        // purix_modify pass response above — isolation: "none" is a
-        // materially weaker guarantee and needs to be visible here too.
+        const beforeSnapshot = originalFiles.map((f) => ({ path: f.path, content: f.content }));
+        const result = await commitVersionedChange({
+          componentId,
+          entry,
+          beforeSnapshot,
+          finalFiles: workingFiles,
+          operation: "diff_ingest",
+          patchRef: `v${entry.current_version + 1}-diff_ingest`,
+          contractChanged: diffVerdict.contract_changing,
+          provenance: { source_type: "external_diff", source_agent: sourceAgent },
+          targetDir: process.cwd(),
+          reRunCommandHint: `"purix ingest ${componentId} ${diffFilePath}"`,
+          newFilePaths,
+        });
+        // Same server-safety reset as purix_modify — commitVersionedChange
+        // is shared with the CLI and sets process.exitCode on failure,
+        // which must never leak into this long-running server's own exit.
+        process.exitCode = undefined;
+        if (!result.ok) {
+          return textContent(`Commit failed for "${componentId}" — no real files were touched, or a conflicting write was rolled back. Re-run against current state.`);
+        }
+        const newVersion = result.newVersion;
+
+        if (diffVerdict.contract_changing) {
+          reVerifyCascadeDependents(entry, process.cwd());
+        }
+
         const isolationNote =
-          sandboxResult.isolation === "none" ? " (⚠ isolation: none — this check ran without sandbox containment)" : "";
-        return textContent(`Successfully ingested and verified diff across ${ingestRes.files.length} files.${isolationNote}`);
+          isolationForResponse === "none" ? " (⚠ isolation: none — this check ran without sandbox containment)" : "";
+        return textContent(`Successfully ingested and committed diff for "${componentId}" (v${newVersion}, files_written: ${workingFiles.length}).${isolationNote}`);
       }
 
       if (name === "purix_accept_drift") {
-        const componentId = (args as any)?.componentId;
-        const driftAgent = (args as any)?.agent ?? null;
+        const componentId = (args)?.componentId;
+        const driftAgent = (args)?.agent ?? null;
         if (!componentId) {
           throw new Error("componentId is required");
         }
@@ -874,7 +1417,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           "mcp_accept_drift",
           componentId,
           `MCP Agent "${agentId}" requests accepting current on-disk state of "${componentId}" as the new baseline. Approve?`,
-          `"purix accept-drift ${componentId}"`,
+          `"purix migration accept-drift ${componentId}"`,
           "Accept-drift"
         );
         if (!gate.approved) {
@@ -890,13 +1433,13 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_migrations_list") {
-        const componentId = (args as any)?.componentId;
+        const componentId = (args)?.componentId;
         const records = listMigrations(componentId);
         return textContent(JSON.stringify(records, null, 2));
       }
 
       if (name === "purix_migration_activate") {
-        const id = (args as any)?.id;
+        const id = (args)?.id;
         if (!id) {
           throw new Error("id is required");
         }
@@ -907,7 +1450,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           "mcp_migration_activate",
           null,
           `MCP Agent "${agentId}" requests activating migration ${id} and writing it to real files. Approve?`,
-          `"purix migration-activate"`,
+          `"purix migration activate"`,
           "Migration activation"
         );
         if (!gate.approved) {
@@ -919,7 +1462,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_migration_rollback") {
-        const id = (args as any)?.id;
+        const id = (args)?.id;
         if (!id) {
           throw new Error("id is required");
         }
@@ -930,7 +1473,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
           "mcp_migration_rollback",
           null,
           `MCP Agent "${agentId}" requests rolling back migration ${id}. Approve?`,
-          `"purix migration-rollback"`,
+          `"purix migration rollback"`,
           "Migration rollback"
         );
         if (!gate.approved) {
@@ -964,8 +1507,8 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
 
       if (name === "purix_audit_trail") {
         requireEntitlement("auditExport");
-        const format = (args as any)?.format === "json" ? "json" : "markdown";
-        const report = buildAuditTrail({ componentId: (args as any)?.componentId, since: (args as any)?.since });
+        const format = (args)?.format === "json" ? "json" : "markdown";
+        const report = buildAuditTrail({ componentId: (args)?.componentId, since: (args)?.since });
         const output = format === "json" ? formatAuditTrailJson(report) : formatAuditTrailMarkdown(report);
         return textContent(output);
       }
@@ -979,8 +1522,8 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_remember") {
-        const note = (args as any)?.note;
-        const componentId = (args as any)?.componentId;
+        const note = (args)?.note;
+        const componentId = (args)?.componentId;
         if (!note) {
           throw new Error("note is required");
         }
@@ -989,7 +1532,7 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_tools") {
-        const purpose = (args as any)?.purpose;
+        const purpose = (args)?.purpose;
         if (!purpose) {
           throw new Error("purpose is required");
         }
@@ -998,11 +1541,19 @@ async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof
       }
 
       if (name === "purix_backup") {
-        const outFile = (args as any)?.outFile;
+        const outFile = (args)?.outFile;
         if (!outFile) {
           throw new Error("outFile is required");
         }
+        // Path containment (2026-09-24): this tool writes a file with no
+        // approval checkpoint, so an agent-supplied path must not be able
+        // to leave the project directory (e.g. "../../.bashrc").
+        if (typeof outFile !== "string") throw new Error("outFile must be a string");
         const resolvedOut = resolve(process.cwd(), outFile);
+        const rel = relative(process.cwd(), resolvedOut);
+        if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+          throw new Error(`outFile must be a file path inside the project directory (got "${outFile}").`);
+        }
         const data = exportManifestData();
         await writeFile(resolvedOut, JSON.stringify(data, null, 2), "utf-8");
         return textContent(`Backed up ${data.manifest.length} component(s) to ${resolvedOut}.`);

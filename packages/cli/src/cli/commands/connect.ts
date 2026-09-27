@@ -33,7 +33,7 @@ export function registerConnectCommand(program: Command) {
       ]);
 
       const cwd = process.cwd();
-      const targets: AgentInput[] = agent ? [agent as AgentInput] : detectProjectAgents(cwd);
+      const targets: AgentInput[] = agent ? [agent] : detectProjectAgents(cwd);
 
       if (targets.length === 0) {
         console.log(
@@ -49,6 +49,7 @@ export function registerConnectCommand(program: Command) {
           console.log(`✅ Connected purix to ${target} — wrote ${result.path}`);
         } else {
           console.log(`❌ Failed to connect purix to ${target}: ${result.error ?? "unknown error"}`);
+          process.exitCode = 1;
         }
       }
     });

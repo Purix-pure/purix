@@ -14,13 +14,14 @@
 // needing to mock a real LLM call to prove it.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyInSandbox } from "./sandbox";
 import { closeDb } from "../manifest/store";
 import { registerLanguageProvider } from "../language/registry";
 import type { LanguageProvider } from "../language/provider";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 let originalCwd: string;
 let tmpDir: string;
@@ -47,7 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("verifyInSandbox — secret scan gate (ADR-037)", () => {

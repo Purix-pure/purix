@@ -17,7 +17,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigStore } from "./config";
@@ -29,6 +29,7 @@ import {
   __pollOnceForTests,
 } from "./scheduler";
 import { resolveTsxCommand } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const tsxCommand = resolveTsxCommand();
 const workerPath = join(import.meta.dirname, "scheduler_process_worker.ts");
@@ -48,7 +49,7 @@ function killProcessTree(child: Pick<ChildProcess, "pid" | "kill">): void {
   } catch {
     try {
       child.kill("SIGKILL");
-    } catch {}
+    } catch { /* test cleanup — process may already be dead */ }
   }
 }
 
@@ -68,7 +69,7 @@ describe("Part 2: scheduler live interval + enable/disable (in-process, determin
     stopScheduler();
     closeDb();
     process.chdir(oldCwd);
-    rmSync(dir, { recursive: true, force: true });
+    safeRmSync(dir);
     delete process.env.PURIX_SCHEDULER_POLL_MS;
   });
 
@@ -157,7 +158,7 @@ describe("Part 2: scheduler hot reload — real end-to-end across processes", { 
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    safeRmSync(dir);
   });
 
   function countTicks(): number {
@@ -195,7 +196,7 @@ describe("Part 2: scheduler hot reload — real end-to-end across processes", { 
       detached: process.platform !== "win32",
     });
     let workerStderr = "";
-    worker.stderr!.on("data", (d: Buffer) => (workerStderr += d.toString()));
+    worker.stderr.on("data", (d: Buffer) => (workerStderr += d.toString()));
     const workerPid = worker.pid;
 
     try {
@@ -235,7 +236,9 @@ describe("Part 2: scheduler hot reload — real end-to-end across processes", { 
       expect(afterDisable).toBe(atDisable); // no further ticks once disabled, no restart involved
     } finally {
       if (worker.exitCode === null) killProcessTree(worker);
-      await new Promise<void>((r) => worker.on("exit", () => r()));
+      if (worker.exitCode === null && worker.signalCode === null) {
+        await new Promise<void>((r) => worker.once("exit", () => r()));
+      }
     }
   });
 });

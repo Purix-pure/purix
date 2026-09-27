@@ -37,7 +37,7 @@ export const typescriptProvider: LanguageProvider = {
         if (deps["typescript"] || deps["ts-node"] || deps["tsx"]) {
           return true;
         }
-      } catch {}
+      } catch { /* best-effort package.json probe */ }
     }
     return false;
   },
@@ -64,7 +64,8 @@ export const typescriptProvider: LanguageProvider = {
     return { pinning, vulnerabilities: scan.findings, ran: scan.ran };
   },
 
-  async getFingerprint(baseDir: string = process.cwd()): Promise<Record<string, string>> {
+  getFingerprint(baseDir: string = process.cwd()): Promise<Record<string, string>> {
+    return Promise.resolve((() => {
     const lockPath = resolve(baseDir, "package-lock.json");
     if (existsSync(lockPath)) {
         const lock = JSON.parse(readFileSync(lockPath, "utf-8"));
@@ -83,5 +84,6 @@ export const typescriptProvider: LanguageProvider = {
         return { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
     }
     return {};
+    })());
   }
 };

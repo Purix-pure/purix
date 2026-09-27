@@ -13,7 +13,7 @@ function getWebhookSecret(): string {
   try {
     const stored = getSecret("purix_webhook_secret");
     if (stored) return stored;
-  } catch {}
+  } catch { /* no webhook secret stored yet — fall back to the dev default below */ }
   return "dev-webhook-secret";
 }
 
@@ -84,6 +84,6 @@ export async function notifyGatedConfirmation(
       signal: AbortSignal.timeout(3000),
     }, 1, 1000);
   } catch (err) {
-    console.warn(`  [notify] webhook call failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+    console.warn(`  [notify] webhook call failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 }

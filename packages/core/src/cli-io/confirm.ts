@@ -1,5 +1,5 @@
 // packages/core/src/cli-io/confirm.ts (moved from src/cli/confirm.ts — security/auth.ts and recovery/escalate.ts import this directly, so it must live in core, not in the cli package, or the core→cli boundary check would fail)
-import * as readline from "node:readline/promises";
+import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 
 /**
@@ -28,19 +28,75 @@ export function isAutoConfirmActive(): boolean {
   return process.env.NODE_ENV === "test" && process.env.AUTO_CONFIRM === "1";
 }
 
+// One process-wide line reader shared by every prompt (confirm() and the
+// login prompts). Two failure modes drove this (TEST-REPORT F6/F7):
+//   F6 — readline/promises' question() never settles when stdin reaches EOF
+//        (CI, `</dev/null`, closed pipe), so the awaited promise hung, Node
+//        drained the event loop and exited 13 ("unsettled top-level await")
+//        with the repo lock still on disk.
+//   F7 — a new readline interface per prompt lets the first interface
+//        swallow all buffered piped input, so the second prompt saw EOF.
+// Lines that arrive before anyone asks are queued; EOF resolves pending and
+// future prompts with `null` so callers can fail closed.
+let reader: readline.Interface | null = null;
+let inputEnded = false;
+const lineQueue: string[] = [];
+const waiters: Array<(line: string | null) => void> = [];
+
+function ensureReader(): readline.Interface {
+  if (reader) return reader;
+  const rl = readline.createInterface({ input: stdin, terminal: false });
+  rl.on("line", (line) => {
+    const waiter = waiters.shift();
+    if (waiter) waiter(line);
+    else lineQueue.push(line);
+    // Nobody is waiting: pause so an idle reader never keeps the process alive.
+    if (waiters.length === 0) rl.pause();
+  });
+  rl.on("close", () => {
+    inputEnded = true;
+    for (const waiter of waiters.splice(0)) waiter(null);
+  });
+  reader = rl;
+  return rl;
+}
+
+/**
+ * Reads one line from stdin. Resolves `null` when stdin has ended and no
+ * queued line remains — never hangs on EOF.
+ */
+export function readInputLine(): Promise<string | null> {
+  const queued = lineQueue.shift();
+  if (queued !== undefined) return Promise.resolve(queued);
+  if (inputEnded || stdin.readableEnded) return Promise.resolve(null);
+  const rl = ensureReader();
+  return new Promise<string | null>((resolve) => {
+    waiters.push(resolve);
+    rl.resume();
+  });
+}
+
+/** Writes `question` and reads one answer; `null` means no input was available. */
+export async function promptLine(question: string): Promise<string | null> {
+  stdout.write(question);
+  const line = await readInputLine();
+  if (line === null) stdout.write("\n");
+  return line;
+}
+
 /**
  * Section 20 human checkpoint: blocks until the developer answers.
  * Defaults to "no" on anything ambiguous (empty enter, garbage input) —
- * a confirmation gate that fails closed, not open.
+ * a confirmation gate that fails closed, not open. That includes stdin
+ * being closed: no input means no approval.
  */
 export async function confirm(message: string): Promise<boolean> {
   if (isAutoConfirmActive()) return true;
-  const rl = readline.createInterface({ input: stdin, output: stdout });
-  try {
-    const answer = await rl.question(`${message} [y/N] `);
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
+  const answer = await promptLine(`${message} [y/N] `);
+  if (answer === null) {
+    stdout.write("(no input available — treating as 'no')\n");
+    return false;
   }
+  const normalized = answer.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes";
 }

@@ -1,6 +1,6 @@
 {
   "name": "@purix/core",
-  "version": "0.2.0-beta.0",
+  "version": "0.3.0-beta.0",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -18,7 +18,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-fixtures.mjs",
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"

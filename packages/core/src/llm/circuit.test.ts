@@ -7,11 +7,12 @@
 // the atomic increment doesn't lose failures across sequential calls.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb } from "../manifest/store";
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from "./circuit";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 let originalCwd: string;
 let tmpDir: string;
@@ -25,7 +26,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("circuit breaker state (SQLite-backed)", () => {

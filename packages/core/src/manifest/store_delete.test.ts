@@ -6,10 +6,11 @@
 // back out afterward, rather than from injecting a path.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "./schema";
+import { safeRmSync } from "../platform/fs_retry.js";
 import {
   writeManifest,
   readManifest,
@@ -49,7 +50,7 @@ beforeEach(() => {
 afterEach(() => {
     closeDb(); // Ensure the SQLite file is closed before deleting the temp dir
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("deleteManifestEntry", () => {

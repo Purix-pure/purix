@@ -144,7 +144,7 @@ export function applyErrorHandlingTransform(
   if (statements.length === 0) {
     return { ok: false, reason: `"${functionName}" has an empty body — nothing to wrap` };
   }
-  if (statements.length === 1 && Node.isTryStatement(statements[0]!)) {
+  if (statements.length === 1 && Node.isTryStatement(statements[0])) {
     return { ok: false, reason: `"${functionName}" already has a top-level try/catch — refusing to double-wrap` };
   }
   if (body.getFullText().includes("__purix_lastError")) {

@@ -6,11 +6,12 @@
 // manifest/store_delete.test.ts: chdir into a fresh temp dir per test.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { computeRequestKey, findPriorCommit, recordRequestCommit } from "./idempotency";
 import { closeDb } from "../manifest/store";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("computeRequestKey", () => {
   it("is deterministic for identical inputs", () => {
@@ -68,7 +69,7 @@ describe("findPriorCommit / recordRequestCommit (SQLite-backed)", () => {
   afterEach(() => {
     closeDb();
     process.chdir(originalCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("returns null for a key that was never recorded", () => {

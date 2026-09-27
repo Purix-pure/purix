@@ -10,13 +10,14 @@
 // about the gap this file exists to close.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stageMigration, activateMigration } from "./migration";
 import { getMigration } from "../manifest/migrations";
 import { closeDb } from "../manifest/store";
 import { resolveRealNodeModules } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const REAL_NODE_MODULES = resolveRealNodeModules();
 
@@ -52,7 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("activateMigration — pre-write sandbox pass", () => {

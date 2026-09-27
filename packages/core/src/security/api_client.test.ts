@@ -41,16 +41,16 @@ describe("createApiClient", () => {
   });
 
   test("an unreachable network (fetch throws) surfaces as ApiUnreachableError, distinct from a server rejection", async () => {
-    globalThis.fetch = (async () => {
+    globalThis.fetch = async () => {
       throw new Error("getaddrinfo ENOTFOUND");
-    }) as unknown as typeof fetch;
+    };
 
     await expect(client.requestCode("dev@example.com")).rejects.toBeInstanceOf(ApiUnreachableError);
   });
 
   test("a real 4xx/5xx from the server surfaces as ApiRequestError, not ApiUnreachableError — the offline-grace rule must only trigger on the former", async () => {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ error: "Invalid code" }), { status: 401 })) as unknown as typeof fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: "Invalid code" }), { status: 401 });
 
     sessionStore.saveSession("existing-token", "dev@example.com");
     try {
@@ -80,10 +80,10 @@ describe("createApiClient", () => {
 
   test("getEntitlements without a stored session rejects locally, before ever calling fetch", async () => {
     let fetchCalled = false;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = async () => {
       fetchCalled = true;
       return new Response("{}", { status: 200 });
-    }) as unknown as typeof fetch;
+    };
 
     await expect(client.getEntitlements()).rejects.toBeInstanceOf(ApiRequestError);
     expect(fetchCalled).toBe(false);

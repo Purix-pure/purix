@@ -8,10 +8,11 @@
 // hard ceiling still trips.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb } from "../manifest/store";
+import { safeRmSync } from "../platform/fs_retry";
 import { assertBudgetAvailable, recordUsage, getBudgetSnapshot, recordSavings, getSavingsSummary, setBudgetOverride } from "./budget";
 import { getOverrideAudits } from "../security/override_audit";
 import type { RoutingDecision } from "./router";
@@ -30,7 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
   if (originalCeiling === undefined) delete process.env.PURIX_COST_CEILING_USD;
   else process.env.PURIX_COST_CEILING_USD = originalCeiling;
 });
@@ -171,7 +172,7 @@ describe("budget override with audit", () => {
 
   it("concurrency reservation: two calls when remaining budget fits only one ensure only one succeeds", () => {
     process.env.PURIX_COST_CEILING_USD = "0.10";
-    let results: string[] = [];
+    const results: string[] = [];
     try {
       assertBudgetAvailable(0.08);
       results.push("success-1");

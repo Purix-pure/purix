@@ -166,7 +166,7 @@ export const pythonProvider: LanguageProvider = {
     }
   },
 
-  async auditDependencies(baseDir: string = process.cwd()): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[]; ran: boolean }> {
+  auditDependencies(baseDir: string = process.cwd()): Promise<{ pinning: PinningFinding[]; vulnerabilities: VulnFinding[]; ran: boolean }> {
     const reqPath = resolve(baseDir, "requirements.txt");
     const pinning: PinningFinding[] = [];
     if (existsSync(reqPath)) {
@@ -184,7 +184,7 @@ export const pythonProvider: LanguageProvider = {
                     });
                 }
             }
-        } catch {}
+        } catch { /* best-effort audit parse — a malformed entry shouldn't fail the whole scan */ }
     }
 
     const pipAuditBin = getVenvBinPath(baseDir, "pip-audit");
@@ -211,18 +211,18 @@ export const pythonProvider: LanguageProvider = {
                     });
                 }
             }
-        } catch {}
+        } catch { /* best-effort audit parse — a malformed entry shouldn't fail the whole scan */ }
     }
 
-    return { pinning, vulnerabilities, ran };
+    return Promise.resolve({ pinning, vulnerabilities, ran });
   },
 
-  async getFingerprint(baseDir: string = process.cwd()): Promise<Record<string, string>> {
+  getFingerprint(baseDir: string = process.cwd()): Promise<Record<string, string>> {
     const reqPath = resolve(baseDir, "requirements.txt");
     if (existsSync(reqPath)) {
         const content = readFileSync(reqPath, "utf-8");
-        return parseLockfileFingerprint(content, /^([^#\s]+)==([\d\.]+)$/gm);
+        return Promise.resolve(parseLockfileFingerprint(content, /^([^#\s]+)==([\d.]+)$/gm));
     }
-    return {};
+    return Promise.resolve({});
   }
 };

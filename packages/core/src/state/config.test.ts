@@ -1,10 +1,11 @@
 // packages/core/src/state/config.test.ts
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigStore } from "./config";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 let dir: string;
 
@@ -13,7 +14,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  safeRmSync(dir);
 });
 
 describe("createConfigStore", () => {
@@ -55,7 +56,7 @@ describe("createConfigStore", () => {
       expect(createConfigStore(dir).get("k")).toBe("one");
       expect(createConfigStore(dir2).get("k")).toBe("two");
     } finally {
-      rmSync(dir2, { recursive: true, force: true });
+      safeRmSync(dir2);
     }
   });
 

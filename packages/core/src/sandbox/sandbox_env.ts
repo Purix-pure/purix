@@ -11,7 +11,7 @@ const SENSITIVE_KEY_RE = /API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL/i;
  * still open. It only closes "test code reads process.env and leaks a
  * real key."
  */
-// Runtime migration (ADR-009) fallout, caught by actually running the
+// Runtime migration (ADR-048) fallout, caught by actually running the
 // sandboxed test-run path end to end rather than trusting it compiled:
 // when verify/tests.ts's own sandbox subprocess is itself a `node --test`
 // invocation (running a component's own test suite via node:test + tsx —

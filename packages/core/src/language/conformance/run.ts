@@ -55,17 +55,59 @@ function prepareRuntimeWorkspace(repoRoot: string, langId: string, sourceFixture
  * (no upward search, no reliance on a global `tsc`), by design, so this
  * just makes sure that local install exists before the checks run.
  */
+// TEST-REPORT F11: this used to run `npm install typescript tsx` with no
+// versions, so it pulled `latest` — TypeScript 7.0.2 at the time of testing,
+// while the repo itself is pinned to 5.7.2 — and it never installed ESLint at
+// all (so the idiom_check fixture could never pass). Pin all three to the
+// repo's own versions so a certification result doesn't change when a new
+// major ships, and re-install if a previously cached copy has a different
+// version (an existing .purix-tmp may still hold the old unpinned install).
+const CONFORMANCE_TS_VERSION = "5.7.2";
+const CONFORMANCE_TSX_VERSION = "4.19.2";
+const CONFORMANCE_ESLINT_VERSION = "9.17.0";
+
+function installedVersion(runtimeDir: string, pkg: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(resolve(runtimeDir, "node_modules", pkg, "package.json"), "utf8")) as { version?: string };
+    return parsed.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function ensureTypeScriptInstalled(runtimeDir: string): void {
   const tscMarker = resolve(runtimeDir, "node_modules", "typescript", "bin", "tsc");
-  if (existsSync(tscMarker)) return;
-  console.log(`  Installing TypeScript locally into ${runtimeDir} (not global, not inside packages/)...`);
+  const upToDate =
+    existsSync(tscMarker) &&
+    installedVersion(runtimeDir, "typescript") === CONFORMANCE_TS_VERSION &&
+    installedVersion(runtimeDir, "eslint") === CONFORMANCE_ESLINT_VERSION;
+  if (upToDate) return;
+  console.log(`  Installing TypeScript ${CONFORMANCE_TS_VERSION}, tsx and ESLint locally into ${runtimeDir} (not global, not inside packages/)...`);
   const res = spawnSync(
-    ["npm", "install", "--no-save", "--no-audit", "--no-fund", "--prefix", runtimeDir, "typescript", "tsx"],
+    [
+      "npm", "install", "--no-save", "--no-audit", "--no-fund", "--prefix", runtimeDir,
+      `typescript@${CONFORMANCE_TS_VERSION}`, `tsx@${CONFORMANCE_TSX_VERSION}`, `eslint@${CONFORMANCE_ESLINT_VERSION}`,
+    ],
     { cwd: runtimeDir, stdout: "pipe", stderr: "pipe" }
   );
   if (res.exitCode !== 0) {
     console.warn(`  ⚠ Failed to install TypeScript into ${runtimeDir}: ${res.stderr.toString().trim() || res.stdout.toString().trim()}`);
   }
+}
+
+/**
+ * The fixture idiom_violation.ts trips ESLint's built-in `no-var` rule and
+ * says it needs "a real eslint.config.js in the runtime workspace (see
+ * run.ts)" — that step was never written. The default parser handles the
+ * plain-JS-compatible fixture, so no typescript-eslint dependency is needed.
+ */
+function ensureEslintConfig(runtimeDir: string): void {
+  const configPath = resolve(runtimeDir, "eslint.config.mjs");
+  if (existsSync(configPath)) return;
+  writeFileSync(
+    configPath,
+    `export default [\n  { files: ["**/*.ts"], rules: { "no-var": "error" } },\n];\n`
+  );
 }
 
 /**
@@ -168,6 +210,7 @@ export async function runConformanceSuite(baseDir: string = process.cwd()): Prom
 
     if (langId === "typescript") {
       ensureTypeScriptInstalled(fixtureDir);
+      ensureEslintConfig(fixtureDir);
       ensureAuditManifest(fixtureDir);
     }
     if (langId === "python") await ensurePythonInstalled(fixtureDir);
@@ -317,11 +360,16 @@ export async function runConformanceSuite(baseDir: string = process.cwd()): Prom
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("run.ts")) {
-  runConformanceSuite().then(({ certified, report }) => {
-    console.log(`Language Parity Conformance Suite completed. Certified: ${certified}`);
-    if (!certified) {
-      console.log("Details:", JSON.stringify(report, null, 2));
+  runConformanceSuite()
+    .then(({ certified, report }) => {
+      console.log(`Language Parity Conformance Suite completed. Certified: ${certified}`);
+      if (!certified) {
+        console.log("Details:", JSON.stringify(report, null, 2));
+        process.exitCode = 1;
+      }
+    })
+    .catch((error: unknown) => {
+      console.error("Language Parity Conformance Suite crashed before completing:", error);
       process.exitCode = 1;
-    }
-  });
+    });
 }

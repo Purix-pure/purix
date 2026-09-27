@@ -1,6 +1,6 @@
 // src/platform/spawn_sync.ts
 //
-// Runtime migration (ADR-009 / ADR-016): Bun's global `spawnSync` had one
+// Runtime migration (ADR-048 / ADR-040): Bun's global `spawnSync` had one
 // call shape used identically at all four of its call sites in this
 // codebase — sandbox/sandbox_exec.ts, verify/verify.ts, verify/idiom.ts,
 // security/deps_audit.ts — command as a single string array, options as
@@ -49,7 +49,7 @@ export function spawnSync(command: string[], opts: SpawnSyncOptions = {}): Spawn
   }
   const result = crossSpawn.sync(bin, args, {
     cwd: opts.cwd,
-    env: opts.env as NodeJS.ProcessEnv | undefined,
+    env: opts.env,
     encoding: "buffer",
   });
   if (result.error) {

@@ -7,6 +7,7 @@
 // entire surface where that stops being true, and it's deliberately
 // narrow: login, entitlements, sync, nothing else.
 import { loadSession as defaultLoadSession, type SessionStore } from "./session.js";
+import { PURIX_VERSION } from "../version.js";
 
 const DEFAULT_BASE_URL = "https://api.purix.dev";
 
@@ -54,7 +55,7 @@ export function createApiClient(loadSessionFn: SessionStore["loadSession"] = def
   async function request<T>(path: string, init: RequestInit = {}, authenticated = false): Promise<T> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
-      "X-Purix-Client-Version": "0.2.0-beta.0",
+      "X-Purix-Client-Version": PURIX_VERSION,
       ...(init.headers as Record<string, string> | undefined),
     };
 

@@ -6,12 +6,13 @@
 // and the fix for the rollback-failure-swallowed bug.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { writeFile as realWriteFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readComponentFiles, applyModificationFiles, rollbackModification } from "./modify";
 import type { ManifestEntry } from "../manifest/schema";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("modify.ts", () => {
   let tmpDir: string;
@@ -21,7 +22,7 @@ describe("modify.ts", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   describe("readComponentFiles", () => {

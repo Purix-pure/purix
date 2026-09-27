@@ -15,7 +15,7 @@
 // the first time `purix login` ran — silently contradicting "session
 // identity is machine-scoped." Two stores, two keys, closes that.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 
 const ROTATION_WARN_DAYS = 90;
@@ -41,10 +41,10 @@ export interface SecretStatus {
 }
 
 export interface SecretsStore {
-  setSecret(name: string, value: string): void;
-  getSecret(name: string): string | null;
-  deleteSecret(name: string): boolean;
-  listSecretStatus(): SecretStatus[];
+  setSecret(this: void, name: string, value: string): void;
+  getSecret(this: void, name: string): string | null;
+  deleteSecret(this: void, name: string): boolean;
+  listSecretStatus(this: void): SecretStatus[];
 }
 
 function encrypt(plaintext: string, key: Buffer) {
@@ -59,6 +59,39 @@ function decrypt(record: SecretRecord, key: Buffer): string {
   decipher.setAuthTag(Buffer.from(record.auth_tag, "base64"));
   const decrypted = Buffer.concat([decipher.update(Buffer.from(record.ciphertext, "base64")), decipher.final()]);
   return decrypted.toString("utf-8");
+}
+
+/**
+ * TEST-REPORT F2: the master key that decrypts every stored secret is written
+ * right next to the ciphertext, inside the project, and nothing ever stopped
+ * `git add -A` from staging both. If the store's parent directory is a git
+ * repository, make sure the two secret files are listed in its .gitignore.
+ * Idempotent (safe to call on every write, so existing installs are fixed on
+ * their next `secret set`), preserves the file's line endings, and never
+ * throws — a read-only checkout must not break secret storage.
+ * Returns the entries it added.
+ */
+export function ensureSecretFilesGitignored(baseDir: string, filenames: string[]): string[] {
+  try {
+    const projectRoot = dirname(baseDir);
+    if (!existsSync(join(projectRoot, ".git"))) return [];
+    const gitignorePath = join(projectRoot, ".gitignore");
+    const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+    const eol = existing.includes("\r\n") ? "\r\n" : "\n";
+    const present = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
+    const dirName = basename(baseDir);
+    const missing = filenames
+      .map((f) => `${dirName}/${f}`)
+      .filter((entry) => !present.has(entry) && !present.has(`/${entry}`) && !present.has(`${dirName}/`) && !present.has(`/${dirName}/`) && !present.has(dirName));
+    if (missing.length === 0) return [];
+    const prefix = existing.length > 0 && !existing.endsWith("\n") ? eol : "";
+    const header = present.has("# Purix secrets — never commit") ? "" : `# Purix secrets — never commit${eol}`;
+    writeFileSync(gitignorePath, `${existing}${prefix}${header}${missing.join(eol)}${eol}`, "utf-8");
+    console.warn(`  [secrets] added ${missing.join(", ")} to ${gitignorePath} so they can't be committed by accident.`);
+    return missing;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -102,17 +135,26 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
     if (!existsSync(storePath)) return { secrets: {} };
     try {
       return JSON.parse(readFileSync(storePath, "utf-8"));
-    } catch {
-      return { secrets: {} };
+    } catch (err) {
+      // TEST-REPORT F2b: this used to `return { secrets: {} }`, so the next
+      // write silently replaced a damaged store with a near-empty one — and
+      // reported success — permanently destroying every other stored secret.
+      // Fail loudly instead and leave the file alone.
+      throw new Error(
+        `The secrets store at ${storePath} could not be read (${err instanceof Error ? err.message : String(err)}). ` +
+          `Nothing was changed. Restore it from a backup, or delete the file if you intend to start over.`,
+        { cause: err }
+      );
     }
   }
 
   function saveStore(store: StoreFile): void {
+    ensureSecretFilesGitignored(baseDir, [basename(masterKeyPath), basename(storePath)]);
     mkdirSync(dirname(storePath), { recursive: true });
     writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
     try {
       chmodSync(storePath, 0o600);
-    } catch {}
+    } catch { /* chmod best-effort — not all filesystems support it */ }
   }
 
   return {

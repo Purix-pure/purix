@@ -10,14 +10,21 @@ export function registerLangCommands(program: Command) {
     .action(async () => {
       const { getLanguageProvider, getLanguagePack } = await import("@purix/core/language/registry");
       const { getEntitlements } = await import("@purix/core/licensing/tier");
+      const { getCachedOrRescan } = await import("@purix/core/language/registry_cache");
       const baseDir = process.cwd();
       const ent = getEntitlements(baseDir);
-      // Only languages with a registered provider are ever shown (the loop
-      // below skips anything getLanguageProvider() doesn't resolve), but
-      // this list should still only name what's actually supported in this
-      // beta rather than languages removed per BETA_SCOPE.md — otherwise
-      // it's misleading to read even though it doesn't misbehave.
-      const languages = ["typescript", "python"];
+      // Sourced from the language_registry cache (discovered from real
+      // on-disk manifests, see docs/adr-drafts/language-plugin-architecture.md)
+      // rather than a hand-maintained array — the ["typescript", "python"]
+      // literal here used to be exactly the kind of hardcoded list that
+      // drifted out of sync with what BETA_SCOPE.md actually removed
+      // elsewhere (scaffold.ts still listed rust/go/ruby well after this
+      // array was correctly trimmed — see the design doc §1 for the full
+      // pattern this replaces). The loop below still skips anything
+      // getLanguageProvider() doesn't resolve, so a manifest without a
+      // matching code-side provider degrades to "not shown" rather than
+      // a crash.
+      const languages = getCachedOrRescan().map((row) => row.languageId);
 
       console.log("Language Providers & Packs:");
       for (const langId of languages) {
@@ -29,6 +36,23 @@ export function registerLangCommands(program: Command) {
         const tier = pack?.tier ?? "free";
         console.log(`  • ${langId} (min v${prov.minSupportedVersion}) — installed: ${installed} — entitled: ${entitled} — tier: ${tier}`);
       }
+    });
+
+  langCmd
+    .command("refresh")
+    .description("Force a fresh scan for installed/removed language plugins, bypassing the cache")
+    .action(async () => {
+      // Explicit escape hatch from design doc §5.1: getCachedOrRescan()
+      // already rescans automatically whenever the discovery hash
+      // changes (i.e. whenever a language was actually installed or
+      // removed), so this should rarely be needed — but it exists for
+      // the same reason `pnpm verify`/`aube ci --frozen` do: a safety
+      // valve for the rare case someone suspects the automatic check
+      // itself missed something, rather than no way to force a recheck
+      // at all.
+      const { rebuildLanguageRegistryCache } = await import("@purix/core/language/registry_cache");
+      const rows = rebuildLanguageRegistryCache();
+      console.log(`Rescanned. ${rows.length} language(s) discovered: ${rows.map((r) => r.languageId).join(", ") || "(none)"}`);
     });
 
   langCmd
@@ -94,13 +118,19 @@ export function registerLangCommands(program: Command) {
     .command("install <id>")
     .description("Install tooling for a language pack in strict sequence")
     .action(async (id: string) => {
-      const { getLanguagePack } = await import("@purix/core/language/registry");
+      const { getLanguagePack, getLanguageProvider } = await import("@purix/core/language/registry");
       const { requireLanguage } = await import("@purix/core/licensing/tier");
       const { confirm } = await import("@purix/core/cli-io/confirm");
       const baseDir = process.cwd();
 
       const pack = getLanguagePack(id);
       if (!pack) {
+        // TEST-REPORT F17: `lang list` reports a built-in language (provider, no pack) as
+        // installed: true, so "No language pack registered" contradicted it.
+        if (getLanguageProvider(id)) {
+          console.log(`"${id}" is built in — there is no separate tooling pack to install (it uses the project's local toolchain).`);
+          return;
+        }
         console.error(`🛑 No language pack registered for "${id}".`);
         process.exitCode = 1;
         return;
@@ -184,11 +214,15 @@ export function registerLangCommands(program: Command) {
     .command("uninstall <id>")
     .description("Uninstall tools for a language pack")
     .action(async (id: string) => {
-      const { getLanguagePack } = await import("@purix/core/language/registry");
+      const { getLanguagePack, getLanguageProvider } = await import("@purix/core/language/registry");
       const { confirm } = await import("@purix/core/cli-io/confirm");
       const baseDir = process.cwd();
       const pack = getLanguagePack(id);
       if (!pack) {
+        if (getLanguageProvider(id)) {
+          console.log(`"${id}" is built in — there is no separate tooling pack to uninstall.`);
+          return;
+        }
         console.error(`🛑 No language pack registered for "${id}".`);
         process.exitCode = 1;
         return;

@@ -16,9 +16,10 @@ import { recordCircuitSuccess } from "./circuit";
 import { getBudgetSnapshot } from "./budget";
 import { getDbCompat as getDb } from "../manifest/store";
 import { createConfigStore } from "../state/config";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("LLM Classify & Call Pipeline", () => {
   let originalFetch: typeof globalThis.fetch;
@@ -68,7 +69,7 @@ describe("LLM Classify & Call Pipeline", () => {
     }
     delete process.env.OPENAI_API_KEY;
     process.chdir(originalCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("validates ChangeEdit schema correctly", () => {
@@ -92,7 +93,7 @@ describe("LLM Classify & Call Pipeline", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const res = await callLlm("test prompt", "low", 1, {
       call: "intent_refinement",
@@ -106,7 +107,7 @@ describe("LLM Classify & Call Pipeline", () => {
       const err: any = new Error("Unauthorized");
       err.status = 401;
       throw err;
-    }) as typeof fetch;
+    });
 
     const before = getBudgetSnapshot();
     await expect(callLlm("prompt", "low")).rejects.toThrow(/Unauthorized/);
@@ -123,7 +124,7 @@ describe("LLM Classify & Call Pipeline", () => {
       const err: any = new Error("Service Unavailable");
       err.status = 503;
       throw err;
-    }) as typeof fetch;
+    });
 
     const before = getBudgetSnapshot();
     // Starting at attempt 5 exercises the same "give up, don't retry
@@ -152,7 +153,7 @@ describe("LLM Classify & Call Pipeline", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const plan = await classifyGreenfield("test-comp");
     expect(plan.component_id).toBe("test-comp");
@@ -172,7 +173,7 @@ describe("LLM Classify & Call Pipeline", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const intent = await refineIntent("comp-1", "do stuff", [{ path: "a.ts", content: "code" }], ["past decision"]);
     expect(intent.explicit_instruction).toBe("Do something explicit");
@@ -196,7 +197,7 @@ describe("LLM Classify & Call Pipeline", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const verdict = await classifyModification("comp-1", "change text", [{ path: "a.ts", content: "a" }]);
     expect(verdict.operation).toBe("update_prompt_text");
@@ -237,7 +238,7 @@ describe("LLM Classify & Call Pipeline", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const res = await classifyDiff("comp-1", "cursor", [
       { path: "a.ts", old_content: "old", new_content: "new", status: "modified" },
@@ -259,7 +260,7 @@ describe("LLM Classify & Call Pipeline", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const res = await classifyRepair("comp-1", "update_prompt_text", [{ path: "a.ts", content: "old" }], "TypeError", 1);
     expect(res.edits.length).toBe(1);

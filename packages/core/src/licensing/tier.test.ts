@@ -1,12 +1,13 @@
 // src/licensing/tier.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getEntitlements, checkComponentLimit, requireEntitlement, clearEntitlementsCache, entitlementsCacheIsStale, refreshEntitlements } from "./tier";
 import { saveSession, clearSession } from "../security/session";
-import { ApiUnreachableError, ApiRequestError } from "../security/api_client";
+import { ApiRequestError } from "../security/api_client";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("Licensing Tier & Entitlements", () => {
   let tmpDir: string;
@@ -18,7 +19,7 @@ describe("Licensing Tier & Entitlements", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
     globalThis.fetch = originalFetch;
     clearSession();
   });
@@ -130,7 +131,7 @@ describe("Licensing Tier & Entitlements", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const res = await refreshEntitlements(tmpDir);
     expect(res.refreshed).toBe(true);
@@ -150,7 +151,7 @@ describe("Licensing Tier & Entitlements", () => {
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
 
     const res = await refreshEntitlements(tmpDir);
     expect(res.entitlements.componentLimit).toBe(25);
@@ -160,7 +161,7 @@ describe("Licensing Tier & Entitlements", () => {
     saveSession("token", "user@example.com");
     globalThis.fetch = (async () => {
       throw new Error("ENOTFOUND");
-    }) as typeof fetch;
+    });
 
     const res = await refreshEntitlements(tmpDir);
     expect(res.refreshed).toBe(false);
@@ -170,7 +171,7 @@ describe("Licensing Tier & Entitlements", () => {
     saveSession("token", "user@example.com");
     globalThis.fetch = (async () => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
-    }) as typeof fetch;
+    });
 
     await expect(refreshEntitlements(tmpDir)).rejects.toBeInstanceOf(ApiRequestError);
   });

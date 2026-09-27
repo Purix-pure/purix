@@ -6,11 +6,12 @@
 // relative ".purix/manifest.db".
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "./schema";
 import { writeManifestWithLimitCheck, listManifest, closeDb } from "./store";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 function makeEntry(id: string, opts: Partial<ManifestEntry> = {}): ManifestEntry {
   return {
@@ -41,7 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("writeManifestWithLimitCheck", () => {

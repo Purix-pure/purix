@@ -16,7 +16,7 @@
 // purix_modify or purix_ingest.
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -24,6 +24,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createPurixMcpServer } from "./server";
 import { closeDb, writeManifest } from "@purix/core/manifest/store";
 import type { ManifestEntry } from "@purix/core/manifest/schema";
+import { safeRmSync } from "@purix/core/platform/fs_retry";
 
 // A deliberately unique, greppable marker standing in for "sensitive
 // repository content" (e.g. a secret, proprietary logic, customer data).
@@ -49,7 +50,7 @@ function makeEntry(id: string, files: string[]): ManifestEntry {
     version_history: [],
     verification_status: "pass",
     last_synced_hash: "abc123hash",
-    language: "typescript" as any,
+    language: "typescript",
   };
 }
 
@@ -80,8 +81,8 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
     // recording every URL and body seen, so we can assert afterward that
     // repository content never reached Purix's own backend.
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
-      const body = init?.body ? String(init.body) : "";
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input).url;
+      const body = typeof init?.body === "string" ? init.body : "";
       recordedCalls.push({ url, body });
 
       return new Response(
@@ -96,6 +97,11 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
                   reasoning: "adversarial-test-fixture classification",
                   edits: [],
                   suspicious_injected_instruction: false,
+                  // Also satisfies src/llm/escalate.ts's response schema,
+                  // reached now that ingest/modify both do real
+                  // verification and can legitimately fall through to
+                  // escalation on failure (previously unreachable).
+                  is_new_capability: false,
                 }),
               },
             },
@@ -104,13 +110,13 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
         }),
         { status: 200 }
       );
-    }) as typeof fetch;
+    });
   });
 
   afterEach(() => {
     closeDb();
     process.chdir(oldCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
     delete process.env.PURIX_MCP_AUTO_APPROVE;
     globalThis.fetch = originalFetch;
     delete process.env.PURIX_LLM_PROVIDER;
@@ -160,6 +166,43 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
     }
   });
 
+  test("purix_change (both the resolve-then-modify and the no-match create branches) never sends repo content to Purix's own backend", async () => {
+    // IDEA-078: purix_change is a new tool on the MCP surface, so ADR-001's
+    // adversarial pass must cover it. Branch 1 resolves to an existing
+    // component and runs the modify pipeline over its (marked) file
+    // content; branch 2 finds no match and proposes a new component.
+    const fileName = "sensitive-component.ts";
+    writeFileSync(join(tmpDir, fileName), `// ${SENSITIVE_MARKER}\nexport const secret = "do-not-leak";\n`);
+    writeManifest(makeEntry("sensitive-comp", [fileName]));
+
+    const server = createPurixMcpServer();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "adversarial-test-client", version: "1.0.0" }, { capabilities: {} });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const resolved = await client.callTool({ name: "purix_change", arguments: { intent: "refactor sensitive-comp for clarity" } });
+    expect(((resolved.content as Array<{ text?: string }>)[0]?.text ?? "").length).toBeGreaterThan(0);
+    try {
+      await client.callTool({ name: "purix_change", arguments: { intent: "add a brand new payroll exporter", dryRun: true } });
+    } catch {
+      // The fixture LLM only returns a classify-shaped payload, so the
+      // no-match create branch may fail to parse a plan. That is fine:
+      // the invariant concerns where requests were sent, not the outcome.
+    }
+
+    await client.close();
+    await server.close();
+
+    expect(recordedCalls.length).toBeGreaterThan(0);
+    for (const call of recordedCalls) {
+      const isPurixBackendCall = PURIX_BACKEND_URL_PATTERN.test(call.url);
+      expect(isPurixBackendCall).toBe(false);
+      if (isPurixBackendCall) {
+        expect(call.body).not.toContain(SENSITIVE_MARKER);
+      }
+    }
+  });
+
   test("purix_ingest never sends ingested diff content to Purix's own backend", async () => {
     const diffPath = join(tmpDir, "adversarial.patch");
     writeFileSync(
@@ -173,6 +216,14 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
         "",
       ].join("\n")
     );
+    // REAL FIX (2026-09-19): purix_ingest now requires a componentId and
+    // commits against that component's real tracked state (see
+    // PURIX-CODE-VERIFIED-GAP-REPORT-2026-09-19.md) — it no longer
+    // accepts an untracked, component-less diff. Track the file the diff
+    // targets and give it real starting content matching the diff's own
+    // context line, so checkDrift() doesn't reject this as drifted.
+    writeFileSync(join(tmpDir, "ingested-file.ts"), "old line\n", "utf-8");
+    writeManifest(makeEntry("ingest-target-comp", ["ingested-file.ts"]));
 
     const server = createPurixMcpServer();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -182,7 +233,7 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
 
     await client.callTool({
       name: "purix_ingest",
-      arguments: { diffFilePath: diffPath, sourceAgent: "adversarial-test" },
+      arguments: { componentId: "ingest-target-comp", diffFilePath: diffPath, sourceAgent: "adversarial-test" },
     });
 
     await client.close();

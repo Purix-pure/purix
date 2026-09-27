@@ -12,7 +12,7 @@ export function registerToolsCommands(program: Command) {
         const suggestions = await suggestTools(purpose);
         console.log(formatSuggestions(suggestions));
       } catch (err) {
-        console.error(`\n🛑 Tool search failed: ${err instanceof Error ? err.message : err}`);
+        console.error(`\n🛑 Tool search failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
       }
     });

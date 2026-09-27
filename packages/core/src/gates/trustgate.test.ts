@@ -10,9 +10,10 @@
 // else is pure.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { safeRmSync } from "../platform/fs_retry.js";
 import {
   evaluateTrustGate,
   hasTestCoverage,
@@ -122,7 +123,7 @@ describe("hasTestCoverage (filesystem-backed)", () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("returns true when a matching .test.ts file exists for a modified file", () => {
@@ -162,7 +163,7 @@ describe("loadDofPatterns (filesystem-backed)", () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("falls back to built-in defaults when dof-patterns.json is absent", () => {

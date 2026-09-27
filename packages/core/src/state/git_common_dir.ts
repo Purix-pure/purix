@@ -1,6 +1,6 @@
 // packages/core/src/state/git_common_dir.ts
 //
-// ADR-041: genuinely shared state (Operation Library, manifest store,
+// ADR-042: genuinely shared state (Operation Library, manifest store,
 // burn-guard ledger) must live in one repository-scoped location — the
 // common git directory every worktree of a repository resolves back to —
 // not a path under any single worktree's own working directory. A linked
@@ -14,7 +14,7 @@
 // environments where git may not be on PATH. Falls back to a plain
 // `<baseDir>/.purix` path (old behavior) when no `.git` is found at all —
 // e.g. a directory that isn't a git repo yet — so this never blocks a
-// command that ADR-041 doesn't apply to.
+// command that ADR-042 doesn't apply to.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -73,9 +73,9 @@ function resolveCommonDir(dotGitPath: string): string {
  * Returns the directory Purix should store repository-shared state in
  * (Operation Library, manifest DB, burn-guard ledger) for the given
  * working directory. Two worktrees of the same repository resolve to the
- * SAME path here — that's the entire point (ADR-041). A directory with no
+ * SAME path here — that's the entire point (ADR-042). A directory with no
  * `.git` anywhere in its ancestry falls back to `<baseDir>/.purix`,
- * matching pre-ADR-041 behavior, so non-repo usage (e.g. tests, scratch
+ * matching pre-ADR-042 behavior, so non-repo usage (e.g. tests, scratch
  * directories) is unaffected.
  */
 export function resolveSharedStateDir(baseDir: string = process.cwd()): string {

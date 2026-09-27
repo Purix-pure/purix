@@ -9,7 +9,7 @@
 // projectId alone).
 //
 // FIX PROVENANCE (2026-08-30): this file previously contained a
-// mis-filed duplicate of project_id.ts's OLD (pre-ADR-041-fix) logic —
+// mis-filed duplicate of project_id.ts's OLD (pre-ADR-042-fix) logic —
 // itself a second copy of getProjectId(), under the wrong filename, with
 // no getMachineId() defined anywhere. cli/commands/auth.ts imported
 // getMachineId from this file and crashed at module load
@@ -78,7 +78,7 @@ export function getMachineId(baseDir?: string): string {
     // permissions, etc.), still return a value for this call so login
     // doesn't crash — just accept that the NEXT call in a fresh process
     // may mint a different id. This mirrors this codebase's existing
-    // "degrade explicitly, never silently" posture (ADR-002/040/043)
+    // "degrade explicitly, never silently" posture (ADR-039/035/012, formerly ADR-002/040/043)
     // applied to a low-stakes identifier rather than a safety gate.
   }
   return id;

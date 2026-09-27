@@ -7,9 +7,10 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { resolve, join } from "node:path";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolveSafePath, findUnsafePaths } from "./path_guard";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const ROOT = resolve("/repo/root");
 
@@ -107,7 +108,7 @@ describe("resolveSafePath — symlink escape (GAPS-REPORT §2.6)", () => {
     tmpRoot = mkdtempSync(join(tmpdir(), "purix-path-guard-test-"));
   };
   const teardown = () => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    safeRmSync(tmpRoot);
   };
 
   it("rejects a path through a component that is a symlink pointing outside targetDir", () => {
@@ -118,13 +119,30 @@ describe("resolveSafePath — symlink escape (GAPS-REPORT §2.6)", () => {
         writeFileSync(join(outsideDir, "passwd"), "root:x:0:0::/root:/bin/bash\n");
         // Plant "shared -> outsideDir" inside the target directory, then
         // ask for a path lexically inside targetDir through that symlink.
-        symlinkSync(outsideDir, join(tmpRoot, "shared"));
+        //
+        // WINDOWS FIX: fs.symlinkSync() for a directory target needs
+        // SeCreateSymbolicLinkPrivilege on Windows (admin elevation, or
+        // Developer Mode enabled in Settings) — without it this throws
+        // EPERM before the test's actual assertions ever run, which is
+        // very likely why this test (and the one below) were reported
+        // failing. Passing "junction" as the link type sidesteps that:
+        // NTFS junctions don't require the privilege, both targets here
+        // are already-absolute local directory paths (junctions can't
+        // target files or relative/UNC paths, but both usages here are
+        // directories with absolute paths, so that's not a constraint
+        // issue), and findSymlinkEscape()'s realpathSync() call follows
+        // a junction exactly the same way it follows a symlink — so this
+        // still genuinely exercises the escape-detection logic, not a
+        // weaker substitute for it. The "junction" argument is a no-op
+        // on POSIX (real symlinks are used there regardless), so this is
+        // safe cross-platform.
+        symlinkSync(outsideDir, join(tmpRoot, "shared"), "junction");
         const result = resolveSafePath(tmpRoot, "shared/passwd");
         expect(result.ok).toBe(false);
         expect(result.reason).toMatch(/symlink escape/);
         expect(result.resolved).toBeUndefined();
       } finally {
-        rmSync(outsideDir, { recursive: true, force: true });
+        safeRmSync(outsideDir);
       }
     } finally {
       teardown();
@@ -136,7 +154,9 @@ describe("resolveSafePath — symlink escape (GAPS-REPORT §2.6)", () => {
     try {
       mkdirSync(join(tmpRoot, "real"));
       writeFileSync(join(tmpRoot, "real", "file.ts"), "export {};\n");
-      symlinkSync(join(tmpRoot, "real"), join(tmpRoot, "alias"));
+      // See the "junction" comment in the test above — same fix, same
+      // reason.
+      symlinkSync(join(tmpRoot, "real"), join(tmpRoot, "alias"), "junction");
       const result = resolveSafePath(tmpRoot, "alias/file.ts");
       expect(result.ok).toBe(true);
     } finally {

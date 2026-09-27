@@ -1,11 +1,12 @@
 // packages/core/src/language/pack.test.ts
 import { describe, it } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getLanguagePack } from "./registry";
 import { pythonPack } from "./providers/python.pack";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("LanguagePack & ToolSpec", () => {
   it("getLanguagePack returns undefined for an unknown language id", () => {
@@ -25,7 +26,7 @@ describe("LanguagePack & ToolSpec", () => {
       const fully = pythonPack.isFullyInstalled(scratch);
       expect(fully).toBe(false);
     } finally {
-      rmSync(scratch, { recursive: true, force: true });
+      safeRmSync(scratch);
     }
   });
 });

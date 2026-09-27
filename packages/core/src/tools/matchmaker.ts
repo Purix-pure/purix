@@ -51,19 +51,29 @@ export async function suggestTools(
     }
     json = (await res.json()) as NpmSearchResponse;
   } catch (err) {
-    console.warn(`  [matchmaker] npm search failed (${err instanceof Error ? err.message : err}) — skipping suggestions.`);
+    console.warn(`  [matchmaker] npm search failed (${err instanceof Error ? err.message : String(err)}) — skipping suggestions.`);
     return [];
   }
 
   const TWO_YEARS_MS = 2 * 365 * 24 * 60 * 60 * 1000;
   const now = Date.now();
 
+  // 2026-09-24: an HTTP 200 whose body is not the expected search shape
+  // (proxy/captive-portal JSON, an API change) used to throw a raw
+  // TypeError here and abort `create`/`change` — but suggestions are
+  // documented as advisory and never blocking.
+  if (!Array.isArray(json?.objects)) {
+    console.warn("  [matchmaker] npm search returned an unexpected response — skipping suggestions.");
+    return [];
+  }
+
   const candidates: ToolSuggestion[] = json.objects
+    .filter((o) => typeof o?.package?.name === "string")
     .map((o) => ({
       name: o.package.name,
       description: o.package.description ?? "(no description)",
       version: o.package.version,
-      npmUrl: o.package.links.npm,
+      npmUrl: o.package.links?.npm ?? `https://www.npmjs.com/package/${o.package.name}`,
       weeklyDownloads: null, // registry search doesn't include this; see fetchDownloads below if you want it
       lastPublished: o.package.date,
       qualityScore: o.score.detail.quality,

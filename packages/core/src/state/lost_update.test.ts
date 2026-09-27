@@ -25,11 +25,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigStore } from "./config.js";
 import { resolveTsxCommand } from "../test-support/real_node_modules.js";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const tsxCommand = resolveTsxCommand();
 const workerPath = join(import.meta.dirname, "lost_update_worker.ts");
@@ -41,7 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  safeRmSync(dir);
 });
 
 function runWorker(baseDir: string, key: string, valuePrefix: string): Promise<void> {

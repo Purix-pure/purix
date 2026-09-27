@@ -3,11 +3,12 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { notifyGatedConfirmation } from "./notify";
 import { createHmac } from "node:crypto";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb } from "../manifest/store";
 import { saveSession, clearSession } from "../security/session";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("notifyGatedConfirmation with HMAC signature and retry", () => {
   let originalCwd: string;
@@ -55,7 +56,7 @@ describe("notifyGatedConfirmation with HMAC signature and retry", () => {
     closeDb();
     clearSession();
     process.chdir(originalCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
     global.fetch = originalFetch;
     if (originalWebhookUrl === undefined) delete process.env.PURIX_WEBHOOK_URL;
     else process.env.PURIX_WEBHOOK_URL = originalWebhookUrl;

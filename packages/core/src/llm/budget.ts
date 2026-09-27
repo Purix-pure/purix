@@ -10,7 +10,7 @@ const PRICE_PER_1M_INPUT_USD = 0.10;
 const PRICE_PER_1M_OUTPUT_USD = 0.40;
 
 function ensureBudgetTable(): void {
-  // ADR-041 note: under real multi-process contention (two worktrees'
+  // ADR-042 note: under real multi-process contention (two worktrees'
   // processes initializing this table for the first time at once), every
   // one of these statements can hit SQLITE_BUSY/"database is locked" —
   // confirmed via budget_worktree.test.ts. Previously unwrapped, so that
@@ -56,7 +56,7 @@ function ensureBudgetTable(): void {
           );
           console.log(`  [budget] Migrated legacy global budget state into repository ID ${repoId}`);
         }
-      } catch {}
+      } catch { /* one-time best-effort migration — safe to skip if it fails */ }
     }, "budget_ensure_migrate");
 
     withSqliteRetry(() => {
@@ -131,7 +131,8 @@ export function assertBudgetAvailable(estimatedCost = 0.05): number {
       // already handle, not a raw driver error.
       throw new Error(
         `Cost guardrail check is temporarily unavailable due to high concurrent load ` +
-          `(${err.message}). Refusing this LLM call rather than risk an unchecked spend — retry shortly.`
+          `(${err.message}). Refusing this LLM call rather than risk an unchecked spend — retry shortly.`,
+        { cause: err }
       );
     }
     throw err;

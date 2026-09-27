@@ -1,12 +1,13 @@
 // packages/core/src/manifest/library.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb } from "./store";
-import { promoteOperation, verifyLibraryChain, computeTaskSignature, clearLibrary, enforceEviction, listLibrary } from "./library";
+import { promoteOperation, verifyLibraryChain, computeTaskSignature, clearLibrary, listLibrary } from "./library";
 import { createConfigStore } from "../state/config";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("Operation Library Tamper-Evidence Chain", () => {
   let tmpDir: string;
@@ -22,7 +23,7 @@ describe("Operation Library Tamper-Evidence Chain", () => {
   afterEach(() => {
     closeDb();
     process.chdir(oldCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("verifies clean library chain successfully", () => {
@@ -63,7 +64,7 @@ describe("Operation Library Configurable Eviction", () => {
   afterEach(() => {
     closeDb();
     process.chdir(oldCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("evicts at overridden ceiling instead of default 50000", () => {

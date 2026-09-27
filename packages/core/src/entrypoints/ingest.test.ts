@@ -8,10 +8,11 @@
 // absent from deletions.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ingestDiff } from "./ingest";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("ingestDiff", () => {
   let tmpDir: string;
@@ -21,7 +22,7 @@ describe("ingestDiff", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("rejects input with no recognizable diff section", async () => {
@@ -161,7 +162,7 @@ describe("ingestDiff", () => {
         const result = await ingestDiff(diff, null, nestedTarget);
         expect(result.ok).toBe(false);
       } finally {
-        rmSync(outsideDir, { recursive: true, force: true });
+        safeRmSync(outsideDir);
       }
     });
   });

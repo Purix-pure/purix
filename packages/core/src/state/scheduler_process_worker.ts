@@ -1,49 +1,49 @@
 // packages/core/src/state/scheduler_process_worker.ts
 //
-// Standin for the one genuinely long-lived process in this codebase (the
-// MCP server) that registers scheduler tasks once at startup and must
-// then pick up config changes made by OTHER processes/invocations for the
-// rest of its life, without restarting. Stays alive for a fixed duration
-// so the parent test can make config changes partway through and observe
-// the effect on THIS SAME process/PID.
-import { appendFileSync, existsSync, writeSync } from "node:fs";
+// Standalone entry point spawned as a real, long-lived child process by
+// scheduler.test.ts's "real end-to-end across processes" hot-reload test.
+//
+// NOTE (2026-09-24): this file previously held a byte-for-byte copy of
+// project_id_race_worker.ts (a wrong-file paste). That copy called
+// getProjectId() and exited 0 immediately, never starting a scheduler, so
+// the hot-reload test could never pass. This is the real worker.
+//
+// Usage: scheduler_process_worker.ts <baseDir> <lifetimeMs> <logPath>
+//   - chdir(baseDir): the scheduler reads config from process.cwd().
+//   - registers one task whose interval is read LIVE from the config key
+//     "test.taskIntervalMs" (default 100s, i.e. it fires once at startup
+//     because lastRunAt starts at 0, then not again on its own).
+//   - each run appends one line to <logPath>, which the parent counts.
+//   - stays alive for <lifetimeMs> (the scheduler's own timer is unref'd,
+//     so without this the process would exit immediately), then exits.
+import { appendFileSync, writeSync } from "node:fs";
 import { createConfigStore } from "./config.js";
-import { registerScheduledTask, startScheduler } from "./scheduler.js";
+import { registerScheduledTask, startScheduler, stopScheduler } from "./scheduler.js";
 
 const baseDir = process.argv[2];
-const totalDurationMs = Number(process.argv[3]);
+const lifetimeMs = Number(process.argv[3]);
 const logPath = process.argv[4];
-
-// LIFECYCLE FIX (parity with budget_race_worker.ts): a synchronous write to
-// fd 2 instead of console.error, ahead of process.exit(), so a usage-error
-// message on this path can't be dropped by an async stdio flush racing the
-// exit — same fix applied throughout this worker for the same reason.
-if (!baseDir || !totalDurationMs || !logPath) {
-  writeSync(2, "usage: scheduler_process_worker.ts <baseDir> <totalDurationMs> <logPath>\n");
+if (!baseDir || !Number.isFinite(lifetimeMs) || lifetimeMs <= 0 || !logPath) {
+  writeSync(2, "usage: scheduler_process_worker.ts <baseDir> <lifetimeMs> <logPath>\n");
   process.exit(1);
 }
 
 process.chdir(baseDir);
-const config = createConfigStore(baseDir);
 
+const DEFAULT_TASK_INTERVAL_MS = 100_000;
 registerScheduledTask(
-  "test-task",
-  // Deliberately a large default (never due within this test's window) so
-  // the test can prove a small explicit config value, written by a LATER,
-  // separate process, is what actually makes it start firing.
-  () => (config.get("test.taskIntervalMs") as number) ?? 100_000,
+  "e2e-hot-reload-probe",
+  () => {
+    const v = createConfigStore(baseDir).get("test.taskIntervalMs");
+    return typeof v === "number" ? v : DEFAULT_TASK_INTERVAL_MS;
+  },
   () => appendFileSync(logPath, `${Date.now()}\n`)
 );
 
-startScheduler();
+startScheduler(false);
 
-// process.exitCode + a plain timeout (not unref'd) keeps this process
-// alive for exactly the window the test needs, then it exits on its own —
-// the test never has to guess when it's "safe" to kill it or race a kill
-// signal against in-flight file writes.
-setTimeout(() => process.exit(0), totalDurationMs);
-
-if (!existsSync(baseDir)) {
-  writeSync(2, `baseDir vanished: ${baseDir}\n`);
-  process.exit(1);
-}
+// Ref'd timer keeps this process alive for the test's window.
+setTimeout(() => {
+  stopScheduler();
+  process.exit(0);
+}, lifetimeMs);

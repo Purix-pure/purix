@@ -119,8 +119,8 @@ print(json.dumps({
   } catch {
     return null;
   } finally {
-    try { unlinkSync(tmpFile); } catch {}
-    try { unlinkSync(scriptFile); } catch {}
+    try { unlinkSync(tmpFile); } catch { /* temp file cleanup is best-effort */ }
+    try { unlinkSync(scriptFile); } catch { /* temp file cleanup is best-effort */ }
   }
 }
 

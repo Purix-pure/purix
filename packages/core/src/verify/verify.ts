@@ -73,26 +73,36 @@ export function verifyComponent(filePaths: string[], baseDir: string = process.c
   const tsconfigPath = resolve(baseDir, "tsconfig.json");
   const hasTsconfig = existsSync(tsconfigPath);
 
-  const result = hasTsconfig
+  const fileListArgs = [
+    ...command,
+    "--noEmit",
+    "--skipLibCheck",
+    "--target", "ESNext",
+    "--module", "Preserve",
+    "--moduleResolution", "bundler",
+    "--allowImportingTsExtensions",
+    "--verbatimModuleSyntax",
+    "--strict",
+    "--noUncheckedIndexedAccess",
+    "--noFallthroughCasesInSwitch",
+    "--noImplicitOverride",
+    ...filePaths.map((p) => resolve(p)),
+  ];
+  let result = hasTsconfig
     ? spawnSync([...command, "-p", tsconfigPath, "--noEmit"], { cwd: baseDir, stdout: "pipe", stderr: "pipe" })
-    : spawnSync(
-        [
-          ...command,
-          "--noEmit",
-          "--skipLibCheck",
-          "--target", "ESNext",
-          "--module", "Preserve",
-          "--moduleResolution", "bundler",
-          "--allowImportingTsExtensions",
-          "--verbatimModuleSyntax",
-          "--strict",
-          "--noUncheckedIndexedAccess",
-          "--noFallthroughCasesInSwitch",
-          "--noImplicitOverride",
-          ...filePaths.map((p) => resolve(p)),
-        ],
-        { cwd: baseDir, stdout: "pipe", stderr: "pipe" }
-      );
+    : spawnSync(fileListArgs, { cwd: baseDir, stdout: "pipe", stderr: "pipe" });
+
+  // TEST-REPORT F11: newer tsc (7.x) refuses the file-list form when a
+  // tsconfig.json exists in an ANCESTOR directory (a monorepo subfolder, or
+  // the conformance workspace inside this repo):
+  //   error TS5112: tsconfig.json is present but will not be loaded if files
+  //   are specified on commandline. Use '--ignoreConfig' to skip this error.
+  // This branch deliberately ignores any config, so retry once with the flag
+  // the compiler itself names. Older tsc never reaches this retry (it exits 0),
+  // so the flag is only ever sent to a compiler that understands it.
+  if (!hasTsconfig && result.exitCode !== 0 && /TS5112/.test(`${result.stderr.toString()}${result.stdout.toString()}`)) {
+    result = spawnSync([...fileListArgs, "--ignoreConfig"], { cwd: baseDir, stdout: "pipe", stderr: "pipe" });
+  }
 
   if (result.exitCode === 0) {
     // BUG FIX (GAPS-REPORT §2.3): this check runs `tsc` directly via

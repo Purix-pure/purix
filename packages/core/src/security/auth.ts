@@ -30,7 +30,7 @@ function save(state: AuthState): void {
   // "authorized" here means "trusted to write to this directory").
   try {
     chmodSync(AUTH_PATH, 0o600);
-  } catch {}
+  } catch { /* chmod best-effort — not all filesystems support it */ }
 }
 
 /**

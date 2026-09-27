@@ -35,7 +35,8 @@ function createToolSpec(name: string, packageSpecName: string, pinnedVersion: st
       const res = spawnSync([name, "--version"], { cwd: toolchainDir, stdout: "pipe", stderr: "pipe" });
       return res.exitCode === 0;
     },
-    async install(baseDir: string): Promise<{ ok: boolean; error?: string }> {
+    install(baseDir: string): Promise<{ ok: boolean; error?: string }> {
+      return Promise.resolve((() => {
       const toolchainDir = resolveToolchainTmp(baseDir, "python");
       const venvDir = toolchainSubdir(baseDir, "python", "venv");
       if (!existsSync(venvDir)) {
@@ -60,6 +61,7 @@ function createToolSpec(name: string, packageSpecName: string, pinnedVersion: st
         return { ok: false, error: installRes.stderr.toString().trim() || installRes.stdout.toString().trim() || "pip install failed" };
       }
       return { ok: true };
+      })());
     },
   };
 }
@@ -128,7 +130,8 @@ export const pythonPack: LanguagePack = {
     return results;
   },
 
-  async uninstall(baseDir: string): Promise<{ ok: boolean; error?: string }> {
+  uninstall(baseDir: string): Promise<{ ok: boolean; error?: string }> {
+    return Promise.resolve((() => {
     try {
       const venvDir = toolchainSubdir(baseDir, "python", "venv");
       if (existsSync(venvDir)) {
@@ -138,5 +141,6 @@ export const pythonPack: LanguagePack = {
     } catch (err: any) {
       return { ok: false, error: err?.message ?? "unknown error" };
     }
+    })());
   },
 };

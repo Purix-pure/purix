@@ -1,10 +1,11 @@
 // src/verify/tests_frameworks.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTestsWithQuarantine } from "./tests";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("verify/tests framework detection and execution", () => {
   let tmpDir: string;
@@ -14,7 +15,7 @@ describe("verify/tests framework detection and execution", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("fails closed with a specific error when no supported test framework is detected", () => {

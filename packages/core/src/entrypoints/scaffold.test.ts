@@ -7,12 +7,13 @@
 // fixes: a scaffold plan whose FIRST file isn't the representative one.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeScaffold, buildManifestEntry, detectScaffoldLanguage } from "./scaffold";
 import type { TopologyPlan } from "../manifest/schema";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const thisDir = dirname(fileURLToPath(import.meta.url));
 
@@ -24,7 +25,7 @@ describe("detectScaffoldLanguage", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("detects python from any file's extension, not just the first", () => {
@@ -36,10 +37,23 @@ describe("detectScaffoldLanguage", () => {
     expect(lang).toBe("python");
   });
 
-  it("detects rust, go, and ruby by extension", () => {
-    expect(detectScaffoldLanguage([{ path: "main.rs" }], "comp-x", tmpDir)).toBe("rust");
-    expect(detectScaffoldLanguage([{ path: "main.go" }], "comp-x", tmpDir)).toBe("go");
-    expect(detectScaffoldLanguage([{ path: "main.rb" }], "comp-x", tmpDir)).toBe("ruby");
+  it("does not recognize rust/go/ruby extensions (removed for this beta, see BETA_SCOPE.md) and falls through to resolveLanguage() instead of mis-tagging them", () => {
+    // No marker files present in tmpDir, so resolveLanguage()'s
+    // whole-repo detection finds nothing and defaults to "typescript" —
+    // NOT "rust"/"go"/"ruby". writeScaffold then verifies these files as
+    // TypeScript (via verifyComponent), which is the honest fail-closed
+    // behavior for an unsupported extension: it won't silently mis-tag
+    // the file's real language, and a genuinely non-TS file will simply
+    // fail that verification and roll back.
+    expect(detectScaffoldLanguage([{ path: "main.rs" }], "comp-x", tmpDir)).toBe("typescript");
+    expect(detectScaffoldLanguage([{ path: "main.go" }], "comp-x", tmpDir)).toBe("typescript");
+    expect(detectScaffoldLanguage([{ path: "main.rb" }], "comp-x", tmpDir)).toBe("typescript");
+  });
+
+  it("detects ambiguously when multiple language markers coexist, propagating resolveLanguage()'s own fail-closed error", () => {
+    writeFileSync(join(tmpDir, "tsconfig.json"), "{}");
+    writeFileSync(join(tmpDir, "pyproject.toml"), "");
+    expect(() => detectScaffoldLanguage([{ path: "main.rs" }], "comp-x", tmpDir)).toThrow(/Multiple language markers/);
   });
 
   it("falls back to resolveLanguage() (whole-repo detection) when no file has a recognized non-TS/JS extension", () => {
@@ -56,24 +70,38 @@ describe("writeScaffold", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "purix-scaffold-test-"));
     writeFileSync(
       join(tmpDir, "tsconfig.json"),
-      JSON.stringify({ compilerOptions: { strict: true, target: "ES2022" }, include: ["**/*.ts"] })
+      // skipLibCheck: true added — this fixture's job is checking that
+      // the SCAFFOLDED files compile, not type-checking every .d.ts
+      // reachable from node_modules (which, with no explicit "types"
+      // restriction here, TypeScript will otherwise walk upward and
+      // auto-include from any ancestor node_modules/@types it finds).
+      // That ambient-lib noise is exactly what caused a real, confirmed
+      // false failure elsewhere in this file's own history — see the
+      // GAPS-REPORT-2 §4 test below — and verify.ts's own no-tsconfig
+      // branch already sets skipLibCheck for the same reason; this just
+      // brings the WITH-tsconfig branch this test exercises in line with
+      // that.
+      JSON.stringify({ compilerOptions: { strict: true, target: "ES2022", skipLibCheck: true }, include: ["**/*.ts"] })
     );
     // verifyComponent() only looks for TypeScript under baseDir's own
-    // node_modules (no global/npx fallback — see verify.ts) — symlink
-    // this package's real, already-installed typescript in so the
-    // happy-path test below actually exercises a real tsc run instead
-    // of unconditionally hitting "not_installed".
+    // node_modules (no global/npx fallback — see verify.ts) — link this
+    // package's real, already-installed typescript in so the happy-path
+    // test below actually exercises a real tsc run instead of
+    // unconditionally hitting "not_installed".
+    //
+    // WINDOWS FIX: a plain directory symlink needs
+    // SeCreateSymbolicLinkPrivilege (admin/Developer Mode) on Windows —
+    // "junction" doesn't. thisDir's real typescript install is already an
+    // absolute local directory path, which is all a junction needs.
+    // Cheap either way (an NTFS reparse point, not a file copy), unlike
+    // recursively cpSync-ing the whole typescript package on every single
+    // test run.
     mkdirSync(join(tmpDir, "node_modules"));
-    const tsDir = resolve(thisDir, "../../node_modules/typescript");
-    if (process.platform === "win32") {
-      cpSync(tsDir, join(tmpDir, "node_modules", "typescript"), { recursive: true, dereference: true });
-    } else {
-      symlinkSync(tsDir, join(tmpDir, "node_modules", "typescript"));
-    }
+    symlinkSync(resolve(thisDir, "../../node_modules/typescript"), join(tmpDir, "node_modules", "typescript"), "junction");
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("writes and verifies a valid TypeScript component", async () => {

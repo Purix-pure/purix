@@ -125,7 +125,7 @@ function acquireConfigLock(baseDir: string): void {
       // path for this one lock, same as it always has.
       try {
         writeFileSync(holderPath(lock), JSON.stringify({ pid: process.pid }));
-      } catch {}
+      } catch { /* best-effort — this write/cleanup isn't load-bearing for the lock itself */ }
       return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -218,7 +218,7 @@ function writeAll(baseDir: string, data: ConfigData): void {
   } catch (err) {
     try {
       unlinkSync(tmpPath);
-    } catch {}
+    } catch { /* best-effort — this write/cleanup isn't load-bearing for the lock itself */ }
     throw err;
   }
 }
@@ -228,6 +228,7 @@ export interface ConfigStore {
   set(key: string, value: ConfigValue): void;
   delete(key: string): void;
   all(): ConfigData;
+  getOrCreate(key: string, factory: () => ConfigValue): ConfigValue;
 }
 
 /**
@@ -262,6 +263,40 @@ export function createConfigStore(baseDir: string): ConfigStore {
     },
     all() {
       return readAll(baseDir);
+    },
+    // CONCURRENCY FIX: an unlocked get()-then-conditionally-set() pair (the
+    // shape every previous "read a cached value, mint one if missing"
+    // caller used — see state/project_id.ts) is a check-then-act race
+    // across processes even though set() itself is safely locked. Two
+    // processes can both call get(), both see the key absent (neither's
+    // write has landed yet), and each independently mint and use its own
+    // value — set()'s lock only protects the two writes from corrupting
+    // each other's file, not from both having already happened. Confirmed
+    // directly: two real processes racing on getProjectId() with no cached
+    // id yet produced two different ids (see project_id.test.ts's
+    // multi-process regression test).
+    //
+    // getOrCreate() closes that window by moving the read INSIDE the same
+    // lock set()/delete() already use: whichever caller acquires the lock
+    // first computes and persists the value; every other caller, once it
+    // gets the lock, re-reads and finds the key already set — and returns
+    // THAT value instead of overwriting it with a second, different one.
+    // factory() may still run more than once (harmless for a pure
+    // computation like randomUUID() or a content hash — only its result
+    // ever reaches disk, and only the first writer's result does).
+    getOrCreate(key, factory) {
+      acquireConfigLock(baseDir);
+      try {
+        const data = readAll(baseDir);
+        const existing = data[key];
+        if (existing !== undefined) return existing;
+        const value = factory();
+        data[key] = value;
+        writeAll(baseDir, data);
+        return value;
+      } finally {
+        releaseConfigLock(baseDir);
+      }
     },
   };
 }

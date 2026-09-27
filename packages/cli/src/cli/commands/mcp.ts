@@ -35,7 +35,7 @@ export function registerMcpCommands(program: Command) {
       if (tools.length === 0) { console.log(`"${name}" exposes no tools.`); return; }
       for (const t of tools) console.log(`  ${t.name}${t.description ? ` — ${t.description}` : ""}`);
     } catch (err) {
-      console.error(`🛑 ${err instanceof Error ? err.message : err}`);
+      console.error(`🛑 ${err instanceof Error ? err.message : String(err)}`);
       process.exitCode = 1;
     }
   });
@@ -58,7 +58,7 @@ export function registerMcpCommands(program: Command) {
         if (result.ok) console.log(`✅ Result:`, JSON.stringify(result.content, null, 2));
         else { console.error(`🛑 Call failed: ${result.reason}`); process.exitCode = 1; }
       } catch (err) {
-        console.error(`\n🛑 MCP call failed: ${err instanceof Error ? err.message : err}`);
+        console.error(`\n🛑 MCP call failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
       }
     });

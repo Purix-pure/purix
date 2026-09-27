@@ -2,11 +2,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
 import { resolveLanguage } from "./registry";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigStore } from "../state/config";
 import { clearEntitlementsCache } from "../licensing/tier";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("ADR-017 Registry & Language Gating", () => {
   let tmpDir: string;
@@ -30,7 +31,7 @@ describe("ADR-017 Registry & Language Gating", () => {
 
   afterEach(() => {
     process.chdir(oldCwd);
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
     delete process.env.PURIX_DEV_TIER;
     process.env.NODE_ENV = oldNodeEnv;
   });

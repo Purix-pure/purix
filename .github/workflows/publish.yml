@@ -43,6 +43,28 @@ jobs:
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
 
+      # REAL FIX (2026-09-19): actions/setup-node@v4's registry-url option
+      # always writes "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}"
+      # into .npmrc, regardless of whether NODE_AUTH_TOKEN is set. This
+      # workflow deliberately never sets that secret (trusted publishing
+      # replaces it), so it expands to an empty string — and npm reads the
+      # mere presence of that line as "auth is already configured" and
+      # skips the OIDC exchange entirely, failing with ENEEDAUTH or a 404
+      # even though everything else here is correctly set up. Stripping
+      # the line is the documented fix; see
+      # PURIX-CODE-VERIFIED-GAP-REPORT-2026-09-19.md §3 for the trace.
+      - name: Remove empty auth token line left by setup-node
+        run: sed -i '/_authToken=$/d' .npmrc || true
+
+      # Trusted publishing needs npm CLI 11.5.1+. Pin explicitly rather
+      # than trust whatever version ships with the Node 22.13.0 image above
+      # — that pairing isn't guaranteed to include a new-enough npm, and
+      # this is exactly the kind of thing that should fail loudly in CI,
+      # not silently downgrade to a token-based auth attempt that doesn't
+      # exist anymore.
+      - name: Ensure npm CLI is new enough for trusted publishing
+        run: npm install -g npm@^11.5.1 && npm --version
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -58,6 +80,34 @@ jobs:
         run: pnpm run typecheck
       - name: Test
         run: pnpm run test
+
+      # Same two gates ci.yml enforces (the coverage threshold job and the language
+      # conformance job). A tag push skips PR review, so publishing must not be able to
+      # succeed while either of them would fail on a pull request.
+      - name: Coverage gate
+        run: pnpm run coverage
+      - name: Language conformance suite
+        run: pnpm exec tsx packages/core/src/language/conformance/run.ts
+
+      # A prerelease (0.2.0-beta.0) must never take npm's default "latest" tag: pnpm/npm
+      # publish to "latest" unless told otherwise, so `npm install @purix/cli` would hand
+      # everyone the beta. Derive the tag from the version: 0.2.0-beta.0 -> beta,
+      # 0.3.0-rc.1 -> rc, an unrecognised prerelease -> next, a stable version -> latest.
+      - name: Compute npm dist-tag
+        id: dist_tag
+        run: |
+          VERSION=$(node -p "require('./packages/cli/package.json').version")
+          case "$VERSION" in
+            *-*)
+              TAG=$(echo "$VERSION" | sed -E 's/^[^-]+-([A-Za-z]+).*/\1/')
+              case "$TAG" in
+                *[!A-Za-z]*|"") TAG=next ;;
+              esac
+              ;;
+            *) TAG=latest ;;
+          esac
+          echo "Publishing $VERSION under dist-tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       # All three packages currently move in lockstep at the same version
       # (see each package.json). Fail loudly rather than publish a package
@@ -83,10 +133,10 @@ jobs:
       # anyone installing at that moment (pnpm rewrites workspace: ranges to
       # the matching real semver range at publish time).
       - name: Publish @purix/core
-        run: pnpm --filter @purix/core publish --access public --provenance --no-git-checks
+        run: pnpm --filter @purix/core publish --access public --provenance --no-git-checks --tag "${{ steps.dist_tag.outputs.tag }}"
 
       - name: Publish @purix/mcp-server
-        run: pnpm --filter @purix/mcp-server publish --access public --provenance --no-git-checks
+        run: pnpm --filter @purix/mcp-server publish --access public --provenance --no-git-checks --tag "${{ steps.dist_tag.outputs.tag }}"
 
       - name: Publish @purix/cli
-        run: pnpm --filter @purix/cli publish --access public --provenance --no-git-checks
+        run: pnpm --filter @purix/cli publish --access public --provenance --no-git-checks --tag "${{ steps.dist_tag.outputs.tag }}"

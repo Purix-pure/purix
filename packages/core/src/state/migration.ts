@@ -35,7 +35,7 @@ export function buildMigrationPlan(
   return {
     summary: `${operation} on "${componentId}" touches ${changedPaths.length} file(s): ${changedPaths.join(", ")}`,
     changedPaths,
-    rollbackCommand: `purix migration-rollback <id>`, // <id> filled in by the caller once recorded
+    rollbackCommand: `purix migration rollback <id>`, // <id> filled in by the caller once recorded
   };
 }
 
@@ -43,7 +43,7 @@ export function buildMigrationPlan(
  * Stages a contract-changing change WITHOUT writing to real files.
  * Section 14: "wraps the change in a feature flag rather than
  * committing it live." The flag, concretely, is: the after-snapshot
- * sits in the migrations table until a human runs migration-activate.
+ * sits in the migrations table until a human runs "migration activate".
  */
 export function stageMigration(
   componentId: string,
@@ -107,7 +107,7 @@ export async function activateMigration(id: string, targetDir: string = process.
       reason:
         `Secrets/entropy scan blocked activation — nothing was written:\n` +
         secretFindings.map((f) => `  ${f.path}:${f.line} — ${f.reason} (${f.match})`).join("\n") +
-        `\nRemove the secret from the staged migration's content, then re-stage and re-run "purix migration-activate".`,
+        `\nRemove the secret from the staged migration's content, then re-stage and re-run "purix migration activate".`,
     };
   }
 

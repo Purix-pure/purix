@@ -33,7 +33,7 @@ export async function checkDrift(
   if (drifted) {
     try {
       appendAuditRecord({ event: "ai_monitoring_event", type: "component_drift", component_id: entry.component_id });
-    } catch {}
+    } catch { /* audit logging is best-effort and must not block the drift check itself */ }
   }
   return {
     drifted,
@@ -61,13 +61,14 @@ export interface DriftAcceptResult {
  * Purix's own Instruction Path. source_agent stays whatever the caller
  * knows, null if truly unknown.
  */
-export async function acceptDrift(
+export function acceptDrift(
   entry: ManifestEntry,
   liveFiles: { path: string; content: string }[],
   liveHash: string,
   targetDir: string = process.cwd(),
   sourceAgent: string | null = null
 ): Promise<DriftAcceptResult> {
+  return Promise.resolve((() => {
   // acceptDrift doesn't write anything itself (the drift already
   // happened outside Purix), so there's no "before the write" moment to
   // protect the way activateMigration has one. But it still sets the
@@ -116,4 +117,5 @@ export async function acceptDrift(
   }
 
   return { ok: true };
+  })());
 }

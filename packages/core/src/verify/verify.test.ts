@@ -8,11 +8,12 @@
 // compiler flags behave as claimed; mocking tsc would test nothing real.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyComponent } from "./verify";
 import { resolveRealNodeModules } from "../test-support/real_node_modules";
+import { safeRmSync } from "../platform/fs_retry.js";
 
 const REAL_NODE_MODULES = resolveRealNodeModules();
 
@@ -30,7 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  safeRmSync(tmpDir);
 });
 
 describe("verifyComponent — no files", () => {

@@ -274,7 +274,7 @@ export async function ingestDiffFromFile(
   try {
     diffText = await readFile(diffFilePath, "utf-8");
   } catch (err) {
-    return { ok: false, reason: `couldn't read diff file "${diffFilePath}": ${err instanceof Error ? err.message : err}` };
+    return { ok: false, reason: `couldn't read diff file "${diffFilePath}": ${err instanceof Error ? err.message : String(err)}` };
   }
   return ingestDiff(diffText, sourceAgent, targetDir);
 }

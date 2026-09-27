@@ -12,9 +12,10 @@ import { expect } from "expect";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { safeRmSync } from "@purix/core/platform/fs_retry";
 
 const require = createRequire(import.meta.url);
 const tsxLoader = require.resolve("tsx");
@@ -55,8 +56,8 @@ describe("connectAgent global-scope fallback (child process, isolated HOME)", ()
       expect(written.mcpServers.purix.command).toBe("purix");
       expect(written.mcpServers.purix.args).toEqual(["mcp-serve"]);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(fakeHome, { recursive: true, force: true });
+      safeRmSync(cwd);
+      safeRmSync(fakeHome);
     }
   });
 });

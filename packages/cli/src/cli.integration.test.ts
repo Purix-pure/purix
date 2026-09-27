@@ -3,10 +3,18 @@ import { expect } from "expect";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProgram } from "./cli";
+import { PURIX_VERSION } from "./version.js";
+// COMMAND-SURFACE FIX (2026-09-24): restores the Windows-safe retrying
+// cleanup (see fs_retry.ts's header) that this file's now-superseded
+// root-level predecessor (packages/cli/cli.integration.test.ts, deleted
+// this pass — its test glob never ran it) had, and that this src/ copy
+// had reverted to plain rmSync when it was rewritten for the 2026-09-22
+// CLI command regroup.
+import { safeRmSync } from "@purix/core/platform/fs_retry";
 
 const require = createRequire(import.meta.url);
 const tsxLoader = require.resolve("tsx");
@@ -19,31 +27,64 @@ type CommandSpec = {
 };
 
 const publicCommandTree: CommandSpec[] = [
-  { name: "create", syntax: "create <name>" },
-  { name: "modify", syntax: "modify <componentId> <instruction>", options: ["--override"] },
+  { name: "create", syntax: "create <name>", options: ["--dry-run"] },
+  { name: "modify", syntax: "modify <componentId> <instruction>", options: ["--override", "--dry-run"] },
+  { name: "change", syntax: "change <intent>", options: ["--component", "--override", "--dry-run"] },
   { name: "ingest", syntax: "ingest <componentId> <diffFile>", options: ["--agent"] },
   { name: "delete", syntax: "delete <componentId>", options: ["--force", "--files"] },
-  { name: "accept-drift", syntax: "accept-drift <componentId>", options: ["--agent"] },
-  { name: "migration-activate", syntax: "migration-activate <id>" },
-  { name: "migration-rollback", syntax: "migration-rollback <id>" },
-  { name: "migrations", syntax: "migrations [componentId]" },
+  // COMMAND-SURFACE FIX (2026-09-22 CLI/MCP command-standard pass): these
+  // entries were flat, hyphenated top-level commands (accept-drift,
+  // migration-activate, migration-rollback, migrations, secret-set,
+  // secret-rotate, secret-remove, secrets-status, provider-set,
+  // provider-status, provider-list, audit-trail, audit-verify, restore) —
+  // now grouped into noun-then-verb subcommand trees. See security.ts's
+  // comment for the standard this follows.
+  {
+    name: "migration",
+    subcommands: [
+      { name: "accept-drift", syntax: "accept-drift <componentId>", options: ["--agent"] },
+      { name: "activate", syntax: "activate <id>" },
+      { name: "rollback", syntax: "rollback <id>" },
+      { name: "list", syntax: "list [componentId]" },
+    ],
+  },
   { name: "status" },
   { name: "library" },
   { name: "stats" },
   { name: "audit" },
-  { name: "audit-trail", options: ["--component", "--since", "--format", "--out"] },
-  { name: "audit-verify" },
+  {
+    name: "audit-log",
+    subcommands: [
+      { name: "trail", options: ["--component", "--since", "--format", "--out"] },
+      { name: "verify" },
+    ],
+  },
   { name: "diagnostics" },
-  { name: "secret-set", syntax: "secret-set <name> <value>" },
-  { name: "secret-rotate", syntax: "secret-rotate <name> <newValue>" },
-  { name: "secret-remove", syntax: "secret-remove <name>" },
-  { name: "secrets-status" },
-  { name: "provider-set", syntax: "provider-set <id>", options: ["--base-url", "--key-env", "--model-low", "--model-high", "--label"] },
-  { name: "provider-status" },
-  { name: "provider-list" },
+  {
+    name: "secret",
+    subcommands: [
+      { name: "set", syntax: "set <name> <value>" },
+      { name: "rotate", syntax: "rotate <name> <newValue>" },
+      { name: "remove", syntax: "remove <name>" },
+      { name: "status" },
+    ],
+  },
+  {
+    name: "provider",
+    subcommands: [
+      { name: "set", syntax: "set <id>", options: ["--base-url", "--key-env", "--model-low", "--model-high", "--label"] },
+      { name: "status" },
+      { name: "list" },
+    ],
+  },
   { name: "tier-status" },
-  { name: "backup", syntax: "backup <outFile>" },
-  { name: "restore", syntax: "restore <inFile>" },
+  {
+    name: "backup",
+    subcommands: [
+      { name: "create", syntax: "create <outFile>" },
+      { name: "restore", syntax: "restore <inFile>" },
+    ],
+  },
   { name: "reconcile" },
   { name: "remember", syntax: "remember [options] <note>", options: ["--component"] },
   { name: "tools", syntax: "tools <purpose>" },
@@ -139,12 +180,11 @@ describe("Purix CLI integration contract", () => {
     const cwd = mkdtempSync(join(tmpdir(), "purix-cli-integration-"));
     try {
       const commands = [
-        ["status"], ["library"], ["stats"], ["audit-verify"], ["diagnostics"],
-        ["secrets-status"], ["provider-list"], ["provider-status"], ["tier-status"],
-        ["migrations"], ["config", "set", "integration.number", "42"],
+        ["status"], ["library"], ["stats"], ["audit-log", "verify"], ["diagnostics"],
+        ["secret", "status"], ["provider", "list"], ["provider", "status"], ["tier-status"],
+        ["migration", "list"], ["config", "set", "integration.number", "42"],
         ["config", "get", "integration.number"], ["config", "delete", "integration.number"],
         ["remember", "integration convention"], ["lang", "list"],
-        ["provider-set", "unknown-provider"], ["provider-set", "custom"],
       ];
       for (const args of commands) {
         const result = runCli(args, cwd);
@@ -152,7 +192,45 @@ describe("Purix CLI integration contract", () => {
         expect(result.status).toBe(0);
       }
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      safeRmSync(cwd);
+    }
+  });
+
+  // TEST-REPORT F12: these used to print an error and exit 0 (the previous
+  // version of the test above even listed two of them as "must succeed").
+  it("exits non-zero on invalid input instead of printing an error and reporting success", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "purix-cli-invalid-"));
+    try {
+      const cases: string[][] = [
+        ["provider", "set", "unknown-provider"],
+        ["provider", "set", "custom"],
+        ["secret", "rotate", "NEVER_STORED", "value"],
+        ["remember", ""],
+        ["remember", "-c", "no-such-component", "a note"],
+        ["index", join(cwd, "does-not-exist")],
+        ["index", "--languages", "notalanguage"],
+      ];
+      for (const args of cases) {
+        const result = runCli(args, cwd);
+        if (result.status !== 1) throw new Error(`${args.join(" ")} should exit 1 but returned ${result.status}:\n${result.output}`);
+      }
+    } finally {
+      safeRmSync(cwd);
+    }
+  });
+
+  // TEST-REPORT F6: with stdin closed (CI, pipes) a prompt used to hang and
+  // Node exited 13 ("unsettled top-level await") with the lock left behind.
+  // runCli passes no input, so the child sees EOF immediately.
+  it("treats a closed stdin at a confirmation prompt as 'no' instead of hanging (exit 13)", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "purix-cli-eof-"));
+    try {
+      const result = runCli(["index", "--full"], cwd);
+      expect(result.status).toBe(0);
+      expect(result.output).toContain("no input available");
+      expect(result.output).toContain("Cancelled");
+    } finally {
+      safeRmSync(cwd);
     }
   });
 
@@ -170,16 +248,34 @@ describe("Purix CLI integration contract", () => {
       for (const args of [["--help"], []]) {
         const result = runCli(args, cwd);
         expect(result.output).toContain("Commands:");
-        expect(result.output).toContain("create <name>");
+        expect(result.output).toContain("create [options] <name>");
+        expect(result.output).toContain("change [options] <intent>");
         expect(result.output).toContain("mcp-serve");
       }
       // --version must still take the fast path: no "Commands:" section,
       // and no reconcile/lock/scheduler side effects from full registration.
       const versionResult = runCli(["--version"], cwd);
       expect(versionResult.output).not.toContain("Commands:");
-      expect(versionResult.output.trim()).toBe("0.2.0-beta.0");
+      expect(versionResult.output.trim()).toBe(PURIX_VERSION);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      safeRmSync(cwd);
+    }
+  });
+
+  it("change: --help carries examples, and an empty intent or unknown --component exits 1 with a clear message", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "purix-cli-change-"));
+    try {
+      const help = runCli(["change", "--help"], cwd);
+      expect(help.output).toContain("Examples:");
+      expect(help.output).toContain("--dry-run");
+      const empty = runCli(["change", "  "], cwd);
+      expect(empty.status).toBe(1);
+      expect(empty.output).toContain("Describe the change");
+      const unknown = runCli(["change", "tweak it", "--component", "nope"], cwd);
+      expect(unknown.status).toBe(1);
+      expect(unknown.output).toContain('No manifest entry for "nope"');
+    } finally {
+      safeRmSync(cwd);
     }
   });
 
@@ -188,16 +284,17 @@ describe("Purix CLI integration contract", () => {
     try {
       for (const args of [
         ["modify", "missing", "change it"],
+        ["change", "anything", "--component", "missing"],
         ["ingest", "missing", "missing.diff"],
         ["delete", "missing"],
-        ["accept-drift", "missing"],
+        ["migration", "accept-drift", "missing"],
       ]) {
         const result = runCli(args, cwd);
         if (result.status !== 1) throw new Error(`${args.join(" ")} unexpectedly returned ${result.status}:\n${result.output}`);
         expect(result.status).toBe(1);
       }
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      safeRmSync(cwd);
     }
   });
 });

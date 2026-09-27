@@ -1,10 +1,11 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "path";
 import { pythonProvider } from "./python";
 import * as providerKit from "../provider-kit";
+import { safeRmSync } from "../../platform/fs_retry.js";
 
 describe("Python Provider Audit Regression", () => {
   let tmpDir: string;
@@ -15,7 +16,7 @@ describe("Python Provider Audit Regression", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    safeRmSync(tmpDir);
   });
 
   it("auditDependencies handles non-zero exit code with vulnerabilities", async () => {
@@ -27,7 +28,7 @@ describe("Python Provider Audit Regression", () => {
       }]
     });
     
-    // @ts-ignore
+    // @ts-expect-error test-only monkeypatch of a readonly hook, not assignable without a cast
     providerKit.providerKitHooks.runIsolatedOrNotInstalled = () => ({
       exitCode: 1,
       stdout: mockOutput,
@@ -49,7 +50,7 @@ describe("Python Provider Audit Regression", () => {
       }]
     });
     
-    // @ts-ignore
+    // @ts-expect-error test-only monkeypatch of a readonly hook, not assignable without a cast
     providerKit.providerKitHooks.runIsolatedOrNotInstalled = () => ({
       exitCode: 1,
       stdout: mockOutput,

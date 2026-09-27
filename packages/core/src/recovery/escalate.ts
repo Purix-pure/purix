@@ -146,7 +146,7 @@ export async function runEscalation(
     try {
       verdict = await escalateJudgeAndRepair(componentId, operation, instruction, snapshot, neighborContext, lastReason, attempt);
     } catch (err) {
-      lastReason = `escalation call threw: ${err instanceof Error ? err.message : err}`;
+      lastReason = `escalation call threw: ${err instanceof Error ? err.message : String(err)}`;
       console.log(`   ❌ ${lastReason}`);
       continue;
     }
