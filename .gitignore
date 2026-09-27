@@ -17,7 +17,6 @@ yarn-error.log*
 coverage/
 opencode/
 .opencode/
-docs/
 
 purix-architecture/
 # (removed a stray bare `*.md` rule that was here — it silently excluded

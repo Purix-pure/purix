@@ -119,7 +119,7 @@ Every modification a Purix-connected agent proposes goes through:
 3. **Sandbox verification** — the change is actually applied and tested in an isolated environment before it's ever committed
 4. **Audit trail** — every classification, confirmation, and verification result is recorded (`packages/core/src/manifest/`)
 
-## License and licensing model
+## License and licensing model:
 
 Core, CLI, and MCP server: Apache 2.0, free to use, self-host, and modify.
 Paid tiers (team accounts, additional entitlements) are enforced entirely
