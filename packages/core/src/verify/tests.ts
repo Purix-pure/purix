@@ -164,7 +164,12 @@ export function parseTapOutput(output: string): ParsedTapTest[] {
         break;
       }
     }
-    if (type !== "test") continue; // skip suite/file/hook rollups — only real leaf tests
+    // Newer Node 22.x stamps `type: 'test'` on leaf tests; 22.13.0 (this repo's
+    // engines floor and the CI pin) emits no `type:` line for them at all, while
+    // suites always carry `type: 'suite'`. Requiring an explicit 'test' made this
+    // parser return nothing on 22.13.0, which silently bypassed the re-run and
+    // quarantine logic. Only an explicit non-'test' type is a rollup to skip.
+    if (type !== null && type !== "test") continue;
     results.push({ name: name.trim(), passed: status === "ok" });
   }
   return results;

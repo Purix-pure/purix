@@ -20,6 +20,17 @@ function waitSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// Windows (antivirus, the search indexer, another process mid-rename) can make
+// a perfectly healthy file briefly unreadable/undeletable with these codes.
+// They mean "try again in a moment", never "the file is empty".
+const TRANSIENT_FS_CODES = new Set(["EPERM", "EACCES", "EBUSY", "EMFILE", "ENFILE"]);
+const TRANSIENT_FS_RETRIES = 40;
+const TRANSIENT_FS_RETRY_DELAY_MS = 15;
+
+function isTransientFsError(err: unknown): boolean {
+  return TRANSIENT_FS_CODES.has((err as NodeJS.ErrnoException).code ?? "");
+}
+
 function renameConfigFile(tmpPath: string, finalPath: string): void {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -111,6 +122,71 @@ function isPidAlive(pid: number): boolean {
  * concurrent callers now serialize instead of racing, and the second one
  * to run genuinely sees the first one's change in its own readAll().
  */
+function stealLockPath(baseDir: string): string {
+  return join(baseDir, ".purix", "config.lock.steal");
+}
+
+function readHolderPid(lock: string): number | undefined {
+  try {
+    const pid = (JSON.parse(readFileSync(holderPath(lock), "utf8")) as { pid?: unknown }).pid;
+    return typeof pid === "number" ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Is the lock currently at `lock` abandoned? Judged fresh every call — never
+// cache the answer across a wait, the lock may have changed hands since.
+function isLockStealable(lock: string): boolean {
+  const holderPid = readHolderPid(lock);
+  const age = Date.now() - statSync(lock).mtimeMs; // throws if the lock vanished
+  return typeof holderPid === "number"
+    ? !isPidAlive(holderPid) || age > CONFIG_LOCK_ABANDONED_MS
+    : age > CONFIG_LOCK_STALE_MS;
+}
+
+/**
+ * RACE FIX: stealing used to be "decide stale, then rmSync". With two
+ * waiters that's a classic TOCTOU: both see the same dead holder, waiter B
+ * removes it and takes a fresh lock, then waiter C — still acting on its
+ * old verdict — removes B's LIVE lock and takes its own. B and C are now
+ * both inside read-modify-write, and one silently loses its write.
+ *
+ * Fix: stealing is itself serialized behind a second mkdir mutex, and the
+ * staleness verdict is re-taken INSIDE it. Only one process can be
+ * removing a lock at a time, so whoever gets in second re-checks, sees a
+ * live holder, and backs off.
+ */
+function tryStealStaleLock(baseDir: string, lock: string): boolean {
+  const steal = stealLockPath(baseDir);
+  try {
+    mkdirSync(steal);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST" || isTransientFsError(err)) {
+      // Someone else is mid-steal. Break the steal mutex only if it's
+      // ancient (its owner crashed) — these critical sections take ms.
+      try {
+        if (Date.now() - statSync(steal).mtimeMs > CONFIG_LOCK_STALE_MS) {
+          rmSync(steal, { recursive: true, force: true });
+        }
+      } catch { /* gone already — fine */ }
+      return false;
+    }
+    throw err;
+  }
+  try {
+    if (!isLockStealable(lock)) return false; // re-verified under the mutex
+    rmSync(lock, { recursive: true, force: true });
+    return !existsSync(lock);
+  } catch {
+    return false; // lock vanished, or Windows still holds a handle — retry via the loop
+  } finally {
+    try {
+      rmSync(steal, { recursive: true, force: true });
+    } catch { /* best-effort */ }
+  }
+}
+
 function acquireConfigLock(baseDir: string): void {
   const dir = dirname(configPath(baseDir));
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -122,42 +198,21 @@ function acquireConfigLock(baseDir: string): void {
       // instead of guessing from age alone. Best-effort: if this write
       // fails, the lock is still held (mkdirSync above already
       // succeeded) — a future waiter just falls back to the age-only
-      // path for this one lock, same as it always has.
+      // path for this one lock.
       try {
         writeFileSync(holderPath(lock), JSON.stringify({ pid: process.pid }));
-      } catch { /* best-effort — this write/cleanup isn't load-bearing for the lock itself */ }
+      } catch { /* best-effort — not load-bearing for the lock itself */ }
       return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST") throw err;
-      // Stale-lock recovery: without this, a process that crashed while
-      // holding the lock would leave every future set()/delete() in
-      // every other process blocked forever waiting on a lock nobody
-      // will ever release.
+      // On Windows, mkdir on a directory that is mid-deletion (someone
+      // else's rmSync still has a handle open) reports EPERM/EACCES
+      // instead of EEXIST. Same meaning: not available yet, wait.
+      if (code !== "EEXIST" && !isTransientFsError(err)) throw err;
       try {
-        let holderPid: number | undefined;
-        try {
-          holderPid = (JSON.parse(readFileSync(holderPath(lock), "utf8")) as { pid: number }).pid;
-        } catch {
-          // No holder.json (pre-fix lock, or the narrow crash window
-          // noted above) — holderPid stays undefined, age-only fallback.
-        }
-
-        const stat = statSync(lock);
-        const age = Date.now() - stat.mtimeMs;
-        const stealable =
-          typeof holderPid === "number"
-            ? !isPidAlive(holderPid) || age > CONFIG_LOCK_ABANDONED_MS
-            : age > CONFIG_LOCK_STALE_MS;
-
-        if (stealable) {
-          rmSync(lock, { recursive: true, force: true });
-          continue; // steal it immediately, don't burn a backoff slot
-        }
+        if (isLockStealable(lock) && tryStealStaleLock(baseDir, lock)) continue;
       } catch {
-        // Lock directory disappeared between the failed mkdir and this
-        // stat — the holder released it; loop around and retry mkdir.
-        continue;
+        continue; // lock vanished between mkdir and stat — holder released it
       }
       waitSync(CONFIG_LOCK_RETRY_DELAY_MS);
     }
@@ -168,25 +223,54 @@ function acquireConfigLock(baseDir: string): void {
 }
 
 function releaseConfigLock(baseDir: string): void {
-  try {
-    rmSync(lockPath(baseDir), { recursive: true, force: true });
-  } catch {
-    // Already gone (e.g. stolen as stale by another waiter that timed
-    // out on us) — fine, the goal (no lock left behind) is met either way.
+  const lock = lockPath(baseDir);
+  // Never remove a lock that has since been taken over by someone else
+  // (we were judged stale while wedged) — that would evict a live holder.
+  const holderPid = readHolderPid(lock);
+  if (typeof holderPid === "number" && holderPid !== process.pid) return;
+  for (let attempt = 0; attempt <= TRANSIENT_FS_RETRIES; attempt++) {
+    try {
+      rmSync(lock, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      // EPERM/EBUSY here = a waiter has holder.json open right now
+      // (Windows). Retry instead of leaving a lock behind.
+      if (!isTransientFsError(err) || attempt >= TRANSIENT_FS_RETRIES) return;
+      waitSync(TRANSIENT_FS_RETRY_DELAY_MS);
+    }
   }
 }
 
 function readAll(baseDir: string): ConfigData {
+  const p = configPath(baseDir);
+  let raw: string | undefined;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      raw = readFileSync(p, "utf8");
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return {}; // genuinely no config yet
+      // BUG FIX: this used to be `catch { return {} }` for EVERYTHING. On
+      // Windows a healthy config.json can be momentarily unreadable
+      // (EPERM/EBUSY/EACCES while another process's rename or an
+      // antivirus scan has it) — and inside set()/delete()/getOrCreate()
+      // "return {}" means "start from an empty config and write that
+      // back", silently wiping every key another process had saved.
+      // Transient errors now retry; anything still failing after that
+      // throws instead of being mistaken for an empty file.
+      if (!isTransientFsError(err) || attempt >= TRANSIENT_FS_RETRIES) throw err;
+      waitSync(TRANSIENT_FS_RETRY_DELAY_MS);
+    }
+  }
   try {
-    const p = configPath(baseDir);
-    if (!existsSync(p)) return {};
-    const parsed = JSON.parse(readFileSync(p, "utf8"));
+    const parsed = JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     // A corrupted or hand-edited config.json degrades to "no overrides
-    // set" rather than crashing every command that happens to touch it —
-    // nothing stored here is load-bearing for correctness, only for
-    // convenience (quiet-mode persistence, throttling, threshold tuning).
+    // set" rather than crashing every command that happens to touch it.
+    // Writes are atomic (temp + rename), so this only happens for
+    // content that was corrupted outside this module.
     return {};
   }
 }

@@ -56,11 +56,38 @@ describe("parseTapOutput", () => {
       "  ---",
       "  type: 'suite'",
       "  ...",
-      "ok 4 - has no type block at all",
-      "  ---",
-      "  ...",
     ].join("\n");
     expect(parseTapOutput(tap)).toEqual([{ name: "adds", passed: true }, { name: "subtracts", passed: false }]);
+  });
+  it("reads leaf tests that carry no `type:` line (Node 22.13.0), still skipping suites", () => {
+    // Verbatim shape captured from `tsx --test --test-reporter=tap` on Node v22.13.0:
+    // leaf tests have no type line; describe() rollups have `type: 'suite'`.
+    const tap = [
+      "TAP version 13",
+      "# Subtest: outer",
+      "    # Subtest: leaf pass",
+      "    ok 1 - leaf pass",
+      "      ---",
+      "      duration_ms: 0.66485",
+      "      ...",
+      "    # Subtest: leaf fail",
+      "    not ok 2 - leaf fail",
+      "      ---",
+      "      duration_ms: 1.244414",
+      "      failureType: 'testCodeFailure'",
+      "      error: 'boom'",
+      "      code: 'ERR_ASSERTION'",
+      "      ...",
+      "    1..2",
+      "not ok 1 - outer",
+      "  ---",
+      "  duration_ms: 3.146311",
+      "  type: 'suite'",
+      "  failureType: 'subtestsFailed'",
+      "  ...",
+      "1..1",
+    ].join("\n");
+    expect(parseTapOutput(tap)).toEqual([{ name: "leaf pass", passed: true }, { name: "leaf fail", passed: false }]);
   });
   it("returns [] for output with no TAP result lines", () => {
     expect(parseTapOutput("hello\nworld")).toEqual([]);
