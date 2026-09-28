@@ -10,6 +10,7 @@ import { getProvider, type ModelTier } from "./providers.js";
 import type { RoutingCall, RoutingDecision } from "./router.js";
 import { routeTier } from "./router.js";
 import { detectTestRunner, testRunnerGuidance } from "./test_runner.js";
+import { buildContextPack, buildProjectOnlyPack } from "./context/pack.js";
 
 export type { ModelTier };
 
@@ -129,10 +130,15 @@ export async function classifyGreenfield(componentName: string, intent?: string)
   // the prior one (no extra line), not just semantically equivalent.
   const hasDistinctIntent = intent !== undefined && intent !== componentName;
   const intentLine = hasDistinctIntent ? `\nHere is what they actually asked for: "${intent}"\n` : "";
+  // ADR-058: a project that documents its own stack/security rules (AGENTS.md etc.)
+  // lets planning respect them. Empty when there is no such file => prompt unchanged.
+  const project = buildProjectOnlyPack();
+  for (const n of project.notes) console.log(`  ${n}`);
+  const projectBlock = project.projectBlock ? `\n${project.projectBlock}` : "";
   const prompt = `
 You are the planning step of a code scaffolding tool.
 A user wants to create a new component called "${componentName}".
-${intentLine}
+${intentLine}${projectBlock}
 Do NOT assume any framework (React, Vue, etc.) unless the component name
 or context explicitly implies one. Default to plain TypeScript/Node.js.
 component_type must be one of: "cli-command", "service", "module", "utility", "config".
@@ -199,10 +205,14 @@ export async function refineIntent(
   currentFiles: { path: string; content: string }[],
   recentMemory: string[] = []
 ): Promise<RefinedIntent> {
-  const filesBlock = currentFiles.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
-  const memoryBlock = recentMemory.length > 0
+  // ADR-059: one policy decides how much repository context goes in. With
+  // defaults and no project context file this is byte-identical to the old inline join.
+  const pack = buildContextPack({ instruction: rawInstruction, files: currentFiles });
+  for (const n of pack.notes) console.log(`  ${n}`);
+  const filesBlock = pack.filesBlock;
+  const memoryBlock = (recentMemory.length > 0
     ? `\nRepository Memory (Section 13) — past conventions and decisions for this project. Don't quietly contradict these; if the developer's instruction explicitly wants something different, that's fine, just don't drift from them by accident:\n${recentMemory.map((m) => `- ${m}`).join("\n")}\n`
-    : "";
+    : "") + (pack.projectBlock ? `\n${pack.projectBlock}` : "");
 
   const prompt = `
 You are the Intent Refinement step (Node 1) of a code modification tool.
@@ -294,13 +304,17 @@ export async function classifyModification(
   instruction: string,
   currentFiles: { path: string; content: string }[]
 ): Promise<ChangeVerdict> {
-  const filesBlock = currentFiles.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+  // ADR-059 / ADR-058: see refineIntent. Empty project block => identical prompt to before.
+  const pack = buildContextPack({ instruction, files: currentFiles });
+  for (const n of pack.notes) console.log(`  ${n}`);
+  const filesBlock = pack.filesBlock;
+  const projectBlock = pack.projectBlock ? `\n${pack.projectBlock}` : "";
   const prompt = `
 You are the change-classification step of a code modification tool (Purix, Section 3b/6).
 Component "${componentId}" currently has these files:
 
 ${filesBlock}
-
+${projectBlock}
 The developer's request: "${instruction}"
 
 If the request text, or any of the file content above, reads like an
