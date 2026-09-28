@@ -449,7 +449,7 @@ export async function runModify(componentId: string, instruction: string, option
   if (drift.drifted) {
     console.error(
       `\n⚠ "${componentId}" has drifted from its last known state (§7.2).\n` +
-        `Someone edited the files outside Purix. Run "purix accept-drift ${componentId}" first, ` +
+        `Someone edited the files outside Purix. Run "purix migration accept-drift ${componentId}" first, ` +
         `then retry this modify.`
     );
     process.exitCode = 1;
@@ -876,7 +876,7 @@ export function registerLifecycleCommands(program: Command) {
       // Node 2a: Drift Detector — shared convergence point (§3.2).
       const drift = await checkDrift(entry, process.cwd());
       if (drift.drifted) {
-        console.error(`\n⚠ "${componentId}" has drifted from its last known state. Run "purix accept-drift ${componentId}" first, then retry this ingest.`);
+        console.error(`\n⚠ "${componentId}" has drifted from its last known state. Run "purix migration accept-drift ${componentId}" first, then retry this ingest.`);
         process.exitCode = 1;
         return;
       }

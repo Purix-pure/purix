@@ -6,7 +6,7 @@
 // executes the tests in sandbox isolation, parsing JSON/TAP test results.
 import { existsSync, realpathSync, readFileSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
-import { recordTestResult, isFlaky, sampleCount, FLAKY_MIN_SAMPLES } from "../manifest/test_history.js";
+import { recordTestResult, isFlaky } from "../manifest/test_history.js";
 import { runIsolated, type IsolationLevel } from "../sandbox/sandbox_exec.js";
 
 export interface TestRunResult {
@@ -175,7 +175,15 @@ export function runTestsWithQuarantine(
   filePaths: string[],
   baseDir: string = process.cwd()
 ): TestRunResult {
+  // Only TypeScript sources map to a sibling *.test.ts. For any other path
+  // (README.md, .gitignore, Dockerfile...) the .replace() below would be a
+  // no-op, the file would "exist", and it would be handed to the test runner
+  // AS a test file. If nothing in the input is TypeScript there is nothing to run.
+  if (!filePaths.some((p) => p.endsWith(".ts"))) {
+    return { status: "no_tests", quarantinedFailures: [] };
+  }
   const testFiles = filePaths
+    .filter((p) => p.endsWith(".ts"))
     .map((p) => p.replace(/\.ts$/, ".test.ts"))
     .filter((p) => existsSync(resolve(baseDir, p)));
 
@@ -279,42 +287,36 @@ export function runTestsWithQuarantine(
   for (const t of parsedTests) {
     const name = t.name;
     const passed = t.passed;
-    // Capture this BEFORE recordTestResult below appends the current
-    // run — this is what isFlaky's own FLAKY_MIN_SAMPLES check would
-    // have seen coming in, i.e. whether isFlaky could possibly have
-    // returned true for this test before now.
-    const priorSamples = passed ? 0 : sampleCount(componentId, name);
+    // Judge flakiness on the history as it stood BEFORE this run. Recording
+    // first would put the current failure into the history, and any test that
+    // had passed at least FLAKY_MIN_SAMPLES-1 times would then look "mixed"
+    // (pass + fail) on its very first real regression and be excused.
+    const flakyBefore = passed ? false : isFlaky(componentId, name);
     recordTestResult(componentId, name, passed ? "pass" : "fail");
     if (passed) continue;
 
-    if (isFlaky(componentId, name)) {
-      quarantined.push(name);
-      continue;
-    }
-
-    // Not (yet) flaky by history — but with fewer than
-    // FLAKY_MIN_SAMPLES prior samples, isFlaky couldn't have returned
-    // true for this test regardless of how it actually behaves, so a
-    // single failure here might just be its first occurrence catching
-    // a flake rather than a real regression. One bounded, local re-run
-    // (not an LLM call) before committing to "real", same sandbox
-    // invocation this call is already running inside.
-    if (priorSamples < FLAKY_MIN_SAMPLES) {
-      const rerunArgs = framework === "node:test" ? [...runnerArgs, "--test-name-pattern", name] : runnerArgs;
-      const rerun = runIsolated([...runnerCmd, ...rerunArgs, ...testFiles], {
-        cwd: baseDir,
-        writableDir: baseDir,
-        extraReadOnlyBinds: extraBinds,
-      });
-      let rerunPassed = rerun.exitCode === 0;
-      const rerunParsed = parseTapOutput(rerun.stdout);
-      const rerunTest = rerunParsed.find((rt) => rt.name === name);
-      if (rerunTest) rerunPassed = rerunTest.passed;
-      recordTestResult(componentId, name, rerunPassed ? "pass" : "fail");
-      if (rerunPassed) {
+    // A failure is only non-blocking if it does NOT reproduce. History decides
+    // how it is reported, never whether a reproducible failure blocks: a
+    // deterministic failure fails the re-run too, however flaky the test once
+    // was. One bounded, local re-run (not an LLM call), same sandbox invocation.
+    const rerunArgs = framework === "node:test" ? [...runnerArgs, "--test-name-pattern", name] : runnerArgs;
+    const rerun = runIsolated([...runnerCmd, ...rerunArgs, ...testFiles], {
+      cwd: baseDir,
+      writableDir: baseDir,
+      extraReadOnlyBinds: extraBinds,
+    });
+    let rerunPassed = rerun.exitCode === 0;
+    const rerunParsed = parseTapOutput(rerun.stdout);
+    const rerunTest = rerunParsed.find((rt) => rt.name === name);
+    if (rerunTest) rerunPassed = rerunTest.passed;
+    recordTestResult(componentId, name, rerunPassed ? "pass" : "fail");
+    if (rerunPassed) {
+      if (flakyBefore) {
+        quarantined.push(name);
+      } else {
         console.log(`  ⚠ first-time failure did not reproduce on re-run, not blocking this pass, watch for a pattern: ${name}`);
-        continue;
       }
+      continue;
     }
 
     real.push(name);

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb } from "../manifest/store";
 import { runTestsWithQuarantine } from "./tests";
+import { recordTestResult } from "../manifest/test_history.js";
 import { resolveRealNodeModules } from "../test-support/real_node_modules";
 import { safeRmSync } from "../platform/fs_retry.js";
 
@@ -77,5 +78,43 @@ describe("runTestsWithQuarantine (real tsx)", { skip }, () => {
   it("passes when the test file runs cleanly but declares no tests", () => {
     testFile("const unused = 1; void unused;");
     expect(runTestsWithQuarantine("comp-empty", ["src/a.ts"], dir).status).toBe("pass");
+  });
+
+  it("blocks a deterministic regression of a test that has already passed several times", () => {
+    testFile('test("adds", () => { assert.equal(1 + 1, 2); });');
+    for (let i = 0; i < 3; i++) expect(runTestsWithQuarantine("comp-regress", ["src/a.ts"], dir).status).toBe("pass");
+    testFile('test("adds", () => { assert.equal(1 + 1, 3); });');
+    const r = runTestsWithQuarantine("comp-regress", ["src/a.ts"], dir);
+    expect(r.status).toBe("fail");
+    expect(r.reason).toContain("adds");
+    expect(r.quarantinedFailures).toEqual([]);
+  });
+  it("still blocks when a test that failed once in the past, and was then fixed, regresses again", () => {
+    const good = 'test("adds", () => { assert.equal(1 + 1, 2); });';
+    const bad = 'test("adds", () => { assert.equal(1 + 1, 3); });';
+    testFile(good);
+    for (let i = 0; i < 3; i++) runTestsWithQuarantine("comp-again", ["src/a.ts"], dir);
+    testFile(bad);
+    expect(runTestsWithQuarantine("comp-again", ["src/a.ts"], dir).status).toBe("fail");
+    testFile(good);
+    for (let i = 0; i < 2; i++) expect(runTestsWithQuarantine("comp-again", ["src/a.ts"], dir).status).toBe("pass");
+    testFile(bad);
+    expect(runTestsWithQuarantine("comp-again", ["src/a.ts"], dir).status).toBe("fail");
+  });
+  it("quarantines, without blocking, a known-flaky test whose failure does not reproduce on the re-run", () => {
+    for (const result of ["pass", "fail", "pass"] as const) recordTestResult("comp-known-flaky", "flaky again", result);
+    const marker = join(dir, "seen2.flag").replace(/\\/g, "/");
+    testFile(`import { existsSync, writeFileSync } from "node:fs";\ntest("flaky again", () => { if (!existsSync("${marker}")) { writeFileSync("${marker}", "x"); assert.fail("first time only"); } });`);
+    const r = runTestsWithQuarantine("comp-known-flaky", ["src/a.ts"], dir);
+    expect(r.status).toBe("pass");
+    expect(r.quarantinedFailures).toEqual(["flaky again"]);
+  });
+  it("runs no tests for input that contains no TypeScript file (README, .gitignore, Dockerfile)", () => {
+    writeFileSync(join(dir, "README.md"), "# hi\n");
+    writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(dir, "Dockerfile"), "FROM node:22\n");
+    for (const f of ["README.md", ".gitignore", "Dockerfile"]) {
+      expect(runTestsWithQuarantine("comp-docs", [f], dir).status).toBe("no_tests");
+    }
   });
 });
