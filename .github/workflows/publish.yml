@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.13.0
+          node-version: '24'
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
 
@@ -57,7 +57,7 @@ jobs:
         run: sed -i '/_authToken=$/d' .npmrc || true
 
       # Trusted publishing needs npm CLI 11.5.1+. Pin explicitly rather
-      # than trust whatever version ships with the Node 22.13.0 image above
+      # than trust whatever version ships with the Node version installed above
       # — that pairing isn't guaranteed to include a new-enough npm, and
       # this is exactly the kind of thing that should fail loudly in CI,
       # not silently downgrade to a token-based auth attempt that doesn't

@@ -58,9 +58,12 @@ purix-architecture/
 .turbo
 .turbo/*
 
+
+
 # Toolchain installs & fixture-scoped caches — never bundle or commit
 **/Python/
 !**/Python/_cache/**/.gitkeep
+!packages/core/src/language/conformance/fixtures/python/
 .venv/
 **/.venv/
 .ruff_cache/

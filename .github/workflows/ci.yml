@@ -10,7 +10,18 @@ on:
 
 jobs:
   validate:
+    name: validate (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      # Node.js's own package-maintenance guidance: test every supported LTS
+      # line plus Current. We also keep the exact declared floor as its own
+      # leg, because floor-only bugs are invisible on newer Node (the 22.13.0
+      # TAP-output bug was found this way). `24` is explicit rather than
+      # `lts/*` because `lts/*` moves to 26 in Oct 2026 and would silently
+      # drop 24 from the matrix. See docs/NODE_SUPPORT_POLICY.md.
+      fail-fast: false
+      matrix:
+        node: ['22.13.0', '24', 'latest']
     steps:
       - uses: actions/checkout@v4
       # pnpm/action-setup only supports pnpm v10 and older. pnpm's own docs
@@ -25,7 +36,7 @@ jobs:
           version: 12.4.1
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.13.0
+          node-version: ${{ matrix.node }}
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -67,7 +78,7 @@ jobs:
           version: 12.4.1
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.13.0
+          node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

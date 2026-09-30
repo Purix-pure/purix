@@ -1,7 +1,7 @@
 # SETUP.md — Local Development Setup
 
 ## Prerequisites
-- Node.js >= 22.13.0
+- Node.js 22.13.0+ on the 22 line, or 24+ (see `docs/NODE_SUPPORT_POLICY.md`)
 - pnpm@12.4.1 (see `packageManager` in the root `package.json`; install via `corepack enable`
   or `npm install -g pnpm@12.4.1` if you don't already have it)
 

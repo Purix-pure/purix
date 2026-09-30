@@ -3,9 +3,11 @@
 //
 // Must run before ANY import: several core modules (manifest/store,
 // platform/sqlite_compat, llm/sqlite_retry, licensing/tier) use the
-// built-in node:sqlite module, which is still experimental on Node 22/23
-// (our minimum supported version — engines requires >=22.13.0; it isn't
-// unflagged as stable until Node 24). Node prints
+// built-in node:sqlite module, which still prints an experimental warning
+// on some supported versions (engines requires ^22.13.0 || >=24.0.0; the
+// warning was observed on v22.x and v24.0.0 but not on a later 24.x, so the
+// filter below stays until the minimum moves past every version that prints
+// it). Node prints
 // "ExperimentalWarning: SQLite is an experimental feature and might
 // change at any time" the first time that module loads, on every single
 // command that touches the manifest DB — which is nearly all of them.

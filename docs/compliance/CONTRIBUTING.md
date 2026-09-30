@@ -16,7 +16,7 @@ pnpm run typecheck
 pnpm run test
 ```
 
-Node >= 22.13.0 and pnpm@12.4.1 (see `packageManager` in the root `package.json`;
+Node 22.13.0+ (22 line) or 24+, and pnpm@12.4.1 (see `packageManager` in the root `package.json`;
 `corepack enable` will pick it up automatically).
 
 ## Before opening a PR

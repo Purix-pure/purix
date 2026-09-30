@@ -13,7 +13,7 @@
 # since no Docker daemon is available in the environment that authored it.
 # Run a real `docker build .` once before relying on this in CI/release.
 
-ARG NODE_VERSION=22.13.0
+ARG NODE_VERSION=24
 ARG PNPM_VERSION=9.15.0
 
 # ---------------------------------------------------------------------------
