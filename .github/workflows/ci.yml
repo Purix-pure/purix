@@ -57,9 +57,7 @@ jobs:
       # for `setSecurityOverride()`'s now-removed orphaned bypass. Wiring it
       # in here is what actually makes it a check, not a second inert one.
       #
-      # NOTE for whoever next touches this: as of this fix, actual coverage
-      # on these directories is below the 90% threshold (measured locally:
-      # ~88.8% lines / ~84.3% branches / ~81.6% functions), concentrated in
+    
       # llm/providers.ts, verify/tests.ts, verify/compile.ts, and
       # sandbox/sandbox_exec.ts. This step is expected to fail until those
       # files get real additional test coverage — that failure is the
