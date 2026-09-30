@@ -13,8 +13,8 @@
 // cleanliness: if the session literally reused loadMasterKey() unmodified,
 // the key encrypting it would come from whichever repo happened to be cwd
 // the first time `purix login` ran — silently contradicting "session
-// identity is machine-scoped." Two stores, two keys, closes that.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+// identity is machine-scoped." Two stores, two keys, closes that. 
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 
@@ -151,7 +151,14 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
   function saveStore(store: StoreFile): void {
     ensureSecretFilesGitignored(baseDir, [basename(masterKeyPath), basename(storePath)]);
     mkdirSync(dirname(storePath), { recursive: true });
-    writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
+    const tmpPath = `${storePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+try {
+  writeFileSync(tmpPath, JSON.stringify(store, null, 2), { encoding: "utf-8", mode: 0o600 });
+  renameSync(tmpPath, storePath);
+} catch (err) {
+  try { unlinkSync(tmpPath); } catch { /* temp file may not exist */ }
+  throw err;
+}
     try {
       chmodSync(storePath, 0o600);
     } catch { /* chmod best-effort — not all filesystems support it */ }
@@ -204,9 +211,11 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
 // before this refactor. providers.ts and cli/commands/security.ts import
 // these three names exactly as they always have; nothing at those call
 // sites changes.
-const projectStore = createSecretsStore(join(process.cwd(), ".purix"));
+function projectStore(): SecretsStore {
+  return createSecretsStore(join(process.cwd(), ".purix"));
+}
 
-export const setSecret = projectStore.setSecret;
-export const getSecret = projectStore.getSecret;
-export const deleteSecret = projectStore.deleteSecret;
-export const listSecretStatus = projectStore.listSecretStatus;
+export const setSecret: SecretsStore["setSecret"] = (...args) => projectStore().setSecret(...args);
+export const getSecret: SecretsStore["getSecret"] = (...args) => projectStore().getSecret(...args);
+export const deleteSecret: SecretsStore["deleteSecret"] = (...args) => projectStore().deleteSecret(...args);
+export const listSecretStatus: SecretsStore["listSecretStatus"] = (...args) => projectStore().listSecretStatus(...args);
