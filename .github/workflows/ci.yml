@@ -38,6 +38,8 @@ jobs:
       - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
+          # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
+          install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
@@ -67,6 +69,8 @@ jobs:
       - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
+          # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
+          install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
@@ -76,10 +80,12 @@ jobs:
       - name: Run Gate-Parity Conformance Suite
         run: pnpm exec tsx packages/core/src/language/conformance/run.ts
       - name: Upload Parity Report Artifact
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: language-parity-report
           path: language-parity-report.json
+          if-no-files-found: error
 
   # Evidence job for the platforms the code has never been run on (PURIX-21 G12, exit gate 11; PURIX-36 C-23). Cold start on
   # Windows and macOS: the whole runner, including the release-only stage (pack, install the tarballs into a folder with spaces and
@@ -103,6 +109,8 @@ jobs:
       - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
+          # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
+          install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
@@ -128,6 +136,8 @@ jobs:
       - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
+          # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
+          install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'

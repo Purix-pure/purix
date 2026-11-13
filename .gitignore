@@ -90,3 +90,6 @@ purix-architecture/TESTING_POLICY.md
 *.db-shm
 coverage/
 .test-logs/
+
+# Written by packages/core/src/language/conformance/run.ts (uploaded by CI)
+language-parity-report.json

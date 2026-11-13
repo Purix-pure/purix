@@ -1,6 +1,6 @@
 // packages/core/src/language/conformance/run.ts
 import { readFileSync, existsSync, cpSync, mkdirSync } from "node:fs";
-import { createFileExclusive } from "../../platform/atomic_write.js";
+import { createFileExclusive, writeJsonAtomic } from "../../platform/atomic_write.js";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getLanguageProvider } from "../registry.js";
@@ -348,6 +348,9 @@ const unattendedGate: ConsentGate = { confirmInstall: () => Promise.resolve(true
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("run.ts")) {
   runConformanceSuite(undefined, { consent: unattendedGate })
     .then(({ certified, report }) => {
+      // CI uploads this file (ci.yml, conformance job). It is written whether or not the suite certified, so a red run still
+      // leaves the evidence behind. It is git-ignored: it is a run result, not source.
+      writeJsonAtomic(join(findRepoRoot(__dirname), "language-parity-report.json"), { certified, report });
       console.log(`Language Parity Conformance Suite completed. Certified: ${certified}`);
       if (!certified) {
         console.log("Details:", JSON.stringify(report, null, 2));
