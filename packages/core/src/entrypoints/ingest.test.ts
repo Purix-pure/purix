@@ -43,7 +43,9 @@ describe("ingestDiff", () => {
       const result = await ingestDiff(diff, "human", tmpDir);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.files).toEqual([{ path: "new.ts", new_content: "export const x = 1;\nexport const y = 2;", status: "added" }]);
+        // A3-1: no "\ No newline at end of file" marker means the new file ends with a newline (this expectation used to be
+        // the lost-final-newline defect: 60 of 64 added files lost theirs, research 04).
+        expect(result.files).toEqual([{ path: "new.ts", new_content: "export const x = 1;\nexport const y = 2;\n", status: "added" }]);
         expect(result.provenance).toEqual({ source_type: "external_diff", source_agent: "human" });
       }
     });

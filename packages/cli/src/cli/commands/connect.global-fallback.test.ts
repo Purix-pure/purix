@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
+import { mcpLauncher } from "./connect_agent";
 
 const require = createRequire(import.meta.url);
 const tsxLoader = require.resolve("tsx");
@@ -53,8 +54,8 @@ describe("connectAgent global-scope fallback (child process, isolated HOME)", ()
       expect(existsSync(result.path)).toBe(true);
 
       const written = JSON.parse(readFileSync(result.path, "utf-8"));
-      expect(written.mcpServers.purix.command).toBe("purix");
-      expect(written.mcpServers.purix.args).toEqual(["mcp-serve"]);
+      expect(written.mcpServers.purix.command).toBe(mcpLauncher().command);
+      expect(written.mcpServers.purix.args).toEqual(mcpLauncher().args);
     } finally {
       safeRmSync(cwd);
       safeRmSync(fakeHome);

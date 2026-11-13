@@ -1,0 +1,19 @@
+# A4 (problem catalogue 2026-11-07): the files below decide what Purix lets an agent do, so a change to them should need a
+# named reviewer. Last matching pattern wins.
+#
+# The owner is the purix-pure account, as given by the project owner on 2026-11-13. If GitHub reports an owner here as
+# invalid (an owner must be a user or an organisation team, such as @purix-pure/maintainers), replace the name on every rule
+# below with the owner's own username or a team; until it is valid GitHub ignores the rule.
+#
+# Then turn on "Require review from Code Owners" in the branch protection rule for main.
+
+/packages/core/src/hooks/          @purix-pure
+/packages/core/src/sandbox/        @purix-pure
+/packages/core/src/gates/          @purix-pure
+/packages/core/src/security/       @purix-pure
+/packages/core/src/platform/       @purix-pure
+/packages/core/package.json        @purix-pure
+/.github/                          @purix-pure
+/Dockerfile                        @purix-pure
+/scripts/                          @purix-pure
+/docs/claims.json                  @purix-pure

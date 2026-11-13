@@ -1,12 +1,12 @@
 // packages/core/src/state/project_id.test.ts
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { getProjectId } from "./project_id";
-import { createConfigStore } from "./config";
+import { createConfigStore, createConfigStoreInDir } from "./config";
 import { resolveSharedStateDir } from "./git_common_dir";
 import { safeRmSync } from "../platform/fs_retry.js";
 import { resolveTsxCommand } from "../test-support/real_node_modules.js";
@@ -62,7 +62,7 @@ function writeGitConfig(baseDir: string, content: string) {
 // place) — writing straight to createConfigStore(baseDir) would silently
 // land in the wrong file and the flag would look unset.
 function setSharedConfigFlag(baseDir: string, key: string, value: boolean) {
-  createConfigStore(resolveSharedStateDir(baseDir)).set(key, value);
+  createConfigStoreInDir(resolveSharedStateDir(baseDir)).set(key, value);
 }
 
 describe("getProjectId", () => {
@@ -207,5 +207,43 @@ describe("getProjectId", () => {
     const distinctIds = new Set(results);
     expect(distinctIds.size).toBe(1);
     expect([...distinctIds][0]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
+describe("project id: where it is stored (regression)", () => {
+  test("the id is cached in <state dir>/config.json, never in a nested .purix/.purix", () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-pid-"));
+    try {
+      const id = getProjectId(dir);
+      expect(existsSync(join(dir, ".purix", "config.json"))).toBe(true);
+      expect(existsSync(join(dir, ".purix", ".purix"))).toBe(false);
+      expect(getProjectId(dir)).toBe(id);
+    } finally {
+      safeRmSync(dir);
+    }
+  });
+
+  test("an id cached by an earlier version in the nested location is carried over, not replaced", () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-pid-"));
+    try {
+      createConfigStoreInDir(join(dir, ".purix", ".purix")).set("project-id", "legacy-id-123");
+      expect(getProjectId(dir)).toBe("legacy-id-123");
+      expect(createConfigStoreInDir(join(dir, ".purix")).get("project-id")).toBe("legacy-id-123");
+    } finally {
+      safeRmSync(dir);
+    }
+  });
+
+  test("the opt-in set with `purix config set` (the project's own config.json) is honoured", () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-pid-"));
+    try {
+      mkdirSync(join(dir, ".git"));
+      writeFileSync(join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+      writeFileSync(join(dir, ".git", "config"), '[remote "origin"]\n\turl = https://example.com/a/b.git\n');
+      createConfigStore(dir).set("purix.shareProjectId", true);
+      expect(getProjectId(dir)).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      safeRmSync(dir);
+    }
   });
 });

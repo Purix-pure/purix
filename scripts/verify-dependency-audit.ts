@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { typescriptProvider } from "../packages/core/src/language/providers/typescript.js";
-import { pythonPack } from "../packages/core/src/language/providers/python.pack.js";
+import { installTool } from "../packages/core/src/tools/broker.js";
+import { fixedGate, memoryAudit } from "../packages/core/src/tools/test_helpers.js";
 import { pythonProvider } from "../packages/core/src/language/providers/python.js";
 
 let failures = 0;
@@ -177,17 +178,16 @@ async function verifyPython(): Promise<void> {
   const vulnDir = mkdtempSync(join(tmpdir(), "purix-audit-verify-py-vuln-"));
   try {
     writeFileSync(join(vulnDir, "requirements.txt"), "flask==0.5\n");
-    console.log(`  Installing Purix's pinned Python toolchain (incl. pip-audit) into ${vulnDir}...`);
-    await pythonPack.install(vulnDir);
-    console.log(`  Installing a real, known-vulnerable dependency (flask==0.5) into ${vulnDir}'s venv...`);
-    const venvPip = join(vulnDir, ".purix-tmp", "python", "venv", process.platform === "win32" ? "Scripts" : "bin", "pip");
-    const install = run([venvPip, "install", "flask==0.5"], vulnDir);
-    if (install.code !== 0) {
-      console.log("  ✗ FAIL — could not pip install flask==0.5");
-      console.log(`    exit code: ${install.code}, signal: ${install.signal}, timedOut: ${install.timedOut}`);
-      if (install.spawnError) console.log(`    spawnError: ${install.spawnError}`);
-      console.log(`    stderr: ${install.stderr.trim() || "(empty)"}`);
-      console.log(`    stdout: ${install.stdout.trim() || "(empty)"}`);
+    // ADR-060: a language pack no longer installs anything. pip-audit comes from the tools broker, into the
+    // project's own .purix/tools, with consent answered "yes" here because this script is the test harness.
+    console.log(`  Installing pip-audit through the tools broker into ${vulnDir}...`);
+    const installed = await installTool({ baseDir: vulnDir, audit: memoryAudit(), consent: fixedGate(true) }, "pip-audit");
+    // The audit reads requirements.txt itself (pip-audit -r), so flask==0.5 does not need to be installed anywhere.
+    if (!installed.ok) {
+      console.log("  ✗ FAIL — could not install pip-audit through the broker");
+      console.log(`    reason: ${installed.reason}`);
+      console.log(`    message: ${installed.message}`);
+      if (installed.hint) console.log(`    hint: ${installed.hint}`);
       failures++;
     } else {
       const auditRes = await pythonProvider.auditDependencies(vulnDir);

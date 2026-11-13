@@ -8,6 +8,10 @@ on:
     - cron: '0 9 1 * *'
   workflow_dispatch:
 
+# Least privilege: every job here only reads the repository. Nothing in this file writes to it or publishes.
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: validate (node ${{ matrix.node }})
@@ -23,7 +27,7 @@ jobs:
       matrix:
         node: ['22.13.0', '24', 'latest']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # pnpm/action-setup only supports pnpm v10 and older. pnpm's own docs
       # (as of pnpm 11) point installers at the successor action, pnpm/setup,
       # for v11+ — using the old action here would either fail outright or
@@ -31,50 +35,39 @@ jobs:
       # repo's pinned version. version is explicit here (not omitted) even
       # though pnpm/setup can read it from packageManager, so CI can never
       # silently drift from what package.json declares.
-      - uses: pnpm/setup@v1
+      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
           cache: 'pnpm'
-      - name: Install dependencies
+      - name: Install dependencies (the runner repeats this as its first stage and checks it)
         run: pnpm install --frozen-lockfile
-      - name: Run Boundary Check
-        run: pnpm run boundary-check
-      - name: Run Artifact Check
-        run: pnpm run artifact-check
-      - name: Run Typecheck
-        run: pnpm run typecheck
-      - name: Run Test Suite
-        run: pnpm run test
-      # BUG FIX (GAPS-REPORT §1, carried forward from Document 4 §1.3): this
-      # script has existed and been real (a genuine 90% line/branch/function
-      # threshold over the security-relevant llm/licensing/gates/sandbox/
-      # verify directories) since before this fix, but was never invoked
-      # anywhere in CI — a defined-but-unenforced gate that reads as a live
-      # guarantee it isn't, the same failure class this pass already named
-      # for `setSecurityOverride()`'s now-removed orphaned bypass. Wiring it
-      # in here is what actually makes it a check, not a second inert one.
-      #
-    
-      # llm/providers.ts, verify/tests.ts, verify/compile.ts, and
-      # sandbox/sandbox_exec.ts. This step is expected to fail until those
-      # files get real additional test coverage — that failure is the
-      # correct, honest signal this gate exists to produce, not a reason to
-      # lower the threshold or narrow --test-coverage-include to make it
-      # pass artificially.
-      - name: Run Coverage Gate
-        run: pnpm run coverage
+      # N-8 (PURIX-36): one command runs every gate. scripts/purix-04-run-all.mjs is the single list of what is tested
+      # (install, boundary, single-point, tool-boundary, artifact, typecheck, lint, build, the three package suites,
+      # the 90% coverage gate, the lock/hook/bypass flows, the MCP smoke test, the per-agent connect harness). Repeating those
+      # as separate steps here is how CI and the local runner drifted apart. Left out of this job on purpose: conformance (its own job
+      # below, which also uploads the parity report), release-only checks and the Windows stage (the os-smoke job), and the live
+      # network check (its own job). Do not lower the coverage threshold or narrow --test-coverage-include in package.json.
+      - name: Run every gate (scripts/purix-04-run-all.mjs)
+        run: node scripts/purix-04-run-all.mjs --skip conformance,release,windows,network
+      - name: Keep the stage logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-logs-validate-node-${{ matrix.node }}
+          path: .test-logs
+          if-no-files-found: ignore
 
   conformance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/setup@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: 'pnpm'
@@ -83,7 +76,63 @@ jobs:
       - name: Run Gate-Parity Conformance Suite
         run: pnpm exec tsx packages/core/src/language/conformance/run.ts
       - name: Upload Parity Report Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: language-parity-report
           path: language-parity-report.json
+
+  # Evidence job for the platforms the code has never been run on (PURIX-21 G12, exit gate 11; PURIX-36 C-23). Cold start on
+  # Windows and macOS: the whole runner, including the release-only stage (pack, install the tarballs into a folder with spaces and
+  # non-ASCII characters, index, adopt, lock, check --strict) and, on Windows, the Windows-only stage.
+  # Images: GitHub moved windows-latest to Visual Studio 2026 (June 2026) and is moving macos-latest from macOS 15 to macOS 26
+  # (github.blog changelog 2026-05-14). Each OS therefore runs one pinned older image and `-latest`, so a red result can be told
+  # apart: red on both = our code; red only on the newer image = the runner moved.
+  # continue-on-error is deliberate and temporary: it records results without blocking releases. Remove it (make the jobs required)
+  # after THREE green runs in a row on every image listed here (C-23).
+  os-smoke:
+    name: os-smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest, macos-15, macos-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+        with:
+          version: 12.4.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run every gate on this OS (scripts/purix-04-run-all.mjs)
+        run: node scripts/purix-04-run-all.mjs --skip network
+      - name: Keep the stage logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-logs-${{ matrix.os }}
+          path: .test-logs
+          if-no-files-found: ignore
+
+  # W-2 (PURIX-36): the dependency audit must DETECT a known vulnerable package against the live registries. The runner says NOT CHECKED,
+  # never PASS, when it cannot reach npm or pip.
+  network-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+        with:
+          version: 12.4.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Dependency audit detects a known vulnerability (live npm and pip)
+        run: node scripts/purix-04-run-all.mjs --only network --network

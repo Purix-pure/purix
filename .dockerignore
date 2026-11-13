@@ -4,6 +4,8 @@ node_modules
 .git
 .turbo
 **/.turbo
+.purix
+**/.purix
 .purix-tmp
 **/.purix-tmp
 *.log

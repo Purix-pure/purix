@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/purix-pure/purix/security/advisories/new
+    about: Please do not file security issues as public issues. Use GitHub's private reporting flow.
+  - name: Questions and ideas
+    url: https://github.com/purix-pure/purix/discussions
+    about: Ask how to use Purix, or float an idea, before opening an issue.

@@ -6,6 +6,7 @@ import { verifyInSandbox } from "../sandbox/sandbox.js";
 import { getDependents, reVerifyDependents } from "../verify/impact.js";
 import { writeManifest } from "../manifest/store.js";
 import { appendAuditRecord } from "../security/audit_tamper_evidence.js";
+import { recordLandedChange } from "./landed_change.js";
 
 export interface DriftCheckResult {
   drifted: boolean;
@@ -81,7 +82,11 @@ export function acceptDrift(
   const verification = verifyInSandbox(
     entry.component_id,
     liveFiles.map((f) => ({ path: f.path, new_content: f.content })),
-    targetDir
+    targetDir,
+    undefined,
+    [],
+    // The live files ARE the project on disk, so there is no unmodified code to judge a failing test against (F06-02 regression).
+    { candidateOnDisk: true }
   );
   if (verification.status !== "pass") {
     return {
@@ -102,6 +107,8 @@ export function acceptDrift(
     provenance: { source_type: "external_diff", source_agent: sourceAgent },
   });
   writeManifest(entry);
+  // Accepting drift moves the baseline, so it belongs in the hash-chained trail like any other landed change.
+  const recorded = recordLandedChange({ kind: "accept_drift", component_id: entry.component_id, version: entry.current_version, sync_hash: liveHash, operation: "drift_reconciled", source: sourceAgent }, targetDir);
 
   const dependents = getDependents(entry);
   if (dependents.length > 0) {
@@ -111,11 +118,13 @@ export function acceptDrift(
       console.log(
         c.status === "pass"
           ? `   ✅ ${c.component_id} still verifies`
-          : `   ❌ ${c.component_id} now FAILS verification:\n      ${c.reason}`
+          : c.infrastructure
+            ? `   ⚠️  ${c.component_id} could not be re-verified (not a failure of the dependent):\n      ${c.reason}`
+            : `   ❌ ${c.component_id} now FAILS verification:\n      ${c.reason}`
       );
     }
   }
 
-  return { ok: true };
+  return recorded.problems.length > 0 ? { ok: true, reason: `The baseline was accepted, but ${recorded.problems.join("; ")}.` } : { ok: true };
   })());
 }

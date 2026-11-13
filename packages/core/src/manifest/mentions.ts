@@ -131,12 +131,21 @@ export function filterVerbatimMentions(intent: string, proposed: unknown): strin
  * chooses the final component_id; this only gives it a stable starting
  * name and lets the CLI/MCP fail early on an obvious collision.
  */
+// Words that carry no name when a request is typed or dictated as a sentence: pronouns, spoken fillers and the
+// verbs people open with. Kept apart from STOPWORDS on purpose: STOPWORDS also decides which words MATCH a file or
+// component, and "build" or "site" are real words in somebody's component id.
+const NAME_FILLER = new Set([
+  "i", "me", "my", "we", "our", "us", "you", "your", "uh", "um", "er", "hmm", "like", "just", "really", "actually",
+  "which", "what", "where", "who", "how", "there", "here", "they", "them", "their", "other", "same", "very",
+  "build", "building", "write", "develop", "make", "want", "wanted", "help", "new", "kind", "sort", "way",
+]);
+
 export function deriveComponentName(intent: string): string {
   const words = intent
     .slice(0, MAX_INTENT_LENGTH)
     .split(/\s+/)
     .map((w) => w.toLowerCase().replace(/[^a-z0-9]+/g, ""))
-    .filter((w) => w.length >= 2 && !STOPWORDS.has(w));
+    .filter((w) => w.length >= 2 && !STOPWORDS.has(w) && !NAME_FILLER.has(w));
   const name = words.slice(0, 4).join("-").slice(0, 40).replace(/-+$/, "");
   return name.length >= 2 ? name : "new-component";
 }

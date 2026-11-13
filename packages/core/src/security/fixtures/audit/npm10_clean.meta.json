@@ -1,0 +1,8 @@
+{
+ "tool": "npm",
+ "version": "10.9.9",
+ "command": "npm audit --json",
+ "exitCode": 0,
+ "stdoutBytes": 358,
+ "stderrFirstLine": ""
+}

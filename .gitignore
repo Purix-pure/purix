@@ -89,3 +89,4 @@ purix-architecture/TESTING_POLICY.md
 *.db-wal
 *.db-shm
 coverage/
+.test-logs/

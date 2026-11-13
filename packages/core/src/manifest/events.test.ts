@@ -2,6 +2,10 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { listEvents, recordEvent } from "./events";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("Manifest Events", () => {
   it("records and lists events", () => {

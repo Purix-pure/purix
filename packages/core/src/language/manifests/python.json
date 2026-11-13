@@ -1,8 +1,13 @@
 {
   "id": "python",
   "minSupportedVersion": "3.10.0",
-  "tier": "pro",
-  "scaffoldExtensions": [".py"],
+  "tier": "free",
+  "scaffoldExtensions": [
+    ".py"
+  ],
+  "fileExtensions": [
+    ".py"
+  ],
   "capabilities": {
     "compileOrTypeCheck": true,
     "testExecution": true,

@@ -27,23 +27,23 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # pnpm/action-setup only supports pnpm v10 and older — see the same
       # note in ci.yml. Using it here would break the release pipeline
       # specifically, which is the one workflow with zero room for a silent
       # failure (it publishes to the real npm registry on a tag push).
-      - uses: pnpm/setup@v1
+      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
         with:
           version: 12.4.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
 
-      # REAL FIX (2026-09-19): actions/setup-node@v4's registry-url option
+      # REAL FIX (2026-09-19): actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4's registry-url option
       # always writes "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}"
       # into .npmrc, regardless of whether NODE_AUTH_TOKEN is set. This
       # workflow deliberately never sets that secret (trusted publishing
@@ -74,12 +74,29 @@ jobs:
       # release reaching real users.
       - name: Boundary check
         run: pnpm run boundary-check
+      - name: Single-point check
+        run: pnpm run single-point-check && pnpm run single-point-check:test
+      - name: Tool boundary check
+        run: pnpm run tool-boundary-check && pnpm run tool-boundary-check:test
       - name: Artifact check
         run: pnpm run artifact-check
       - name: Typecheck
         run: pnpm run typecheck
+      - name: Lint
+        run: pnpm run lint
       - name: Test
         run: pnpm run test
+
+      # The CI scenario for `purix check --strict` (purix lock, then a fresh checkout with no local store). A release
+      # must not go out if the committed-lock path that CI depends on is broken.
+      - name: CI lock flow
+        run: pnpm run build && pnpm run ci-lock-flow
+      - name: Hook flow
+        run: pnpm run ci-hook-flow
+      - name: Bypass flow (hooks installed block a direct edit; uninstalled, check --strict names it)
+        run: pnpm run ci-bypass-flow
+      - name: Connect harness (every supported agent's config starts a server that answers)
+        run: pnpm run connect-harness
 
       # Same two gates ci.yml enforces (the coverage threshold job and the language
       # conformance job). A tag push skips PR review, so publishing must not be able to
@@ -125,18 +142,50 @@ jobs:
             fi
           done
 
+      # Build once, pack once, and publish exactly what was packed. Publishing
+      # with `pnpm publish` re-runs prepublishOnly (a second build), so the
+      # bytes that shipped were never the bytes that were tested. Here the
+      # three tarballs are created a single time, checksummed, installed into
+      # an empty directory and smoke-tested, and then those same files are
+      # what npm receives. pnpm pack rewrites workspace: ranges to real semver.
+      - name: Build and pack tarballs (once)
+        run: |
+          set -euo pipefail
+          pnpm run build
+          mkdir -p "$RUNNER_TEMP/tarballs"
+          for pkg in core mcp-server cli; do
+            pnpm --filter "@purix/$pkg" pack --pack-destination "$RUNNER_TEMP/tarballs"
+          done
+          (cd "$RUNNER_TEMP/tarballs" && sha256sum *.tgz | tee SHA256SUMS)
+
+      - name: Smoke-test the packed tarballs in an empty directory
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          npm init -y >/dev/null
+          npm install "$RUNNER_TEMP"/tarballs/purix-core-*.tgz "$RUNNER_TEMP"/tarballs/purix-mcp-server-*.tgz "$RUNNER_TEMP"/tarballs/purix-cli-*.tgz
+          if tar -xzOf "$RUNNER_TEMP"/tarballs/purix-cli-*.tgz package/package.json | grep -q 'workspace:'; then
+            echo "::error::packed @purix/cli still contains a workspace: range"; exit 1
+          fi
+          EXPECTED=$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version")
+          test "$(npx purix --version)" = "$EXPECTED"
+          npx purix --help | grep -q adopt
+
+      - name: Upload tarballs and checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/tarballs/
+
       # Publish order matters: @purix/core has no internal dependency on the
       # others, @purix/mcp-server depends on @purix/core, and @purix/cli
-      # depends on both. Each publish makes the next one resolvable —
-      # publishing cli before core/mcp-server are live on the registry would
-      # leave its declared workspace-protocol ranges unsatisfiable for
-      # anyone installing at that moment (pnpm rewrites workspace: ranges to
-      # the matching real semver range at publish time).
-      - name: Publish @purix/core
-        run: pnpm --filter @purix/core publish --access public --provenance --no-git-checks --tag "${{ steps.dist_tag.outputs.tag }}"
-
-      - name: Publish @purix/mcp-server
-        run: pnpm --filter @purix/mcp-server publish --access public --provenance --no-git-checks --tag "${{ steps.dist_tag.outputs.tag }}"
-
-      - name: Publish @purix/cli
-        run: pnpm --filter @purix/cli publish --access public --provenance --no-git-checks --tag "${{ steps.dist_tag.outputs.tag }}"
+      # depends on both. Each publish makes the next one resolvable.
+      # The checksum is re-verified immediately before each upload.
+      - name: Publish tarballs (core -> mcp-server -> cli)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/tarballs"
+          sha256sum -c SHA256SUMS
+          for pkg in core mcp-server cli; do
+            npm publish "./purix-$pkg-$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version").tgz" --access public --provenance --tag "${{ steps.dist_tag.outputs.tag }}"
+          done

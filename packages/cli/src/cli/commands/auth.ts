@@ -47,6 +47,11 @@ export function registerAuthCommands(program: Command) {
         return;
       }
 
+      if (!process.stdin.isTTY) {
+        console.error("`purix login` asks for your email and a code, so it needs a terminal. Run it in an interactive shell.");
+        process.exitCode = 1;
+        return;
+      }
       const email = await prompt("Email: ");
       if (!email.includes("@")) {
         console.error("That doesn't look like an email address.");
@@ -68,54 +73,32 @@ export function registerAuthCommands(program: Command) {
       console.log(`A 6-digit code was sent to ${email}.`);
       const code = await prompt("Code: ");
 
-      let token: string;
+      let login: { token: string; refreshToken?: string; expiresAt?: string; refreshExpiresAt?: string; sessionId?: string };
       try {
-        const result = await runtime.apiClient.verifyCode(email, code);
-        token = result.token;
+        // The same machine id the savings sync uses, so the dashboard's device list and savings list line up.
+        const { hostname } = await import("node:os");
+        login = await runtime.apiClient.verifyCode(email, code, { deviceId: runtime.getMachineId(), deviceName: hostname() });
       } catch (err) {
         console.error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
         return;
       }
 
-      runtime.saveSession(token, email);
+      runtime.saveSession(login.token, email, login);
       console.log(`✅ Logged in as ${email}.`);
 
-      // Part 4: "On first successful login, call /sync/savings with the
-      // full local ledger history across every project this machine has
-      // data for." Honest limitation, not silently glossed over: nothing
-      // in this codebase maintains a registry of every project directory
-      // Purix has ever been run in — each project's .purix/ is
-      // independent and unaware of siblings — so "every project" isn't
-      // achievable from a single `purix login` invocation without adding
-      // that registry. What this DOES do is sync the current project
-      // (the one login was run from); the architecture doc's "periodic /
-      // per-run" sync trigger picks up every other project incrementally
-      // as the user works in them, so the end state converges to "every
-      // project synced" over time rather than instantly at login.
-      try {
-        const summary = runtime.getSavingsSummary(3650); // ~10 years — effectively "all time" for this project
-        if (summary.callCount > 0) {
-          await runtime.apiClient.syncSavings([
-            {
-              projectId: runtime.getProjectId(),
-              machineId: runtime.getMachineId(),
-              windowStart: new Date(0).toISOString(),
-              totalSavingsUsd: summary.totalSavingsUsd,
-              callCount: summary.callCount,
-            },
-          ]);
-        }
-      } catch (err) {
-        // Part 3: "a network blip mid-purix login shouldn't fail the
-        // login itself, log and retry the sync on next invocation
-        // instead of blocking session issuance on it." Login has already
-        // succeeded above; this failure is logged, not fatal.
-        console.warn(`  (savings sync didn't complete — will retry on a future run: ${err instanceof Error ? err.message : String(err)})`);
+      // Savings sync: event-ID endpoint first, legacy window-total call if the
+      // server does not have it yet (see core/security/savings_sync_run.ts).
+      // A failure here never fails the login; it is retried after later commands.
+      const { runSavingsSync } = await import("@purix/core/security/savings_sync_run");
+      const syncResult = await runSavingsSync();
+      if (syncResult.status === "failed") {
+        console.warn(`  (savings sync didn't complete — will retry on a future run: ${syncResult.reason})`);
       }
 
       try {
-        await runtime.refreshEntitlements();
+        const refreshed = await runtime.refreshEntitlements();
+        if (refreshed.reason) console.warn(`  (${refreshed.reason})`);
       } catch (err) {
         if (!(err instanceof runtime.ApiUnreachableError)) {
           console.warn(`  (couldn't fetch entitlements yet: ${err instanceof Error ? err.message : String(err)})`);

@@ -9,7 +9,8 @@
       "dependsOn": ["^build", "^typecheck"]
     },
     "test": {
-      "dependsOn": ["^build", "^typecheck"]
+      "dependsOn": ["^build", "^typecheck"],
+      "cache": false
     },
     "purix": {
       "dependsOn": ["^build"],

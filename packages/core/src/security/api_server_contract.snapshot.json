@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "note": "Generated from packages/api/src/routes/contract.ts in the private repo by scripts/write-contract-snapshot.ts. Do not edit by hand: the private repo's check-contract fails when this file differs from the server's table.",
+  "routes": [
+    {
+      "path": "/account/delete",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/account/devices",
+      "methods": [
+        "GET"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/account/digest",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/account/export",
+      "methods": [
+        "GET"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/admin/revoke-user",
+      "methods": [
+        "POST"
+      ],
+      "v1": false
+    },
+    {
+      "path": "/auth/logout",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/auth/refresh",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/auth/request-code",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/auth/sessions/revoke",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/auth/verify-code",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/checkout/session",
+      "methods": [
+        "POST"
+      ],
+      "v1": false
+    },
+    {
+      "path": "/dashboard/summary",
+      "methods": [
+        "GET"
+      ],
+      "v1": false
+    },
+    {
+      "path": "/entitlements",
+      "methods": [
+        "GET"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/health",
+      "methods": [
+        "GET"
+      ],
+      "v1": false
+    },
+    {
+      "path": "/sync/savings",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/sync/savings-events",
+      "methods": [
+        "POST"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/unsubscribe",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "v1": false
+    },
+    {
+      "path": "/version",
+      "methods": [
+        "GET"
+      ],
+      "v1": true
+    },
+    {
+      "path": "/webhooks/lemonsqueezy",
+      "methods": [
+        "POST"
+      ],
+      "v1": false
+    }
+  ]
+}

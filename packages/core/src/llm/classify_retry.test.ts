@@ -49,7 +49,7 @@ describe("callLlm transient retry", () => {
       return new Response(JSON.stringify({ choices: [{ message: { content: "recovered" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
     });
     const started = Date.now();
-    await expect(callLlm("prompt", "low")).resolves.toBe("recovered");
+    await expect(callLlm("prompt", "change_classification", "low")).resolves.toBe("recovered");
     expect(calls).toBe(2);
     expect(Date.now() - started).toBeGreaterThanOrEqual(900); // the real 1s back-off ran
   });

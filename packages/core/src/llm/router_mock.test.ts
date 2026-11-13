@@ -3,6 +3,10 @@ import { describe, it, beforeEach } from "node:test";
 import { expect } from "expect";
 import { routeTier } from "./router";
 import { recordCircuitFailure, recordCircuitSuccess, assertCircuitClosed } from "./circuit";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("LLM Router & Circuit Breaker Mock Integration", () => {
   beforeEach(() => {

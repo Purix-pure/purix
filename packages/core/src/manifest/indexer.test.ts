@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("Purix Indexer & Components Sync", () => {
-  it("indexes codebase, verifies in sandbox, writes manifest, and syncs components.json", async () => {
+  it("indexes codebase, writes manifest, and syncs components.json (nothing is compiled or tested here)", async () => {
     const result = await runIndex(tmpDir);
     expect(result.fileCount).toBeGreaterThan(0);
     expect(result.componentCount).toBeGreaterThan(0);
@@ -51,6 +51,13 @@ describe("Purix Indexer & Components Sync", () => {
     expect(entry?.schema_version).toBe(5);
     expect(entry?.components).toBeDefined();
     expect(entry?.components?.length).toBe(result.components.length);
+  });
+
+  it("records the index row as pending on every run: indexing runs no verification, so it never claims pass or fail", async () => {
+    await runIndex(tmpDir);
+    expect(readManifest("purix-codebase-index")?.verification_status).toBe("pending");
+    await runIndex(tmpDir);
+    expect(readManifest("purix-codebase-index")?.verification_status).toBe("pending");
   });
 
   it("handles manifest schema migration from version 3 to current correctly", () => {

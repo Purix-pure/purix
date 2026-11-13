@@ -16,9 +16,9 @@ export function registerSecurityCommands(program: Command) {
   // the standard describes, not a stylistic preference. Purix has not yet
   // had its first public/npm release, so this rename carries no breaking-
   // change cost for real users.
-  const secretCmd = program.command("secret").description("Manage stored credentials (encrypted at rest)");
+  const secretCmd = program.command("secret").description("Manage stored credentials (encrypted file; the key sits beside it, so this keeps secrets out of git, not away from other local users)");
 
-  secretCmd.command("set <name> <value>").description("Store a credential, encrypted at rest").action(async (name: string, value: string) => {
+  secretCmd.command("set <name> <value>").description("Store a credential in an encrypted file (the key is stored beside it)").action(async (name: string, value: string) => {
     const { setSecret } = await import("@purix/core/security/secrets_manager");
     setSecret(name, value);
     console.log(`✅ Stored "${name}" encrypted. Remove it from any .env once you've confirmed this works.`);

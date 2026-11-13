@@ -1,26 +1,13 @@
 // packages/core/src/language/pack.ts
-
-export type ToolResultStatus = "pass" | "fail" | "not_installed";
-
-export interface ToolResult {
-  status: ToolResultStatus;
-  reason?: string;
-  actionHint?: string;
-}
-
-export interface ToolSpec {
-  name: string;
-  pinnedVersion: string;
-  resolveBinPath(baseDir: string): string;
-  isInstalled(baseDir: string): boolean;
-  install(baseDir: string): Promise<{ ok: boolean; error?: string }>;
-  installMethod?: "package-manager" | "language-toolchain-component" | "custom-script";
-}
+//
+// A language pack says what a language needs from the machine and project (a runtime, project
+// markers) and which verification capabilities it offers. It does NOT choose, install, locate, or
+// pin tools: that is the tools broker (src/tools, ADR-060). A pack's tools are whatever the catalog
+// lists for its language; ask `purix tools plan --for <language>`.
 
 export interface LanguagePack {
   languageId: string;
   minSupportedVersion: string;
-  tools: ToolSpec[];
   tier: "free" | "pro" | "team" | "enterprise";
 
   // baseDir is required (not optional) so implementations can never silently
@@ -28,7 +15,6 @@ export interface LanguagePack {
   // python.pack.ts::checkRuntimePresent for why that matters on Windows.
   checkRuntimePresent(baseDir: string): { present: boolean; message?: string };
   checkProjectValid(baseDir: string): { valid: boolean; reason?: string };
-  extraSetup?(baseDir: string): Promise<{ ok: boolean; error?: string }>;
 
   capabilities: {
     compileOrTypeCheck: boolean;
@@ -37,8 +23,4 @@ export interface LanguagePack {
     idiomCheck: boolean;
     dependencyVulnScan: boolean;
   };
-
-  isFullyInstalled(baseDir: string): boolean;
-  install(baseDir: string): Promise<Array<{ tool: string; ok: boolean; error?: string }>>;
-  uninstall(baseDir: string): Promise<{ ok: boolean; error?: string }>;
 }

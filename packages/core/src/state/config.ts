@@ -6,15 +6,13 @@
 // own bespoke read/write code. This backs `purix config set/get/delete`,
 // the milestone-upsell rate-limit timestamp, and the milestone threshold
 // override — none of it sensitive, so plain JSON, no encryption.
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { purixDir } from "../platform/layout.js";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { writeFileAtomic } from "../platform/atomic_write.js";
 
 export type ConfigValue = string | number | boolean;
 type ConfigData = Record<string, ConfigValue>;
-
-const WINDOWS_RENAME_RETRIES = 8;
-const WINDOWS_RENAME_RETRY_DELAY_MS = 25;
 
 function waitSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -31,26 +29,12 @@ function isTransientFsError(err: unknown): boolean {
   return TRANSIENT_FS_CODES.has((err as NodeJS.ErrnoException).code ?? "");
 }
 
-function renameConfigFile(tmpPath: string, finalPath: string): void {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      renameSync(tmpPath, finalPath);
-      return;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      const retryable = process.platform === "win32" && (code === "EPERM" || code === "EACCES");
-      if (!retryable || attempt >= WINDOWS_RENAME_RETRIES) throw err;
-      waitSync(WINDOWS_RENAME_RETRY_DELAY_MS);
-    }
-  }
+function configPath(stateDir: string): string {
+  return join(stateDir, "config.json");
 }
 
-function configPath(baseDir: string): string {
-  return join(baseDir, ".purix", "config.json");
-}
-
-function lockPath(baseDir: string): string {
-  return join(baseDir, ".purix", "config.lock");
+function lockPath(stateDir: string): string {
+  return join(stateDir, "config.lock");
 }
 
 const CONFIG_LOCK_RETRIES = 100;
@@ -122,8 +106,8 @@ function isPidAlive(pid: number): boolean {
  * concurrent callers now serialize instead of racing, and the second one
  * to run genuinely sees the first one's change in its own readAll().
  */
-function stealLockPath(baseDir: string): string {
-  return join(baseDir, ".purix", "config.lock.steal");
+function stealLockPath(stateDir: string): string {
+  return join(stateDir, "config.lock.steal");
 }
 
 function readHolderPid(lock: string): number | undefined {
@@ -135,6 +119,14 @@ function readHolderPid(lock: string): number | undefined {
   }
 }
 
+// H4 clock moved backwards: a stamp further ahead of our clock than ordinary noise was written by a clock that is wrong (or was).
+// Its age is negative and would never pass the staleness test, so every writer would wait for our clock to catch up. Same
+// allowance as repo_lock.ts (A2b). Only used where no live holder is recorded: a live holder's pid stays the deciding signal.
+const CLOCK_SKEW_ALLOWANCE_MS = 5 * 60_000;
+function stampedInTheFuture(ageMs: number): boolean {
+  return ageMs < -CLOCK_SKEW_ALLOWANCE_MS;
+}
+
 // Is the lock currently at `lock` abandoned? Judged fresh every call — never
 // cache the answer across a wait, the lock may have changed hands since.
 function isLockStealable(lock: string): boolean {
@@ -142,7 +134,7 @@ function isLockStealable(lock: string): boolean {
   const age = Date.now() - statSync(lock).mtimeMs; // throws if the lock vanished
   return typeof holderPid === "number"
     ? !isPidAlive(holderPid) || age > CONFIG_LOCK_ABANDONED_MS
-    : age > CONFIG_LOCK_STALE_MS;
+    : age > CONFIG_LOCK_STALE_MS || stampedInTheFuture(age);
 }
 
 /**
@@ -157,8 +149,8 @@ function isLockStealable(lock: string): boolean {
  * removing a lock at a time, so whoever gets in second re-checks, sees a
  * live holder, and backs off.
  */
-function tryStealStaleLock(baseDir: string, lock: string): boolean {
-  const steal = stealLockPath(baseDir);
+function tryStealStaleLock(stateDir: string, lock: string): boolean {
+  const steal = stealLockPath(stateDir);
   try {
     mkdirSync(steal);
   } catch (err) {
@@ -166,7 +158,8 @@ function tryStealStaleLock(baseDir: string, lock: string): boolean {
       // Someone else is mid-steal. Break the steal mutex only if it's
       // ancient (its owner crashed) — these critical sections take ms.
       try {
-        if (Date.now() - statSync(steal).mtimeMs > CONFIG_LOCK_STALE_MS) {
+        const stealAge = Date.now() - statSync(steal).mtimeMs;
+        if (stealAge > CONFIG_LOCK_STALE_MS || stampedInTheFuture(stealAge)) {
           rmSync(steal, { recursive: true, force: true });
         }
       } catch { /* gone already — fine */ }
@@ -187,10 +180,10 @@ function tryStealStaleLock(baseDir: string, lock: string): boolean {
   }
 }
 
-function acquireConfigLock(baseDir: string): void {
-  const dir = dirname(configPath(baseDir));
+function acquireConfigLock(stateDir: string): void {
+  const dir = dirname(configPath(stateDir));
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const lock = lockPath(baseDir);
+  const lock = lockPath(stateDir);
   for (let attempt = 0; attempt < CONFIG_LOCK_RETRIES; attempt++) {
     try {
       mkdirSync(lock);
@@ -200,7 +193,8 @@ function acquireConfigLock(baseDir: string): void {
       // succeeded) — a future waiter just falls back to the age-only
       // path for this one lock.
       try {
-        writeFileSync(holderPath(lock), JSON.stringify({ pid: process.pid }));
+        // mkdir:false - the lock directory may have been stolen and removed by now; never recreate it.
+        writeFileAtomic(holderPath(lock), JSON.stringify({ pid: process.pid }), { mkdir: false });
       } catch { /* best-effort — not load-bearing for the lock itself */ }
       return;
     } catch (err) {
@@ -210,7 +204,7 @@ function acquireConfigLock(baseDir: string): void {
       // instead of EEXIST. Same meaning: not available yet, wait.
       if (code !== "EEXIST" && !isTransientFsError(err)) throw err;
       try {
-        if (isLockStealable(lock) && tryStealStaleLock(baseDir, lock)) continue;
+        if (isLockStealable(lock) && tryStealStaleLock(stateDir, lock)) continue;
       } catch {
         continue; // lock vanished between mkdir and stat — holder released it
       }
@@ -222,8 +216,8 @@ function acquireConfigLock(baseDir: string): void {
   );
 }
 
-function releaseConfigLock(baseDir: string): void {
-  const lock = lockPath(baseDir);
+function releaseConfigLock(stateDir: string): void {
+  const lock = lockPath(stateDir);
   // Never remove a lock that has since been taken over by someone else
   // (we were judged stale while wedged) — that would evict a live holder.
   const holderPid = readHolderPid(lock);
@@ -241,8 +235,8 @@ function releaseConfigLock(baseDir: string): void {
   }
 }
 
-function readAll(baseDir: string): ConfigData {
-  const p = configPath(baseDir);
+function readAll(stateDir: string): ConfigData {
+  const p = configPath(stateDir);
   let raw: string | undefined;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -276,35 +270,16 @@ function readAll(baseDir: string): ConfigData {
 }
 
 // Hot-reload note (Part 2): readAll() above already re-reads from disk on
-// every call — there is no in-memory cache to invalidate — so a config
-// change made by one process becomes visible to any other process's next
-// get()/all() with no restart needed. The one thing that WAS unsafe for
-// that scenario was this function: a plain writeFileSync() truncates the
-// destination file before writing the new bytes, so a reader (or a crash
-// mid-write, e.g. disk full or the process being killed) could observe a
-// truncated/empty/half-written config.json — readAll()'s JSON.parse would
-// then throw and silently degrade to "no overrides set" (see readAll's own
-// comment), which is a real data-loss/flicker risk for a file two
-// processes read and write concurrently. Fixed with the standard
-// write-temp-then-rename pattern: write the full new content to a sibling
-// temp file, then rename() it over the real path. POSIX and Windows both
-// guarantee rename() is atomic with respect to concurrent readers/writers
-// on the same filesystem — a reader either sees the old complete file or
-// the new complete file, never a partial one.
-function writeAll(baseDir: string, data: ConfigData): void {
-  const dir = dirname(configPath(baseDir));
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const finalPath = configPath(baseDir);
-  const tmpPath = join(dir, `.config.json.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
-  writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-  try {
-    renameConfigFile(tmpPath, finalPath);
-  } catch (err) {
-    try {
-      unlinkSync(tmpPath);
-    } catch { /* best-effort — this write/cleanup isn't load-bearing for the lock itself */ }
-    throw err;
-  }
+// every call, so a change made by one process is visible to any other
+// process's next get()/all() with no restart. The write must therefore never
+// expose a truncated or half-written config.json (readAll() would degrade to
+// "no overrides set"). It goes through the one atomic writer
+// (platform/atomic_write.ts): temp file in the same directory, fsync, rename
+// over the target, bounded retry on Windows EPERM/EBUSY/EACCES. Before
+// 2026-10-06 this file carried its own copy of that pattern (PURIX-21 rev4,
+// ratchet R5).
+function writeAll(stateDir: string, data: ConfigData): void {
+  writeFileAtomic(configPath(stateDir), JSON.stringify(data, null, 2), { retries: 8 });
 }
 
 export interface ConfigStore {
@@ -317,36 +292,46 @@ export interface ConfigStore {
 
 /**
  * Bound to a specific project directory (normally process.cwd()) — pass an
- * explicit baseDir in tests so they don't read/write the real repo's
+ * explicit stateDir in tests so they don't read/write the real repo's
  * .purix/config.json.
  */
 export function createConfigStore(baseDir: string): ConfigStore {
+  return createConfigStoreInDir(purixDir(baseDir));
+}
+
+/**
+ * A config store whose files (config.json, config.lock) live DIRECTLY in `stateDir`. createConfigStore() above is
+ * this with `<baseDir>/.purix`. project_id.ts needs the direct form for the shared state directory
+ * (`<git-dir>/purix-state`): passing that directory to createConfigStore() produced `.../purix-state/.purix/config.json`,
+ * and in a non-git folder `.purix/.purix/config.json`, a different file from the one `purix config set` writes.
+ */
+export function createConfigStoreInDir(stateDir: string): ConfigStore {
   return {
     get(key) {
-      return readAll(baseDir)[key];
+      return readAll(stateDir)[key];
     },
     set(key, value) {
-      acquireConfigLock(baseDir);
+      acquireConfigLock(stateDir);
       try {
-        const data = readAll(baseDir);
+        const data = readAll(stateDir);
         data[key] = value;
-        writeAll(baseDir, data);
+        writeAll(stateDir, data);
       } finally {
-        releaseConfigLock(baseDir);
+        releaseConfigLock(stateDir);
       }
     },
     delete(key) {
-      acquireConfigLock(baseDir);
+      acquireConfigLock(stateDir);
       try {
-        const data = readAll(baseDir);
+        const data = readAll(stateDir);
         delete data[key];
-        writeAll(baseDir, data);
+        writeAll(stateDir, data);
       } finally {
-        releaseConfigLock(baseDir);
+        releaseConfigLock(stateDir);
       }
     },
     all() {
-      return readAll(baseDir);
+      return readAll(stateDir);
     },
     // CONCURRENCY FIX: an unlocked get()-then-conditionally-set() pair (the
     // shape every previous "read a cached value, mint one if missing"
@@ -369,17 +354,17 @@ export function createConfigStore(baseDir: string): ConfigStore {
     // computation like randomUUID() or a content hash — only its result
     // ever reaches disk, and only the first writer's result does).
     getOrCreate(key, factory) {
-      acquireConfigLock(baseDir);
+      acquireConfigLock(stateDir);
       try {
-        const data = readAll(baseDir);
+        const data = readAll(stateDir);
         const existing = data[key];
         if (existing !== undefined) return existing;
         const value = factory();
         data[key] = value;
-        writeAll(baseDir, data);
+        writeAll(stateDir, data);
         return value;
       } finally {
-        releaseConfigLock(baseDir);
+        releaseConfigLock(stateDir);
       }
     },
   };

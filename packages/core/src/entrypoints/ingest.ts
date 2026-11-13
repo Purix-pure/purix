@@ -20,12 +20,18 @@ interface DiffHunk {
   newStart: number;
   newLines: number;
   lines: string[]; // each entry starts with ' ', '+', or '-'
+  /** The diff says the new side of this hunk ends without a final newline ("\\ No newline at end of file" after a ' ' or '+' line). */
+  noNewlineAtEndOfNew?: boolean;
+  /** A3-2: the same for the old side (the marker after a ' ' or '-' line). With it and no new-side marker, the commit ADDED a final newline. */
+  noNewlineAtEndOfOld?: boolean;
 }
 
 interface FileDiff {
   oldPath: string | null; // null when the old side is /dev/null (new file)
   newPath: string | null; // null when the new side is /dev/null (deleted file)
   hunks: DiffHunk[];
+  /** Set on the last file of a diff whose last hunk has fewer lines than its header says: the text was cut off. */
+  cutOff?: { hunkOldStart: number; expectedOld: number; expectedNew: number; sawOld: number; sawNew: number };
 }
 
 function stripGitPrefix(path: string): string {
@@ -54,14 +60,29 @@ function normalizeHeaderPath(raw: string): string | null {
  */
 function parseUnifiedDiff(diffText: string): FileDiff[] {
   const lines = diffText.split("\n");
+  // A diff that ends in a newline splits into a last "" that is not a line of the diff.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   const files: FileDiff[] = [];
   let current: FileDiff | null = null;
   let currentHunk: DiffHunk | null = null;
+  let oldSeen = 0;
+  let newSeen = 0;
 
   const hunkHeaderRe = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
-  for (const line of lines) {
+  // A header that miscounts in the middle of a diff is recounted from the lines that are really there. Only the LAST hunk of the
+  // diff is held to its header, because a hunk with fewer lines than it says and nothing after it is what a cut-off looks like.
+  const closeHunk = () => {
+    if (currentHunk) {
+      currentHunk.oldLines = oldSeen;
+      currentHunk.newLines = newSeen;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     if (line.startsWith("--- ")) {
+      closeHunk();
       if (current) files.push(current);
       current = { oldPath: normalizeHeaderPath(line.slice(4)), newPath: null, hunks: [] };
       currentHunk = null;
@@ -69,6 +90,7 @@ function parseUnifiedDiff(diffText: string): FileDiff[] {
     }
 
     if (line.startsWith("+++ ")) {
+      closeHunk();
       if (!current) current = { oldPath: null, newPath: null, hunks: [] };
       current.newPath = normalizeHeaderPath(line.slice(4));
       currentHunk = null;
@@ -77,7 +99,8 @@ function parseUnifiedDiff(diffText: string): FileDiff[] {
 
     const hunkMatch = line.match(hunkHeaderRe);
     if (hunkMatch) {
-      if (!current) continue; // malformed input — no file header yet, skip stray hunk
+      closeHunk();
+      if (!current) { currentHunk = null; continue; } // malformed input — no file header yet, skip stray hunk
       currentHunk = {
         oldStart: Number(hunkMatch[1]),
         oldLines: hunkMatch[2] !== undefined ? Number(hunkMatch[2]) : 1,
@@ -85,18 +108,60 @@ function parseUnifiedDiff(diffText: string): FileDiff[] {
         newLines: hunkMatch[4] !== undefined ? Number(hunkMatch[4]) : 1,
         lines: [],
       };
+      oldSeen = 0;
+      newSeen = 0;
       current.hunks.push(currentHunk);
       continue;
     }
 
     if (currentHunk && (line.startsWith(" ") || line.startsWith("+") || line.startsWith("-"))) {
       currentHunk.lines.push(line);
+      if (line[0] !== "+") oldSeen++;
+      if (line[0] !== "-") newSeen++;
       continue;
     }
 
-    // "diff --git", "index ...", "\ No newline at end of file", blank
-    // separator lines between file sections — none of these carry
-    // content we need; ignored rather than treated as an error.
+    // A blank line inside a hunk that still expects lines is a blank CONTEXT line whose leading space was stripped (editors and chat
+    // tools do this). It is read that way when a content line follows it, or when the blank lines are exactly what the header still
+    // needs. Anywhere else a blank line is a separator and carries nothing.
+    if (currentHunk && line === "") {
+      let j = i;
+      while (j < lines.length && lines[j] === "") j++;
+      const run = j - i;
+      const next = lines[j];
+      const nextIsContent = next !== undefined && /^[ +-]/.test(next) && !next.startsWith("--- ") && !next.startsWith("+++ ");
+      const needOld = currentHunk.oldLines - oldSeen;
+      const needNew = currentHunk.newLines - newSeen;
+      if (needOld > 0 && needNew > 0 && (nextIsContent || (needOld === run && needNew === run))) {
+        currentHunk.lines.push(" ");
+        oldSeen++;
+        newSeen++;
+      }
+      continue;
+    }
+
+    // "\ No newline at end of file" says the line before it has no newline. After a ' ' or '+' line that is the new side, which an
+    // added file needs to be written exactly as it is.
+    if (currentHunk && line.startsWith("\\")) {
+      const before = currentHunk.lines[currentHunk.lines.length - 1];
+      if (before !== undefined && (before.startsWith("+") || before.startsWith(" "))) currentHunk.noNewlineAtEndOfNew = true;
+      if (before !== undefined && (before.startsWith("-") || before.startsWith(" "))) currentHunk.noNewlineAtEndOfOld = true;
+      continue;
+    }
+
+    // "diff --git", "index ...", blank separator lines between file
+    // sections — none of these carry content we need; ignored rather
+    // than treated as an error.
+  }
+
+  // The last hunk of the diff keeps its header counts: fewer lines than the header says means the diff was cut off.
+  if (current && currentHunk) {
+    const last: DiffHunk = currentHunk;
+    if (oldSeen < last.oldLines || newSeen < last.newLines) {
+      current.cutOff = { hunkOldStart: last.oldStart, expectedOld: last.oldLines, expectedNew: last.newLines, sawOld: oldSeen, sawNew: newSeen };
+    } else {
+      closeHunk();
+    }
   }
 
   if (current) files.push(current);
@@ -113,12 +178,62 @@ type ApplyResult = { ok: true; lines: string[] } | { ok: false; reason: string }
  * edit) — fails closed instead of silently applying a hunk against the
  * wrong base and corrupting the file.
  */
+/** Fewest non-blank old-side lines a hunk needs before it may be moved away from the line its header gives. */
+const MIN_SHIFT_ANCHOR_LINES = 3;
+
+/**
+ * Where a hunk's old side (its context and removed lines) sits in the file, when it is not at the line the header gives. It is
+ * accepted only when it matches in exactly ONE place in the whole file, the way `git apply` treats context: there is no fixed
+ * distance to tune, and a block that appears twice (near or far) is refused, because it could be either. A hunk with no old-side
+ * lines (a bare insertion) is refused too: it has nothing to anchor on. The caller's file-hash re-check at write time is what
+ * covers a file that changed after the diff was read.
+ */
+function locateHunk(originalLines: string[], oldSide: string[], _stated: number, notBefore: number): number | null {
+  if (oldSide.length === 0) return null;
+  const substantial = oldSide.filter((l) => l.trim() !== "").length;
+  if (substantial === 0) return null; // blank lines match everywhere, so they anchor nothing
+  const found: number[] = [];
+  for (let pos = 0; pos + oldSide.length <= originalLines.length; pos++) {
+    let fits = true;
+    for (let i = 0; i < oldSide.length; i++) {
+      if (originalLines[pos + i] !== oldSide[i]) { fits = false; break; }
+    }
+    if (fits) {
+      found.push(pos);
+      if (found.length > 1) return null;
+    }
+  }
+  // A single match that sits inside an earlier hunk's lines is not usable (the hunks would overlap).
+  if (found.length !== 1 || found[0]! < notBefore) return null;
+  // A thin anchor (a lone `}` or a blank line) can be unique by luck. Below MIN_SHIFT_ANCHOR_LINES non-blank old-side lines the
+  // hunk is moved only when it sits flush against the start or end of the file, the one place a diff legitimately carries less
+  // context (git writes fewer than three context lines only there). Anywhere else the stated position has to be right.
+  if (substantial < MIN_SHIFT_ANCHOR_LINES) {
+    const atStart = found[0] === 0;
+    // the split of a file that ends in a newline carries one empty last element that is not a line of the file
+    const realLength = originalLines.length > 0 && originalLines[originalLines.length - 1] === "" ? originalLines.length - 1 : originalLines.length;
+    const atEnd = found[0]! + oldSide.length === realLength;
+    if (!atStart && !atEnd) return null;
+  }
+  return found[0]!;
+}
+
 function applyHunks(originalLines: string[], hunks: DiffHunk[]): ApplyResult {
   const result: string[] = [];
   let origIdx = 0;
+  let carried = 0; // how far the previous hunks turned out to be from where their headers said
 
   for (const hunk of hunks) {
-    const hunkStart = hunk.oldStart > 0 ? hunk.oldStart - 1 : 0;
+    let hunkStart = (hunk.oldStart > 0 ? hunk.oldStart - 1 : 0) + carried;
+    const oldSide = hunk.lines.filter((l) => l[0] === " " || l[0] === "-").map((l) => l.slice(1));
+    const exact = oldSide.every((t, i) => originalLines[hunkStart + i] === t);
+    if (!exact) {
+      const found = locateHunk(originalLines, oldSide, hunkStart, origIdx);
+      if (found !== null) {
+        carried += found - hunkStart;
+        hunkStart = found;
+      }
+    }
     if (hunkStart < origIdx) {
       return { ok: false, reason: `hunk at old-line ${hunk.oldStart} overlaps a previous hunk — malformed or out-of-order diff` };
     }
@@ -182,6 +297,15 @@ export async function ingestDiff(
   const files: IngestedFileChange[] = [];
 
   for (const fileDiff of parsed) {
+    if (fileDiff.cutOff) {
+      const c = fileDiff.cutOff;
+      return {
+        ok: false,
+        reason:
+          `the diff ends in the middle of a hunk (the hunk at old-line ${c.hunkOldStart} of "${fileDiff.newPath ?? fileDiff.oldPath}" says ${c.expectedOld} old and ${c.expectedNew} new lines, ` +
+          `the text has ${c.sawOld} and ${c.sawNew}): it looks cut off, so nothing was applied. Send the whole diff again.`,
+      };
+    }
     const isNewFile = fileDiff.oldPath === null;
     const isDeleted = fileDiff.newPath === null;
     const relPath = fileDiff.newPath ?? fileDiff.oldPath;
@@ -250,9 +374,24 @@ export async function ingestDiff(
       return { ok: false, reason: `${relPath}: ${applied.reason}` };
     }
 
+    let newContent = applied.lines.join("\n");
+    if (!isNewFile) {
+      // A3-2: a modified file keeps the ending the original had, unless the diff's markers say the commit changed it. The new side
+      // lacking a final newline wins; otherwise an old side that lacked one and a new side that does means one was added.
+      const newLacksNewline = fileDiff.hunks.some((h) => h.noNewlineAtEndOfNew);
+      const oldLackedNewline = fileDiff.hunks.some((h) => h.noNewlineAtEndOfOld);
+      if (newLacksNewline) newContent = newContent.replace(/\n$/, "");
+      else if (oldLackedNewline && !newContent.endsWith("\n")) newContent += "\n";
+    }
+    if (isNewFile) {
+      // A new file has no original to carry its last newline: the lines are joined with "\n", so the one after the last line
+      // has to be put back, unless the diff says the file ends without one (60 of 64 added files lost it, research 04).
+      const noFinalNewline = fileDiff.hunks.some((h) => h.noNewlineAtEndOfNew);
+      if (applied.lines.length > 0 && !noFinalNewline) newContent += "\n";
+    }
     files.push({
       path: relPath,
-      new_content: applied.lines.join("\n"),
+      new_content: newContent,
       status: isNewFile ? "added" : "modified",
     });
   }

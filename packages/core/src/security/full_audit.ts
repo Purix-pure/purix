@@ -16,7 +16,7 @@
 import { join } from "node:path";
 import { checkVersionPinning, runVulnScan, formatVulnScan, type PinningFinding } from "./deps_audit.js";
 import { checkIdioms, type IdiomCheckResult } from "../verify/idiom.js";
-import { getLanguageProvider } from "../language/registry.js";
+import { getLanguageProvider, languageForFile } from "../language/registry.js";
 import { listManifest } from "../manifest/store.js";
 
 export interface FullAuditResult {
@@ -24,6 +24,8 @@ export interface FullAuditResult {
   vulnScanFormatted: string;
   trackedFileCount: number;
   idiom: IdiomCheckResult | null; // null when there are no manifest-tracked files to check
+  /** Set when the tracked files belong to no registered language, so no idiom check could run. */
+  idiomSkippedReason?: string;
 }
 
 /**
@@ -39,7 +41,17 @@ export async function runFullAudit(targetDir: string = process.cwd()): Promise<F
     return { pinning, vulnScanFormatted, trackedFileCount: 0, idiom: null };
   }
 
-  const lang = trackedPaths[0]!.endsWith(".py") ? "python" : "typescript";
+  const lang = languageForFile(trackedPaths[0]!);
+  if (lang === undefined) {
+    // Not checked is not clean: report it rather than lint another language's files as TypeScript (ADR-017).
+    return {
+      pinning,
+      vulnScanFormatted,
+      trackedFileCount: trackedPaths.length,
+      idiom: { ran: false, findings: [] },
+      idiomSkippedReason: `no registered language for ${trackedPaths[0]}`,
+    };
+  }
   const provider = getLanguageProvider(lang);
   const idiom = provider ? provider.checkIdiom(trackedPaths, targetDir) : checkIdioms(trackedPaths, targetDir);
   return { pinning, vulnScanFormatted, trackedFileCount: trackedPaths.length, idiom };
@@ -66,7 +78,7 @@ export function formatFullAuditLines(result: FullAuditResult): string[] {
   if (result.idiom === null) {
     lines.push("  no manifest-tracked files yet.");
   } else if (!result.idiom.ran) {
-    lines.push("  skipped — no local ESLint binary + config found in this project.");
+    lines.push(result.idiomSkippedReason ? `  skipped — ${result.idiomSkippedReason}.` : "  skipped — no local ESLint binary + config found in this project.");
   } else if (result.idiom.findings.length === 0) {
     lines.push("  clean — no idiom findings across all tracked components.");
   } else {

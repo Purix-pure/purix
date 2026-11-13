@@ -1,20 +1,440 @@
 {
   "name": "@purix/core",
-  "version": "0.3.0-beta.0",
+  "version": "0.4.0-beta.0",
+  "description": "Purix core: the classify, sandbox-verify and record-evidence pipeline behind the @purix/cli and @purix/mcp-server packages. Most people want @purix/cli.",
+  "keywords": [
+    "ai",
+    "code-verification",
+    "governance",
+    "sandbox",
+    "typescript"
+  ],
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/purix-pure/purix.git",
     "directory": "packages/core"
   },
+  "homepage": "https://github.com/purix-pure/purix#readme",
+  "bugs": {
+    "url": "https://github.com/purix-pure/purix/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map",
+    "NOTICE"
   ],
   "exports": {
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "default": "./dist/*.js"
+    "./approvals/pending": {
+      "types": "./dist/approvals/pending.d.ts",
+      "default": "./dist/approvals/pending.js"
+    },
+    "./cli-io/confirm": {
+      "types": "./dist/cli-io/confirm.d.ts",
+      "default": "./dist/cli-io/confirm.js"
+    },
+    "./cli-io/diff_format": {
+      "types": "./dist/cli-io/diff_format.d.ts",
+      "default": "./dist/cli-io/diff_format.js"
+    },
+    "./cli-io/exit_codes": {
+      "types": "./dist/cli-io/exit_codes.d.ts",
+      "default": "./dist/cli-io/exit_codes.js"
+    },
+    "./cli-io/gated-confirm": {
+      "types": "./dist/cli-io/gated-confirm.d.ts",
+      "default": "./dist/cli-io/gated-confirm.js"
+    },
+    "./entrypoints/check": {
+      "types": "./dist/entrypoints/check.d.ts",
+      "default": "./dist/entrypoints/check.js"
+    },
+    "./entrypoints/ingest": {
+      "types": "./dist/entrypoints/ingest.d.ts",
+      "default": "./dist/entrypoints/ingest.js"
+    },
+    "./entrypoints/ingest_deletions": {
+      "types": "./dist/entrypoints/ingest_deletions.d.ts",
+      "default": "./dist/entrypoints/ingest_deletions.js"
+    },
+    "./entrypoints/modify": {
+      "types": "./dist/entrypoints/modify.d.ts",
+      "default": "./dist/entrypoints/modify.js"
+    },
+    "./entrypoints/scaffold": {
+      "types": "./dist/entrypoints/scaffold.d.ts",
+      "default": "./dist/entrypoints/scaffold.js"
+    },
+    "./evidence/anchor": {
+      "types": "./dist/evidence/anchor.d.ts",
+      "default": "./dist/evidence/anchor.js"
+    },
+    "./evidence/evidence": {
+      "types": "./dist/evidence/evidence.d.ts",
+      "default": "./dist/evidence/evidence.js"
+    },
+    "./gates/security_gate": {
+      "types": "./dist/gates/security_gate.d.ts",
+      "default": "./dist/gates/security_gate.js"
+    },
+    "./gates/trustgate": {
+      "types": "./dist/gates/trustgate.d.ts",
+      "default": "./dist/gates/trustgate.js"
+    },
+    "./hooks/doctor": {
+      "types": "./dist/hooks/doctor.d.ts",
+      "default": "./dist/hooks/doctor.js"
+    },
+    "./hooks/install": {
+      "types": "./dist/hooks/install.d.ts",
+      "default": "./dist/hooks/install.js"
+    },
+    "./hooks/path_check": {
+      "types": "./dist/hooks/path_check.d.ts",
+      "default": "./dist/hooks/path_check.js"
+    },
+    "./hooks/protocol": {
+      "types": "./dist/hooks/protocol.d.ts",
+      "default": "./dist/hooks/protocol.js"
+    },
+    "./hooks/run": {
+      "types": "./dist/hooks/run.d.ts",
+      "default": "./dist/hooks/run.js"
+    },
+    "./language/conformance/run": {
+      "types": "./dist/language/conformance/run.d.ts",
+      "default": "./dist/language/conformance/run.js"
+    },
+    "./language/discovery": {
+      "types": "./dist/language/discovery.d.ts",
+      "default": "./dist/language/discovery.js"
+    },
+    "./language/registry": {
+      "types": "./dist/language/registry.d.ts",
+      "default": "./dist/language/registry.js"
+    },
+    "./language/registry_cache": {
+      "types": "./dist/language/registry_cache.d.ts",
+      "default": "./dist/language/registry_cache.js"
+    },
+    "./licensing/tier": {
+      "types": "./dist/licensing/tier.d.ts",
+      "default": "./dist/licensing/tier.js"
+    },
+    "./llm/budget": {
+      "types": "./dist/llm/budget.d.ts",
+      "default": "./dist/llm/budget.js"
+    },
+    "./llm/call_log": {
+      "types": "./dist/llm/call_log.d.ts",
+      "default": "./dist/llm/call_log.js"
+    },
+    "./llm/classify": {
+      "types": "./dist/llm/classify.d.ts",
+      "default": "./dist/llm/classify.js"
+    },
+    "./llm/context/tokens": {
+      "types": "./dist/llm/context/tokens.d.ts",
+      "default": "./dist/llm/context/tokens.js"
+    },
+    "./llm/injection": {
+      "types": "./dist/llm/injection.d.ts",
+      "default": "./dist/llm/injection.js"
+    },
+    "./llm/injection_policy": {
+      "types": "./dist/llm/injection_policy.d.ts",
+      "default": "./dist/llm/injection_policy.js"
+    },
+    "./llm/providers": {
+      "types": "./dist/llm/providers.d.ts",
+      "default": "./dist/llm/providers.js"
+    },
+    "./manifest/adopt": {
+      "types": "./dist/manifest/adopt.d.ts",
+      "default": "./dist/manifest/adopt.js"
+    },
+    "./manifest/audit_export": {
+      "types": "./dist/manifest/audit_export.d.ts",
+      "default": "./dist/manifest/audit_export.js"
+    },
+    "./manifest/change_target": {
+      "types": "./dist/manifest/change_target.d.ts",
+      "default": "./dist/manifest/change_target.js"
+    },
+    "./manifest/commit_and_cascade": {
+      "types": "./dist/manifest/commit_and_cascade.d.ts",
+      "default": "./dist/manifest/commit_and_cascade.js"
+    },
+    "./manifest/events": {
+      "types": "./dist/manifest/events.d.ts",
+      "default": "./dist/manifest/events.js"
+    },
+    "./manifest/indexer": {
+      "types": "./dist/manifest/indexer.d.ts",
+      "default": "./dist/manifest/indexer.js"
+    },
+    "./manifest/library": {
+      "types": "./dist/manifest/library.d.ts",
+      "default": "./dist/manifest/library.js"
+    },
+    "./manifest/memory": {
+      "types": "./dist/manifest/memory.d.ts",
+      "default": "./dist/manifest/memory.js"
+    },
+    "./manifest/mentions": {
+      "types": "./dist/manifest/mentions.d.ts",
+      "default": "./dist/manifest/mentions.js"
+    },
+    "./manifest/migrations": {
+      "types": "./dist/manifest/migrations.d.ts",
+      "default": "./dist/manifest/migrations.js"
+    },
+    "./manifest/not_tested": {
+      "types": "./dist/manifest/not_tested.d.ts",
+      "default": "./dist/manifest/not_tested.js"
+    },
+    "./manifest/observability": {
+      "types": "./dist/manifest/observability.d.ts",
+      "default": "./dist/manifest/observability.js"
+    },
+    "./manifest/repair_curve": {
+      "types": "./dist/manifest/repair_curve.d.ts",
+      "default": "./dist/manifest/repair_curve.js"
+    },
+    "./manifest/resolver": {
+      "types": "./dist/manifest/resolver.d.ts",
+      "default": "./dist/manifest/resolver.js"
+    },
+    "./manifest/schema": {
+      "types": "./dist/manifest/schema.d.ts",
+      "default": "./dist/manifest/schema.js"
+    },
+    "./manifest/store": {
+      "types": "./dist/manifest/store.d.ts",
+      "default": "./dist/manifest/store.js"
+    },
+    "./platform/atomic_write": {
+      "types": "./dist/platform/atomic_write.d.ts",
+      "default": "./dist/platform/atomic_write.js"
+    },
+    "./platform/db_busy": {
+      "types": "./dist/platform/db_busy.d.ts",
+      "default": "./dist/platform/db_busy.js"
+    },
+    "./platform/disk_full": {
+      "types": "./dist/platform/disk_full.d.ts",
+      "default": "./dist/platform/disk_full.js"
+    },
+    "./platform/env": {
+      "types": "./dist/platform/env.d.ts",
+      "default": "./dist/platform/env.js"
+    },
+    "./platform/fs_retry": {
+      "types": "./dist/platform/fs_retry.d.ts",
+      "default": "./dist/platform/fs_retry.js"
+    },
+    "./platform/layout": {
+      "types": "./dist/platform/layout.d.ts",
+      "default": "./dist/platform/layout.js"
+    },
+    "./platform/project_root": {
+      "types": "./dist/platform/project_root.d.ts",
+      "default": "./dist/platform/project_root.js"
+    },
+    "./recovery/classify_and_compile": {
+      "types": "./dist/recovery/classify_and_compile.d.ts",
+      "default": "./dist/recovery/classify_and_compile.js"
+    },
+    "./recovery/escalate": {
+      "types": "./dist/recovery/escalate.d.ts",
+      "default": "./dist/recovery/escalate.js"
+    },
+    "./recovery/resolve_verification": {
+      "types": "./dist/recovery/resolve_verification.d.ts",
+      "default": "./dist/recovery/resolve_verification.js"
+    },
+    "./sandbox/sandbox_env": {
+      "types": "./dist/sandbox/sandbox_env.d.ts",
+      "default": "./dist/sandbox/sandbox_env.js"
+    },
+    "./security/api_client": {
+      "types": "./dist/security/api_client.d.ts",
+      "default": "./dist/security/api_client.js"
+    },
+    "./security/api_contract": {
+      "types": "./dist/security/api_contract.d.ts",
+      "default": "./dist/security/api_contract.js"
+    },
+    "./security/audit_tamper_evidence": {
+      "types": "./dist/security/audit_tamper_evidence.d.ts",
+      "default": "./dist/security/audit_tamper_evidence.js"
+    },
+    "./security/auth": {
+      "types": "./dist/security/auth.d.ts",
+      "default": "./dist/security/auth.js"
+    },
+    "./security/error_text": {
+      "types": "./dist/security/error_text.d.ts",
+      "default": "./dist/security/error_text.js"
+    },
+    "./security/full_audit": {
+      "types": "./dist/security/full_audit.d.ts",
+      "default": "./dist/security/full_audit.js"
+    },
+    "./security/override_audit": {
+      "types": "./dist/security/override_audit.d.ts",
+      "default": "./dist/security/override_audit.js"
+    },
+    "./security/savings_sync_run": {
+      "types": "./dist/security/savings_sync_run.d.ts",
+      "default": "./dist/security/savings_sync_run.js"
+    },
+    "./security/secrets": {
+      "types": "./dist/security/secrets.d.ts",
+      "default": "./dist/security/secrets.js"
+    },
+    "./security/secrets_manager": {
+      "types": "./dist/security/secrets_manager.d.ts",
+      "default": "./dist/security/secrets_manager.js"
+    },
+    "./security/security_audit": {
+      "types": "./dist/security/security_audit.d.ts",
+      "default": "./dist/security/security_audit.js"
+    },
+    "./security/session": {
+      "types": "./dist/security/session.d.ts",
+      "default": "./dist/security/session.js"
+    },
+    "./state/config": {
+      "types": "./dist/state/config.d.ts",
+      "default": "./dist/state/config.js"
+    },
+    "./state/drift": {
+      "types": "./dist/state/drift.d.ts",
+      "default": "./dist/state/drift.js"
+    },
+    "./state/governed_lock": {
+      "types": "./dist/state/governed_lock.d.ts",
+      "default": "./dist/state/governed_lock.js"
+    },
+    "./state/hash": {
+      "types": "./dist/state/hash.d.ts",
+      "default": "./dist/state/hash.js"
+    },
+    "./state/idempotency": {
+      "types": "./dist/state/idempotency.d.ts",
+      "default": "./dist/state/idempotency.js"
+    },
+    "./state/landed_change": {
+      "types": "./dist/state/landed_change.d.ts",
+      "default": "./dist/state/landed_change.js"
+    },
+    "./state/machine_id": {
+      "types": "./dist/state/machine_id.d.ts",
+      "default": "./dist/state/machine_id.js"
+    },
+    "./state/migration": {
+      "types": "./dist/state/migration.d.ts",
+      "default": "./dist/state/migration.js"
+    },
+    "./state/project_id": {
+      "types": "./dist/state/project_id.d.ts",
+      "default": "./dist/state/project_id.js"
+    },
+    "./state/reconcile": {
+      "types": "./dist/state/reconcile.d.ts",
+      "default": "./dist/state/reconcile.js"
+    },
+    "./state/repo_lock": {
+      "types": "./dist/state/repo_lock.d.ts",
+      "default": "./dist/state/repo_lock.js"
+    },
+    "./state/scheduler": {
+      "types": "./dist/state/scheduler.d.ts",
+      "default": "./dist/state/scheduler.js"
+    },
+    "./test-support/isolated_cwd": {
+      "types": "./dist/test-support/isolated_cwd.d.ts",
+      "default": "./dist/test-support/isolated_cwd.js"
+    },
+    "./tools/broker": {
+      "types": "./dist/tools/broker.d.ts",
+      "default": "./dist/tools/broker.js"
+    },
+    "./tools/consent": {
+      "types": "./dist/tools/consent.d.ts",
+      "default": "./dist/tools/consent.js"
+    },
+    "./tools/state": {
+      "types": "./dist/tools/state.d.ts",
+      "default": "./dist/tools/state.js"
+    },
+    "./usage/consent": {
+      "types": "./dist/usage/consent.d.ts",
+      "default": "./dist/usage/consent.js"
+    },
+    "./usage/ledger": {
+      "types": "./dist/usage/ledger.d.ts",
+      "default": "./dist/usage/ledger.js"
+    },
+    "./usage/schema": {
+      "types": "./dist/usage/schema.d.ts",
+      "default": "./dist/usage/schema.js"
+    },
+    "./usage/summary": {
+      "types": "./dist/usage/summary.d.ts",
+      "default": "./dist/usage/summary.js"
+    },
+    "./verify/anchor_events": {
+      "types": "./dist/verify/anchor_events.d.ts",
+      "default": "./dist/verify/anchor_events.js"
+    },
+    "./verify/changed_line_coverage": {
+      "types": "./dist/verify/changed_line_coverage.d.ts",
+      "default": "./dist/verify/changed_line_coverage.js"
+    },
+    "./verify/compile": {
+      "types": "./dist/verify/compile.d.ts",
+      "default": "./dist/verify/compile.js"
+    },
+    "./verify/discovery_cut": {
+      "types": "./dist/verify/discovery_cut.d.ts",
+      "default": "./dist/verify/discovery_cut.js"
+    },
+    "./verify/impact": {
+      "types": "./dist/verify/impact.d.ts",
+      "default": "./dist/verify/impact.js"
+    },
+    "./verify/outcome": {
+      "types": "./dist/verify/outcome.d.ts",
+      "default": "./dist/verify/outcome.js"
+    },
+    "./verify/partial_line_record": {
+      "types": "./dist/verify/partial_line_record.d.ts",
+      "default": "./dist/verify/partial_line_record.js"
+    },
+    "./verify/preflight": {
+      "types": "./dist/verify/preflight.d.ts",
+      "default": "./dist/verify/preflight.js"
+    },
+    "./verify/python_test_integrity": {
+      "types": "./dist/verify/python_test_integrity.d.ts",
+      "default": "./dist/verify/python_test_integrity.js"
+    },
+    "./verify/surface_text": {
+      "types": "./dist/verify/surface_text.d.ts",
+      "default": "./dist/verify/surface_text.js"
+    },
+    "./verify/test_integrity": {
+      "types": "./dist/verify/test_integrity.d.ts",
+      "default": "./dist/verify/test_integrity.js"
     }
   },
   "scripts": {
@@ -31,9 +451,8 @@
     "typescript": "5.7.2"
   },
   "dependencies": {
-    "@google/genai": "^2.13.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "ts-morph": "^28.0.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   }
 }

@@ -27,6 +27,11 @@ export interface LanguageManifest {
   // caused (packages.zip's scaffold.ts still listed .rs/.go/.rb here
   // after BETA_SCOPE.md said they were removed).
   scaffoldExtensions: string[];
+  // Every file extension this language claims when Purix looks at an existing file (gates, index,
+  // audit). Optional: a manifest that omits it claims its scaffold extensions only. Extensions are
+  // lower-case with a leading dot. languageForFile() is built from this field, so adding a language
+  // never means editing a table in registry.ts.
+  fileExtensions?: string[];
   capabilities: {
     compileOrTypeCheck: boolean;
     testExecution: boolean;
@@ -61,6 +66,10 @@ export function parseLanguageManifest(raw: unknown, sourceDescription: string): 
   if (!Array.isArray(m.scaffoldExtensions) || !m.scaffoldExtensions.every((e) => typeof e === "string")) {
     throw new Error(`${sourceDescription}: "scaffoldExtensions" must be a string array`);
   }
+  if (m.fileExtensions !== undefined) {
+    const ok = Array.isArray(m.fileExtensions) && m.fileExtensions.every((e) => typeof e === "string" && /^\.[a-z0-9]+$/.test(e));
+    if (!ok) throw new Error(`${sourceDescription}: "fileExtensions" must be an array of lower-case extensions such as ".py"`);
+  }
   const caps = m.capabilities as Record<string, unknown> | undefined;
   const capKeys = ["compileOrTypeCheck", "testExecution", "testIntegrityCheck", "idiomCheck", "dependencyVulnScan"] as const;
   if (typeof caps !== "object" || caps === null || !capKeys.every((k) => typeof caps[k] === "boolean")) {
@@ -72,6 +81,7 @@ export function parseLanguageManifest(raw: unknown, sourceDescription: string): 
     minSupportedVersion: m.minSupportedVersion,
     tier: m.tier,
     scaffoldExtensions: m.scaffoldExtensions,
+    ...(m.fileExtensions !== undefined ? { fileExtensions: m.fileExtensions as string[] } : {}),
     capabilities: {
       compileOrTypeCheck: caps.compileOrTypeCheck as boolean,
       testExecution: caps.testExecution as boolean,

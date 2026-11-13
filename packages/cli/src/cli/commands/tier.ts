@@ -17,7 +17,8 @@ export function registerTierCommands(program: Command) {
     .action(async () => {
       const { getEntitlements, refreshEntitlements } = await import("@purix/core/licensing/tier");
       try {
-        await refreshEntitlements();
+        const refreshed = await refreshEntitlements();
+        if (refreshed.reason) console.warn(`  (${refreshed.reason})`);
       } catch (err) {
         // A real rejection (e.g. an expired/invalid session) still falls
         // through to printing whatever's cached below, rather than
@@ -27,7 +28,7 @@ export function registerTierCommands(program: Command) {
       }
       const ent = getEntitlements();
       console.log(`Tier: ${ent.tier}`);
-      console.log(`  Tracked components:     ${ent.componentLimit === null ? "unlimited" : ent.componentLimit}`);
+      console.log(`  Component limit:        ${ent.componentLimit === null ? "unlimited" : `${ent.componentLimit} tracked components`}`);
       console.log(`  Audit export:           ${ent.auditExport ? "✅" : "❌"}`);
       console.log(`  Webhooks:               ${ent.webhooks ? "✅" : "❌"}`);
       if (ent.tier === "free") {

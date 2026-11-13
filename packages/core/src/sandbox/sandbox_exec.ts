@@ -1,7 +1,8 @@
 // src/sandbox/sandbox_exec.ts
-import { spawnSync } from "../platform/spawn_sync.js";
+import { ambientEnv } from "../platform/env.js";
+import { spawnSync, type SpawnStop, type SpawnSyncOptions } from "../platform/spawn_sync.js";
 import { existsSync, mkdirSync } from "node:fs";
-import { sandboxEnv } from "./sandbox_env.js";
+import { sandboxEnv, strictIsolation } from "./sandbox_env.js";
 
 export type IsolationLevel = "network-namespace" | "os-sandbox" | "none";
 
@@ -10,6 +11,9 @@ export interface IsolatedRunOptions {
   writableDir: string; // the one directory the command is allowed to write to
   extraReadOnlyBinds?: string[]; // real paths that need to resolve inside the sandbox (e.g. a symlink target)
   env?: Record<string, string>;
+  /** Spawn budget for this run (platform/spawn_sync.ts). Default: the tier default. Only tests and callers with a reason to be tighter set these. */
+  deadlineMs?: number;
+  maxOutputBytes?: number;
 }
 
 export interface IsolatedRunResult {
@@ -17,6 +21,14 @@ export interface IsolatedRunResult {
   stdout: string;
   stderr: string;
   isolation: IsolationLevel;
+  /** F02-03: set when the run was stopped (timeout, output over the cap, out of a resource) or could not be started. Absent on any normal exit, including a failing one. */
+  stopped?: SpawnStop;
+  /** The signal that ended the run, set with `stopped: "signal"`. */
+  signal?: string;
+}
+
+function budgetOf(opts: IsolatedRunOptions): Pick<SpawnSyncOptions, "deadlineMs" | "maxOutputBytes"> {
+  return { ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}), ...(opts.maxOutputBytes !== undefined ? { maxOutputBytes: opts.maxOutputBytes } : {}) };
 }
 
 function hasBinary(bin: string): boolean {
@@ -83,6 +95,22 @@ export class SandboxUnavailableError extends Error {
 }
 
 /**
+ * Thrown in strict mode (PURIX_STRICT_ISOLATION) when a step would run with no sandbox at all. Like SandboxUnavailableError it is
+ * a thrown error and not an `isolation: "none"` result: the person asked for "no sandbox, no run", so the command is never started.
+ * verifyInSandbox turns it into an infrastructure result ("sandbox_unavailable"), which the repair loop never acts on.
+ */
+export class IsolationRequiredError extends Error {
+  constructor(what = "this step") {
+    super(
+      `Strict isolation is on (PURIX_STRICT_ISOLATION), and ${what} would run with no sandbox, so it was not run. ` +
+        "A sandbox needs bubblewrap (bwrap) on Linux or sandbox-exec on macOS; Windows has none. " +
+        "Install bubblewrap, or unset PURIX_STRICT_ISOLATION to allow unisolated runs (the result will then say isolation: none)."
+    );
+    this.name = "IsolationRequiredError";
+  }
+}
+
+/**
  * Section 24's open sandbox-isolation question, given a real (if
  * partial) answer instead of staying an open decision forever.
  *
@@ -106,7 +134,7 @@ export class SandboxUnavailableError extends Error {
 export function runIsolated(command: string[], opts: IsolatedRunOptions): IsolatedRunResult {
   // extraReadOnlyBinds are frequently toolchain-owned cache/gopath/bundle/target
   // dirs computed via toolchainSubdir(), which only guarantees its *parent*
-  // (.purix-tmp/<lang>) exists, not the leaf subdir itself. bwrap's --ro-bind
+  // (.purix/tmp/<lang>) exists, not the leaf subdir itself. bwrap's --ro-bind
   // (and macOS's subpath allow, for consistency) needs a real path on disk —
   // without this, the very first sandboxed call for a language whose install()
   // step hasn't already created that leaf dir as a side effect fails with
@@ -150,13 +178,14 @@ export function runIsolated(command: string[], opts: IsolatedRunOptions): Isolat
       "--chdir", opts.cwd,
       ...command,
     ];
-    const result = spawnSync(bwrapArgs, { stdout: "pipe", stderr: "pipe", env: { ...sandboxEnv(), ...(opts.env ?? {}) } });
+    const result = spawnSync(bwrapArgs, { stdout: "pipe", stderr: "pipe", env: { ...sandboxEnv({ home: opts.writableDir }), ...(opts.env ?? {}) }, ...budgetOf(opts) });
     const resultStdout = result.stdout.toString();
     const resultStderr = result.stderr.toString();
-    if (isBwrapSetupFailure(result.exitCode, resultStdout, resultStderr)) {
+    // A run that was stopped (deadline, output cap) has no exit code and no words of its own, so it must not be mistaken for a setup failure.
+    if (!result.stopped && isBwrapSetupFailure(result.exitCode, resultStdout, resultStderr)) {
       throw new SandboxUnavailableError(resultStderr);
     }
-    return { exitCode: result.exitCode, stdout: resultStdout, stderr: resultStderr, isolation: "network-namespace" };
+    return { exitCode: result.exitCode, stdout: resultStdout, stderr: resultStderr, isolation: "network-namespace", ...(result.stopped ? { stopped: result.stopped } : {}), ...(result.signal ? { signal: result.signal } : {}) };
   }
 
   if (process.platform === "darwin" && hasBinary("sandbox-exec")) {
@@ -172,7 +201,7 @@ export function runIsolated(command: string[], opts: IsolatedRunOptions): Isolat
     // bwrap. ~/.npm and pnpm's local store cover the common case of a
     // fallback `npx`/`pnpm dlx` invocation needing to read its cache;
     // this does not grant write access to either, only read.
-    const home = process.env.HOME ?? "";
+    const home = ambientEnv("HOME") ?? "";
     const readAllowSubpaths = [
       "/usr",
       "/bin",
@@ -195,11 +224,14 @@ ${readAllowSubpaths.map((p) => `(allow file-read* (subpath "${p}"))`).join("\n")
       cwd: opts.cwd,
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...sandboxEnv(), ...(opts.env ?? {}) },
+      env: { ...sandboxEnv({ home: opts.writableDir }), ...(opts.env ?? {}) },
+      ...budgetOf(opts),
     });
-    return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString(), isolation: "os-sandbox" };
+    return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString(), isolation: "os-sandbox", ...(result.stopped ? { stopped: result.stopped } : {}), ...(result.signal ? { signal: result.signal } : {}) };
   }
 
-  const result = spawnSync(command, { cwd: opts.cwd, stdout: "pipe", stderr: "pipe", env: { ...sandboxEnv(), ...(opts.env ?? {}) } });
-  return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString(), isolation: "none" };
+  // A4-1: no sandbox tool on this machine. Strict mode refuses; otherwise it runs unisolated and says so (isolation: "none").
+  if (strictIsolation()) throw new IsolationRequiredError(`the command "${command[0] ?? ""}"`);
+  const result = spawnSync(command, { cwd: opts.cwd, stdout: "pipe", stderr: "pipe", env: { ...sandboxEnv({ home: opts.writableDir }), ...(opts.env ?? {}) }, ...budgetOf(opts) });
+  return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString(), isolation: "none", ...(result.stopped ? { stopped: result.stopped } : {}), ...(result.signal ? { signal: result.signal } : {}) };
 }

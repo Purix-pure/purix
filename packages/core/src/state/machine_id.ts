@@ -30,10 +30,12 @@
 // process.cwd(), unused by the real cache path) purely so tests can
 // redirect the cache location without touching a real machine's home
 // directory — see the accompanying test file.
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { createFileExclusive, writeFileAtomic } from "../platform/atomic_write.js";
+import { purixDir } from "../platform/layout.js";
 
 const MACHINE_ID_FILE = "machine-id";
 
@@ -44,7 +46,7 @@ const MACHINE_ID_FILE = "machine-id";
  * directory or collide with each other when run in parallel.
  */
 function machineIdDir(baseDir?: string): string {
-  return baseDir ? join(baseDir, ".purix") : join(homedir(), ".purix");
+  return purixDir(baseDir ?? homedir());
 }
 
 /**
@@ -71,8 +73,14 @@ export function getMachineId(baseDir?: string): string {
 
   const id = randomUUID();
   try {
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(filePath, id, "utf8");
+    // Create-if-absent, not "check then write": two processes starting together on a fresh machine would
+    // both see no file and each keep their own id, splitting the machine's savings history server-side.
+    if (createFileExclusive(filePath, id)) return id;
+    // Someone created it between our check and now. Their id is the machine's id; use it.
+    const winner = readFileSync(filePath, "utf8").trim();
+    if (winner.length > 0) return winner;
+    // The file exists but is empty (damaged): replace it, atomically.
+    writeFileAtomic(filePath, id);
   } catch {
     // Best-effort persistence: if the write fails (read-only filesystem,
     // permissions, etc.), still return a value for this call so login

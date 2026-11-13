@@ -1,0 +1,54 @@
+{
+  "_about": "Speed budgets for scripts/speed-test.mjs, in milliseconds on the REFERENCE machine (a machine where `node -e \"\"` takes about referenceFloorMs). The test multiplies every budget by how much slower the machine it runs on is. Budgets come from Nielsen's response-time limits (0.1 s feels instant, 1 s keeps the user's flow of thought, 10 s is the limit of attention), set well under 1 s for anything interactive. They are NOT the current speed: the current speed is about three to five times lower, and the gap is the room allowed for noise. To tighten one, change it here and say why in docs/TESTING-PLAN.md.",
+  "referenceFloorMs": 25,
+  "classes": {
+    "version": {
+      "ms": 250,
+      "why": "purix --version: process start only; the floor of every other number"
+    },
+    "help": {
+      "ms": 350,
+      "why": "purix <command> --help: start-up plus argument parsing; people type this when unsure, so it has to feel instant"
+    },
+    "read": {
+      "ms": 500,
+      "why": "read-only commands (status, check, stats, tools list ...): under the 1 s flow-of-thought limit with room to spare"
+    },
+    "write": {
+      "ms": 700,
+      "why": "light local writes (config set, lock, adopt, backup create ...)"
+    },
+    "index-small": {
+      "ms": 1500,
+      "why": "purix index on a one-file project: the first command a new user runs"
+    },
+    "hook": {
+      "ms": 350,
+      "why": "purix hook ... pre-tool-use: an agent waits for this before EVERY edit, so it must stay far under 1 s"
+    },
+    "mcp-start": {
+      "ms": 1500,
+      "why": "start the MCP server and finish the handshake: paid once per agent session"
+    },
+    "mcp-call": {
+      "ms": 300,
+      "why": "one MCP read tool call on a running server"
+    }
+  },
+  "scale": {
+    "sizes": [
+      500,
+      2000,
+      8000
+    ],
+    "indexAtLargestMs": 10000,
+    "maxSlope": 1.5,
+    "abortAfterMs": 30000,
+    "_why": "Index time must grow about in step with the project. Slope is log(time ratio) / log(size ratio) between the two largest sizes: 1.0 = in step, 2.0 = quadratic. Sizes are large on purpose: index has a fixed cost of about 150 ms, and on 25 to 300 files that cost hides growth (the old quadratic bug showed there only because it was extreme). 10 s is Nielsen's limit of attention for the largest size. abortAfterMs: if one run takes longer than this (times the machine factor) the sizes after it are not run, because a quadratic index at 8,000 files would take hours."
+  },
+  "regression": {
+    "ratio": 1.25,
+    "minExtraMs": 40,
+    "_why": "With --compare: fail only if the median is more than 25% AND more than 40 ms (x machine factor) slower than a baseline saved on the same machine. Both conditions, so noise on a 90 ms command does not fail a run."
+  }
+}

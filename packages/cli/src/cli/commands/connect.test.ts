@@ -4,7 +4,7 @@ import { expect } from "expect";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectAgent } from "./connect_agent";
+import { connectAgent, readRecordedAgentId, mcpLauncher } from "./connect_agent";
 import { agents, getAgentTypes } from "add-mcp";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
 
@@ -32,11 +32,20 @@ describe("connectAgent", () => {
     expect(result.path).toBe(join(cwd, ".mcp.json"));
 
     const written = JSON.parse(readFileSync(result.path, "utf-8"));
+    // The launcher is platform-specific by design (cmd /c purix mcp-serve on Windows, purix mcp-serve elsewhere).
     expect(written.mcpServers.purix).toEqual({
-      command: "purix",
-      args: ["mcp-serve"],
+      command: mcpLauncher().command,
+      args: mcpLauncher().args,
       env: { PURIX_MCP_AGENT_ID: "claude-code" },
     });
+  });
+
+  test("readRecordedAgentId returns the identity a previous connect recorded, for JSON and TOML configs", () => {
+    expect(readRecordedAgentId("claude-code", cwd)).toBeUndefined();
+    connectAgent("claude-code", cwd, "my-claude");
+    expect(readRecordedAgentId("claude-code", cwd)).toBe("my-claude");
+    connectAgent("codex", cwd, "my-codex");
+    expect(readRecordedAgentId("codex", cwd)).toBe("my-codex");
   });
 
   test("registers purix with Cursor by writing a real project-scoped .cursor/mcp.json", () => {
@@ -45,8 +54,8 @@ describe("connectAgent", () => {
     expect(existsSync(join(cwd, ".cursor", "mcp.json"))).toBe(true);
 
     const written = JSON.parse(readFileSync(result.path, "utf-8"));
-    expect(written.mcpServers.purix.command).toBe("purix");
-    expect(written.mcpServers.purix.args).toEqual(["mcp-serve"]);
+    expect(written.mcpServers.purix.command).toBe(mcpLauncher().command);
+    expect(written.mcpServers.purix.args).toEqual(mcpLauncher().args);
   });
 
   test("registers purix with Codex by writing real project-scoped config.toml (TOML, not JSON)", () => {
@@ -55,7 +64,7 @@ describe("connectAgent", () => {
 
     const written = readFileSync(result.path, "utf-8");
     expect(written).toContain("[mcp_servers.purix]");
-    expect(written).toContain('command = "purix"');
+    expect(written).toContain(`command = "${mcpLauncher().command}"`);
   });
 
   test("records the given agentId in PURIX_MCP_AGENT_ID, not a hardcoded value", () => {
@@ -112,5 +121,15 @@ describe("connectAgent", () => {
     for (const agentType of getAgentTypes()) {
       expect(() => connectAgent(agentType, cwd, agentType)).not.toThrow();
     }
+  });
+});
+describe("mcpLauncher", () => {
+  test("is cmd /c purix mcp-serve on Windows, where purix is a .cmd shim an agent cannot spawn directly", async () => {
+    const { mcpLauncher } = await import("./connect_agent");
+    expect(mcpLauncher("win32")).toEqual({ command: "cmd", args: ["/c", "purix", "mcp-serve"] });
+  });
+  test("is purix mcp-serve everywhere else", async () => {
+    const { mcpLauncher } = await import("./connect_agent");
+    for (const p of ["linux", "darwin"] as const) expect(mcpLauncher(p)).toEqual({ command: "purix", args: ["mcp-serve"] });
   });
 });

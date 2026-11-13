@@ -8,6 +8,7 @@
 // conservative starting points, overridable per environment, and meant to be
 // re-tuned from the "context_pack"/"context_usage" telemetry once real usage
 // exists (STATUS.md's Phase 6 gate).
+import { envSnapshot } from "../../platform/env.js";
 export interface ContextConfig {
   /** Master switch. false = exact legacy behaviour (all files, no extras, no restructuring). */
   enabled: boolean;
@@ -17,6 +18,8 @@ export interface ContextConfig {
   focusedMaxTokens: number;
   projectContextEnabled: boolean;
   projectContextMaxTokens: number;
+  /** Escalation sends the files of neighbouring components (dependencies first, then dependents) up to this many estimated tokens. */
+  neighborMaxTokens: number;
 }
 
 export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
@@ -25,6 +28,7 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
   focusedMaxTokens: 6_000,
   projectContextEnabled: true,
   projectContextMaxTokens: 500,
+  neighborMaxTokens: 6_000,
 };
 
 function intFromEnv(v: string | undefined, fallback: number, min: number): number {
@@ -35,7 +39,7 @@ function intFromEnv(v: string | undefined, fallback: number, min: number): numbe
 
 const isOff = (v: string | undefined) => v !== undefined && ["off", "0", "false", "no"].includes(v.trim().toLowerCase());
 
-export function loadContextConfig(env: NodeJS.ProcessEnv = process.env): ContextConfig {
+export function loadContextConfig(env: NodeJS.ProcessEnv = envSnapshot()): ContextConfig {
   const d = DEFAULT_CONTEXT_CONFIG;
   const fullMaxTokens = intFromEnv(env.PURIX_CONTEXT_FULL_MAX_TOKENS, d.fullMaxTokens, 500);
   const focused = intFromEnv(env.PURIX_CONTEXT_FOCUSED_MAX_TOKENS, d.focusedMaxTokens, 200);
@@ -46,5 +50,6 @@ export function loadContextConfig(env: NodeJS.ProcessEnv = process.env): Context
     focusedMaxTokens: Math.min(focused, fullMaxTokens),
     projectContextEnabled: !isOff(env.PURIX_PROJECT_CONTEXT),
     projectContextMaxTokens: intFromEnv(env.PURIX_PROJECT_CONTEXT_MAX_TOKENS, d.projectContextMaxTokens, 0),
+    neighborMaxTokens: intFromEnv(env.PURIX_CONTEXT_NEIGHBOR_MAX_TOKENS, d.neighborMaxTokens, 500),
   };
 }

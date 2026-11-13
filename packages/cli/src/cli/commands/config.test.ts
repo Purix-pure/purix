@@ -10,7 +10,7 @@ import { expect } from "expect";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectAgent } from "./connect_agent";
+import { connectAgent, mcpLauncher } from "./connect_agent";
 import { agents, getAgentTypes } from "add-mcp";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
 
@@ -39,8 +39,8 @@ describe("connectAgent", () => {
 
     const written = JSON.parse(readFileSync(result.path, "utf-8"));
     expect(written.mcpServers.purix).toEqual({
-      command: "purix",
-      args: ["mcp-serve"],
+      command: mcpLauncher().command,
+      args: mcpLauncher().args,
       env: { PURIX_MCP_AGENT_ID: "claude-code" },
     });
   });
@@ -51,8 +51,8 @@ describe("connectAgent", () => {
     expect(existsSync(join(cwd, ".cursor", "mcp.json"))).toBe(true);
 
     const written = JSON.parse(readFileSync(result.path, "utf-8"));
-    expect(written.mcpServers.purix.command).toBe("purix");
-    expect(written.mcpServers.purix.args).toEqual(["mcp-serve"]);
+    expect(written.mcpServers.purix.command).toBe(mcpLauncher().command);
+    expect(written.mcpServers.purix.args).toEqual(mcpLauncher().args);
   });
 
   test("registers purix with Codex by writing real project-scoped config.toml (TOML, not JSON)", () => {
@@ -61,7 +61,7 @@ describe("connectAgent", () => {
 
     const written = readFileSync(result.path, "utf-8");
     expect(written).toContain("[mcp_servers.purix]");
-    expect(written).toContain('command = "purix"');
+    expect(written).toContain(`command = "${mcpLauncher().command}"`);
   });
 
   test("records the given agentId in PURIX_MCP_AGENT_ID, not a hardcoded value", () => {

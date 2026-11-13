@@ -23,24 +23,35 @@ describe("verifyComponent", () => {
   it("fails fast when there is nothing to verify", () => {
     expect(verifyComponent([], dir)).toEqual({ status: "fail", reason: "No files to verify" });
   });
-  it("reports not_installed with the install hint matching the project's package manager", () => {
-    const cases: [string | null, string][] = [
-      ["pnpm-lock.yaml", "pnpm add -D typescript"],
-      ["yarn.lock", "yarn add -D typescript"],
-      ["bun.lockb", "bun add -D typescript"],
-      ["bun.lock", "bun add -D typescript"],
-      [null, "npm install -D typescript"],
-    ];
-    for (const [lock, hint] of cases) {
+  it("reports not_installed and points at `purix tools install typescript`, whatever the package manager", () => {
+    for (const lock of ["pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "package-lock.json", null]) {
       const d = mkdtempSync(join(tmpdir(), "purix-hint-"));
       try {
         if (lock) writeFileSync(join(d, lock), "");
         const r = verifyComponent(["a.ts"], d);
         expect(r.status).toBe("not_installed");
-        if (r.status === "not_installed") expect(r.actionHint).toContain(hint);
+        if (r.status === "not_installed") {
+          expect(r.actionHint).toBe("Run: purix tools install typescript");
+          // Purix never asks the user to edit their own package manifest.
+          expect(r.actionHint).not.toMatch(/npm install|pnpm add|yarn add|bun add/);
+        }
       } finally {
         rmSync(d, { recursive: true, force: true });
       }
+    }
+  });
+  it("when the project declares typescript but has not installed it, says to install the project's dependencies", () => {
+    const d = mkdtempSync(join(tmpdir(), "purix-hint-"));
+    try {
+      writeFileSync(join(d, "package.json"), JSON.stringify({ devDependencies: { typescript: "^5.0.0" } }));
+      const r = verifyComponent(["a.ts"], d);
+      expect(r.status).toBe("not_installed");
+      if (r.status === "not_installed") {
+        expect(r.actionHint).toMatch(/declared by your project/);
+        expect(r.actionHint).toMatch(/purix tools install typescript/);
+      }
+    } finally {
+      rmSync(d, { recursive: true, force: true });
     }
   });
   it("passes when tsc exits 0", () => {

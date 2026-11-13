@@ -18,6 +18,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { purixDir } from "../platform/layout.js";
 
 /**
  * Walks up from startDir looking for a `.git` entry (directory or file),
@@ -79,9 +80,15 @@ function resolveCommonDir(dotGitPath: string): string {
  * directories) is unaffected.
  */
 export function resolveSharedStateDir(baseDir: string = process.cwd()): string {
+  const local = purixDir(resolve(baseDir));
   const dotGit = findDotGit(baseDir);
-  if (!dotGit) return join(resolve(baseDir), ".purix");
+  if (!dotGit) return local;
 
-  const commonDir = resolveCommonDir(dotGit);
-  return join(commonDir, "purix-state");
+  const shared = join(resolveCommonDir(dotGit), "purix-state");
+  // A project that began before `git init` (or was copied in from a folder that was not a repository) keeps its
+  // store where it is. Without this, running `git init` silently moved the store's address: `purix status`
+  // showed nothing governed and `purix check` exited 0 over the same project. The legacy store is used only while
+  // the shared one does not exist yet, so a worktree setup that already has a shared store is unaffected.
+  if (!existsSync(join(shared, "manifest.db")) && existsSync(join(local, "manifest.db"))) return local;
+  return shared;
 }

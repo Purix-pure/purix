@@ -16,7 +16,7 @@
 // purix_modify or purix_ingest.
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -57,6 +57,14 @@ function makeEntry(id: string, files: string[]): ManifestEntry {
 interface RecordedFetchCall {
   url: string;
   body: string;
+}
+
+// Verification pre-flight refuses, before any model call, a TypeScript change in a project with no compiler. These tests
+// are about what the model call carries, so the project gets a compiler to find (it is never the one that decides here).
+function giveProjectACompiler(dir: string): void {
+  mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+  writeFileSync(join(dir, "node_modules", ".bin", "tsc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(dir, "node_modules", ".bin", "tsc.cmd"), "@echo off\r\nexit /b 0\r\n");
 }
 
 describe("ADR-001 adversarial pass: MCP server never forwards repo content to Purix's own backend", () => {
@@ -127,6 +135,7 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
     const fileName = "sensitive-component.ts";
     writeFileSync(join(tmpDir, fileName), `// ${SENSITIVE_MARKER}\nexport const secret = "do-not-leak";\n`);
     writeManifest(makeEntry("sensitive-comp", [fileName]));
+    giveProjectACompiler(tmpDir);
 
     const server = createPurixMcpServer();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -174,6 +183,7 @@ describe("ADR-001 adversarial pass: MCP server never forwards repo content to Pu
     const fileName = "sensitive-component.ts";
     writeFileSync(join(tmpDir, fileName), `// ${SENSITIVE_MARKER}\nexport const secret = "do-not-leak";\n`);
     writeManifest(makeEntry("sensitive-comp", [fileName]));
+    giveProjectACompiler(tmpDir);
 
     const server = createPurixMcpServer();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

@@ -1,0 +1,4 @@
+{
+  "note": "README.md sentences that look like claims and are not in docs/claims.json. May only fall. See scripts/check-claims.mjs.",
+  "readmeUnmapped": 15
+}

@@ -23,7 +23,16 @@ export function snapshotSavings() {
   return getSavingsSummary(3650); // ~10 years ≈ "all time" for this project
 }
 
-export function printRunSummary(before: ReturnType<typeof snapshotSavings>): void {
+/**
+ * What the caller knows about verification for this run. The heading says "Verification Complete"
+ * only for "passed". A caller that does not say (or says "failed"/"skipped") gets a neutral heading,
+ * so a skipped or errored check can never read as a pass (FR-04, C-36).
+ * "partial" means the code compiled and some checks ran, but at least one changed file had no test that
+ * exercised it (or, for `create`, no test has run yet). It is a gap, so it never reads as a pass either.
+ */
+export type RunVerification = "passed" | "failed" | "skipped" | "partial";
+
+export function printRunSummary(before: ReturnType<typeof snapshotSavings>, verification?: RunVerification): void {
   if (isQuiet() || config.get("show-savings") === "off") return;
 
   const after = getSavingsSummary(3650);
@@ -44,10 +53,18 @@ export function printRunSummary(before: ReturnType<typeof snapshotSavings>): voi
   }
   if (lines.length === 0) return; // nothing genuine to show at all
 
-  console.log(`\nPurix Verification Complete ✅`);
+  console.log(runSummaryHeading(verification));
   for (const line of lines) console.log(line);
 
   maybePrintMilestoneUpsell();
+}
+
+export function runSummaryHeading(verification?: RunVerification): string {
+  if (verification === "passed") return `\nPurix Verification Complete ✅`;
+  if (verification === "failed") return `\nPurix run summary (verification did not pass)`;
+  if (verification === "skipped") return `\nPurix run summary (verification was not run)`;
+  if (verification === "partial") return `\nPurix run summary (not everything was tested)`;
+  return `\nPurix run summary`;
 }
 
 function maybePrintMilestoneUpsell(): void {

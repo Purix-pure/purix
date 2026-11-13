@@ -2,6 +2,10 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { PYTHON_MODEL_BASELINES, evaluateModelBaseline } from "./python_model_baseline";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("ADR-013 Python Model Escalation Baseline (ADR-013 Amendment)", () => {
   it("evaluates python baseline fixtures successfully", () => {

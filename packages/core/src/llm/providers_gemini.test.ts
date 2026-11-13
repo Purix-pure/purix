@@ -67,3 +67,38 @@ describe("Gemini adapter generate()", () => {
     expect(called).toBe(false);
   });
 });
+
+describe("Gemini adapter goes through the network door", () => {
+  it("sends the key in a header, never in the URL, to the documented REST endpoint", async () => {
+    process.env.GEMINI_API_KEY = "gk-secret";
+    let seenUrl = "";
+    let seenHeaders: Record<string, string> = {};
+    let seenBody: any = null;
+    globalThis.fetch = (async (url: any, init: any) => {
+      seenUrl = String(url);
+      seenHeaders = init.headers;
+      seenBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 });
+    });
+    await getProvider("gemini").generate("hello", "low", "be brief");
+    expect(seenUrl.startsWith("https://generativelanguage.googleapis.com/v1beta/models/")).toBe(true);
+    expect(seenUrl.endsWith(":generateContent")).toBe(true);
+    expect(seenUrl).not.toContain("gk-secret");
+    expect(seenHeaders["x-goog-api-key"]).toBe("gk-secret");
+    expect(seenBody.contents[0].parts[0].text).toBe("hello");
+    expect(seenBody.systemInstruction.parts[0].text).toBe("be brief");
+  });
+  it("turns an HTTP error into an error with a status, so retry logic can classify it", async () => {
+    process.env.GEMINI_API_KEY = "gk-test";
+    globalThis.fetch = (async () => new Response("quota", { status: 429 }));
+    const p = getProvider("gemini");
+    const err: any = await p.generate("hi", "low").catch((e) => e);
+    expect(err.status).toBe(429);
+    expect(p.isTransientError(err)).toBe(true);
+  });
+  it("ignores thought parts and joins the text parts", async () => {
+    process.env.GEMINI_API_KEY = "gk-test";
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "hidden", thought: true }, { text: "a" }, { text: "b" }] } }] }), { status: 200 }));
+    expect((await getProvider("gemini").generate("hi", "low")).text).toBe("ab");
+  });
+});

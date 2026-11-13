@@ -5,16 +5,63 @@ import type { LanguageProvider } from "../provider.js";
 import type { VerificationResult } from "../../verify/verify.js";
 import { verifyComponent } from "../../verify/verify.js";
 import type { TestRunResult } from "../../verify/tests.js";
-import { runTestsWithQuarantine } from "../../verify/tests.js";
+import { runTestsWithQuarantine, type RunTestsOptions } from "../../verify/tests.js";
 import type { IdiomCheckResult } from "../../verify/idiom.js";
 import { checkIdioms } from "../../verify/idiom.js";
 import type { PinningFinding, VulnFinding } from "../../security/deps_audit.js";
 import { checkVersionPinning, runVulnScan } from "../../security/deps_audit.js";
 import type { TestIntegrityChecker } from "../../verify/test_integrity.js";
+import { discoverRelatedTests } from "../../verify/test_discovery.js";
+import { createRequire } from "node:module";
+import type { ParseCheckResult } from "../provider.js";
+
+const TS_EXTENSIONS = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
+
+/**
+ * The TypeScript compiler that ships inside ts-morph, loaded on first use and synchronously (the verify path is
+ * synchronous). It is never the project's own TypeScript, which is why a parse failure only counts when the file's
+ * original text parsed clean through the same parser (see verify/precheck.ts).
+ */
+let tsApi: typeof import("ts-morph").ts | null | undefined;
+function loadTs(): typeof import("ts-morph").ts | null {
+  if (tsApi !== undefined) return tsApi;
+  try {
+    tsApi = (createRequire(import.meta.url)("ts-morph") as typeof import("ts-morph")).ts;
+  } catch {
+    tsApi = null;
+  }
+  return tsApi;
+}
 
 export const typescriptProvider: LanguageProvider = {
   id: "typescript",
   minSupportedVersion: "5.0.0",
+
+  parseCheck(path: string, content: string): ParseCheckResult | undefined {
+    if (!TS_EXTENSIONS.test(path)) return undefined;
+    const ts = loadTs();
+    if (!ts) return undefined;
+    // Parse only. transpileModule reports the same syntactic errors but also emits, which is ~10x slower on a 500-line file.
+    // The parser's diagnostics are an internal field of the source file; if a future TypeScript hides it, fall back to
+    // transpileModule's public report so the check degrades to slower, never to silent.
+    const sf = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, false);
+    const parseDiagnostics = (sf as unknown as { parseDiagnostics?: readonly { start?: number; code: number; messageText: string | { messageText: string } }[] }).parseDiagnostics;
+    if (Array.isArray(parseDiagnostics)) {
+      const first = parseDiagnostics[0];
+      if (!first || first.start === undefined) return { ok: true };
+      const pos = sf.getLineAndCharacterOfPosition(first.start);
+      return { ok: false, line: pos.line + 1, column: pos.character + 1, message: ts.flattenDiagnosticMessageText(first.messageText as never, "\n"), code: `TS${first.code}` };
+    }
+    const out = ts.transpileModule(content, {
+      fileName: path,
+      reportDiagnostics: true,
+      compilerOptions: { allowJs: true, jsx: ts.JsxEmit.Preserve, noResolve: true, isolatedModules: true },
+    });
+    const first = (out.diagnostics ?? []).find((d) => d.category === ts.DiagnosticCategory.Error && d.file !== undefined && d.start !== undefined);
+    if (!first || !first.file || first.start === undefined) return { ok: true };
+    const pos = first.file.getLineAndCharacterOfPosition(first.start);
+    return { ok: false, line: pos.line + 1, column: pos.character + 1, message: ts.flattenDiagnosticMessageText(first.messageText, "\n"), code: `TS${first.code}` };
+  },
 
   // See the getTestIntegrityChecker doc comment on LanguageProvider for why
   // this is dynamic-import-on-first-use rather than a top-level import:
@@ -46,8 +93,12 @@ export const typescriptProvider: LanguageProvider = {
     return verifyComponent(filePaths, baseDir);
   },
 
-  runTests(componentId: string, testFiles: string[], baseDir: string = process.cwd()): TestRunResult {
-    return runTestsWithQuarantine(componentId, testFiles, baseDir);
+  runTests(componentId: string, testFiles: string[], baseDir: string = process.cwd(), options?: RunTestsOptions): TestRunResult {
+    return runTestsWithQuarantine(componentId, testFiles, baseDir, options);
+  },
+
+  findRelatedTests(changedPaths: string[], baseDir: string = process.cwd()) {
+    return discoverRelatedTests(changedPaths, baseDir);
   },
 
   checkIdiom(filePaths: string[], baseDir: string = process.cwd()): IdiomCheckResult {

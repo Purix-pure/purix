@@ -42,10 +42,13 @@
 // dedup pass. Both commands still call buildMigrationPlan/stageMigration
 // (modify) or skip it (ingest) exactly as before, immediately after
 // calling reVerifyCascadeDependents() below.
+import { notTestedMessage } from "../verify/outcome.js";
 import { createPendingOperation, completeModification, commitManifestWithRetry, deletePendingOperation } from "./store.js";
 import { applyModificationFiles, rollbackModification } from "../entrypoints/modify.js";
+import { assertRepoLockHeld } from "../state/repo_lock.js";
 import { computeSyncHash } from "../state/hash.js";
 import { getDependents, reVerifyDependents } from "../verify/impact.js";
+import { recordLandedChange } from "../state/landed_change.js";
 import type { ManifestEntry, Provenance } from "./schema.js";
 
 export interface CommitVersionedChangeParams {
@@ -62,10 +65,16 @@ export interface CommitVersionedChangeParams {
   reRunCommandHint: string;
   /** ingest-only: new file paths a diff added, merged into entry.files before commit. Omit for modify. */
   newFilePaths?: string[];
+  /**
+   * ingest-only: files the diff deletes. `finalFiles` holds only the files that REMAIN; `beforeSnapshot` still holds the deleted
+   * ones (it is what the change was verified against). They are removed from disk, from `entry.files`, and recorded in the
+   * journal's after snapshot as `deleted` so a crash between two writes can be told apart and recovered.
+   */
+  deletedPaths?: string[];
 }
 
 export type CommitVersionedChangeResult =
-  | { ok: true; newVersion: number }
+  | { ok: true; newVersion: number; recordProblems: string[] }
   | { ok: false }; // caller has nothing further to do — this already printed the error and set process.exitCode
 
 /**
@@ -76,12 +85,16 @@ export type CommitVersionedChangeResult =
  */
 export async function commitVersionedChange(params: CommitVersionedChangeParams): Promise<CommitVersionedChangeResult> {
   const { componentId, entry, beforeSnapshot, finalFiles, operation, patchRef, contractChanged, provenance, targetDir, reRunCommandHint, newFilePaths } = params;
+  const deletedPaths = params.deletedPaths ?? [];
   const newVersion = entry.current_version + 1;
 
   const pendingId = createPendingOperation({
     component_id: componentId,
     before_snapshot: beforeSnapshot,
-    after_snapshot: finalFiles.map((f) => ({ path: f.path, content: f.new_content })),
+    after_snapshot: [
+      ...finalFiles.map((f) => ({ path: f.path, content: f.new_content })),
+      ...deletedPaths.map((path) => ({ path, content: "", deleted: true })),
+    ],
     new_version: newVersion,
     operation,
     contract_changed: contractChanged,
@@ -90,15 +103,27 @@ export async function commitVersionedChange(params: CommitVersionedChangeParams)
 
   let backups;
   try {
-    backups = await applyModificationFiles(finalFiles, targetDir);
+    // beforeSnapshot is what the files held when this change was verified: a file that holds something else now was edited
+    // since (by a person, or another tool) and is never overwritten. The lock check stops a process whose lock expired.
+    backups = await applyModificationFiles([...finalFiles, ...deletedPaths.map((path) => ({ path, new_content: "", delete: true }))], targetDir, undefined, {
+      expectedBefore: beforeSnapshot,
+      lockCheck: () => assertRepoLockHeld(targetDir),
+    });
   } catch (err) {
     console.error(`\n🛑 File write failed, rolled back: ${err instanceof Error ? err.message : String(err)}`);
+    // Everything was undone (a failed undo carries rollbackFailures and keeps its row for reconcile to find): the row describes
+    // a change that never happened, so it must not wait for the next command to be reconciled.
+    if (!(err as { rollbackFailures?: unknown }).rollbackFailures) deletePendingOperation(pendingId);
     process.exitCode = 1;
     return { ok: false };
   }
 
   if (newFilePaths && newFilePaths.length > 0) {
     entry.files = Array.from(new Set([...entry.files, ...newFilePaths]));
+  }
+  if (deletedPaths.length > 0) {
+    const gone = new Set(deletedPaths);
+    entry.files = entry.files.filter((f) => !gone.has(f));
   }
   entry.current_version = newVersion;
   entry.verification_status = "pass";
@@ -126,7 +151,19 @@ export async function commitVersionedChange(params: CommitVersionedChangeParams)
     return { ok: false };
   }
   completeModification(entry, pendingId, newVersion);
-  return { ok: true, newVersion };
+  // The change has landed. Put it in the hash-chained audit trail and refresh purix.lock.json if the project keeps one.
+  const recorded = recordLandedChange(
+    {
+      kind: operation === "diff_ingest" ? "ingest" : "modify",
+      component_id: componentId,
+      version: newVersion,
+      sync_hash: entry.last_synced_hash,
+      operation,
+      source: provenance.source_agent ?? provenance.source_type,
+    },
+    targetDir
+  );
+  return { ok: true, newVersion, recordProblems: recorded.problems };
 }
 
 /**
@@ -142,6 +179,6 @@ export function reVerifyCascadeDependents(entry: ManifestEntry, targetDir: strin
   console.log(`  Re-verifying ${dependents.length} dependent(s)${leadInSuffix}`);
   const cascade = reVerifyDependents(dependents, targetDir);
   for (const c of cascade) {
-    console.log(c.status === "pass" ? `    ✅ ${c.component_id}` : `    ❌ ${c.component_id}: ${c.reason}`);
+    console.log(c.status === "pass" ? `    ${c.notTested ? "⚠️ " : "✅"} ${c.component_id}${c.notTested ? `  ${notTestedMessage(c.notTested, { searchCut: c.testSearchCut === true })}` : ""}` : c.infrastructure ? `    ⚠️  ${c.component_id}: could not be re-verified (not a failure of the dependent): ${c.reason}` : `    ❌ ${c.component_id}: ${c.reason}`);
   }
 }

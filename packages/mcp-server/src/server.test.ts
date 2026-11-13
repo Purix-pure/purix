@@ -11,10 +11,16 @@ import { safeRmSync } from "@purix/core/platform/fs_retry";
 
 describe("Purix MCP Server", () => {
   let tmpDir: string;
+  let userDir: string;
   let oldCwd: string;
+  let savedUserDir: string | undefined;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "purix-mcp-test-"));
+    // Pending approvals sign with a key in the user folder; keep it out of the real home.
+    userDir = mkdtempSync(join(tmpdir(), "purix-mcp-test-user-"));
+    savedUserDir = process.env.PURIX_USER_DIR;
+    process.env.PURIX_USER_DIR = userDir;
     oldCwd = process.cwd();
     process.chdir(tmpDir);
     process.env.PURIX_MCP_AUTO_APPROVE = "1"; // bypass prompt for test
@@ -24,6 +30,9 @@ describe("Purix MCP Server", () => {
     closeDb();
     process.chdir(oldCwd);
     safeRmSync(tmpDir);
+    safeRmSync(userDir);
+    if (savedUserDir === undefined) delete process.env.PURIX_USER_DIR;
+    else process.env.PURIX_USER_DIR = savedUserDir;
     delete process.env.PURIX_MCP_AUTO_APPROVE;
   });
 
@@ -162,7 +171,7 @@ describe("Purix MCP Server", () => {
       });
 
       const callTool = createToolCaller();
-      const result = await callTool("purix_status", {});
+      const result = await callTool("purix_status", { detail: "full" });
       const text = result.content[0]!.text;
       expect(text).not.toContain("zQ8mK2vN9pL4xR7wT1cB6hJ3sD5fG0yA");
       expect(text).toContain("REDACTED");
@@ -223,6 +232,49 @@ describe("Purix MCP Server", () => {
       expect(passEvents.length).toBe(0);
     });
 
+    describe("a diff that deletes files", () => {
+      const entryFor = (id: string, files: string[]) =>
+        writeManifest({
+          component_id: id, component_type: "module", current_version: 1, schema_version: 4, parts: { tools: [], config: {} },
+          files, depends_on: [], depended_on_by: [], version_history: [], verification_status: "pass", last_synced_hash: null, language: "typescript",
+        });
+      const diffDeleting = (name: string) => ["--- a/" + name, "+++ /dev/null", "@@ -1,1 +0,0 @@", "-bye", ""].join("\n");
+
+      test("that would leave the component empty is refused and points at purix delete; the file stays", async () => {
+        const { writeFileSync, existsSync } = await import("node:fs");
+        writeFileSync(join(tmpDir, "gone.txt"), "bye\n", "utf-8");
+        writeFileSync(join(tmpDir, "gone.diff"), diffDeleting("gone.txt"), "utf-8");
+        entryFor("ingest-delete-comp", ["gone.txt"]);
+        const result = await createToolCaller()("purix_ingest", { componentId: "ingest-delete-comp", diffFilePath: join(tmpDir, "gone.diff") });
+        expect(result.content[0]!.text).toMatch(/^Refused: this diff would leave the component with no files/);
+        expect(result.content[0]!.text).toMatch(/purix delete/);
+        expect(existsSync(join(tmpDir, "gone.txt"))).toBe(true);
+        expect(listEvents({ kind: "verification_pass" }).filter((e) => e.component_id === "ingest-delete-comp").length).toBe(0);
+      });
+
+      test("of a file the component does not track is refused, and the file stays", async () => {
+        const { writeFileSync, existsSync } = await import("node:fs");
+        writeFileSync(join(tmpDir, "keep.txt"), "k\n", "utf-8");
+        writeFileSync(join(tmpDir, "other.txt"), "bye\n", "utf-8");
+        writeFileSync(join(tmpDir, "other.diff"), diffDeleting("other.txt"), "utf-8");
+        entryFor("ingest-delete-foreign", ["keep.txt"]);
+        const result = await createToolCaller()("purix_ingest", { componentId: "ingest-delete-foreign", diffFilePath: join(tmpDir, "other.diff") });
+        expect(result.content[0]!.text).toMatch(/^Refused: this diff deletes file\(s\) this component does not track: other\.txt/);
+        expect(existsSync(join(tmpDir, "other.txt"))).toBe(true);
+      });
+
+      test("of a test file is refused, because removing a test can make a failing check pass", async () => {
+        const { writeFileSync, existsSync } = await import("node:fs");
+        writeFileSync(join(tmpDir, "keep.ts"), "export const k = 1;\n", "utf-8");
+        writeFileSync(join(tmpDir, "keep.test.ts"), "bye\n", "utf-8");
+        writeFileSync(join(tmpDir, "t.diff"), diffDeleting("keep.test.ts"), "utf-8");
+        entryFor("ingest-delete-test", ["keep.ts", "keep.test.ts"]);
+        const result = await createToolCaller()("purix_ingest", { componentId: "ingest-delete-test", diffFilePath: join(tmpDir, "t.diff") });
+        expect(result.content[0]!.text).toMatch(/^Refused: this diff deletes test file\(s\) \(keep\.test\.ts\)/);
+        expect(existsSync(join(tmpDir, "keep.test.ts"))).toBe(true);
+      });
+    });
+
     test("gated-action budget: caps repeated full-reindex attempts within one server session", async () => {
       process.env.PURIX_MCP_MAX_GATED_ACTIONS = "1";
       const callTool = createToolCaller();
@@ -278,17 +330,14 @@ describe("Purix MCP Server", () => {
       // reporting a clean pass/fail — which is itself the regression
       // signal, not a flake to retry past.
       const result = await Promise.race([
-        callTool("purix_delete", { componentId: "gate-test-comp" }),
+        callTool("purix_index", { full: true }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("timed out — likely hung on stdin")), 2000)),
       ]);
 
       const text = (result as { content: Array<{ text?: string }> }).content[0]!.text ?? "";
-      expect(text).toContain("no working human-confirmation channel yet");
-      expect(text).not.toContain("Deletion rejected by human confirmation checkpoint.");
-
-      // Never silently approved either — the component must still exist.
-      const stillThere = readManifest("gate-test-comp");
-      expect(stillThere).toBeDefined();
+      // C-30: with no human-confirmation channel the call becomes a pending request, not a hang and not a silent yes.
+      expect(text).toContain("needs a person's approval");
+      expect(text).not.toContain("fileCount");
 
       const events = listEvents({ kind: "confirm_response" });
       const rejection = events.find((e) => (e.detail).reason === "mcp_no_elicitation_support");

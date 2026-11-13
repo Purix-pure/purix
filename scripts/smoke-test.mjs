@@ -153,9 +153,7 @@ async function main() {
 
   const readOnlyCalls = [
     { name: "purix_status", arguments: {} },
-    { name: "purix_stats", arguments: {} },
-    { name: "purix_library", arguments: {} },
-    { name: "purix_audit", arguments: {} },
+    { name: "purix_audit_verify", arguments: {} },
     { name: "purix_tools", arguments: { purpose: "parse CSV files" } },
   ];
 

@@ -56,9 +56,16 @@ describe("detectScaffoldLanguage", () => {
     expect(() => detectScaffoldLanguage([{ path: "main.rs" }], "comp-x", tmpDir)).toThrow(/Multiple language markers/);
   });
 
-  it("falls back to resolveLanguage() (whole-repo detection) when no file has a recognized non-TS/JS extension", () => {
+  it("dispatches a TypeScript file by its manifest extension even in a repo that also has Python markers", () => {
     writeFileSync(join(tmpDir, "tsconfig.json"), "{}");
-    const lang = detectScaffoldLanguage([{ path: "index.ts" }], "comp-x", tmpDir);
+    writeFileSync(join(tmpDir, "pyproject.toml"), "");
+    expect(detectScaffoldLanguage([{ path: "src/index.ts" }], "comp-x", tmpDir)).toBe("typescript");
+    expect(detectScaffoldLanguage([{ path: "pkg/mod.py" }], "comp-x", tmpDir)).toBe("python");
+  });
+
+  it("falls back to resolveLanguage() (whole-repo detection) when no file has an extension a manifest claims", () => {
+    writeFileSync(join(tmpDir, "tsconfig.json"), "{}");
+    const lang = detectScaffoldLanguage([{ path: "notes.txt" }], "comp-x", tmpDir);
     expect(lang).toBe("typescript");
   });
 });
@@ -191,5 +198,23 @@ describe("buildManifestEntry", () => {
     };
     const entry = buildManifestEntry(plan, "agent-42");
     expect(entry.version_history[0]?.provenance.source_agent).toBe("agent-42");
+  });
+});
+
+describe("writeScaffold when the compiler is missing", () => {
+  it("rolls back, and the error says how to fix it instead of only that it is missing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-scaffold-nocompiler-"));
+    try {
+      const plan = {
+        component_id: "demo",
+        component_type: "module",
+        depends_on: [],
+        files: [{ path: "src/demo.ts", purpose: "demo", starter_content: "export const demo = 1;\n" }],
+      } as unknown as TopologyPlan;
+      await expect(writeScaffold(plan, dir)).rejects.toThrow(/rolled back what was written: TypeScript is not installed.*purix tools install typescript/s);
+      expect(existsSync(join(dir, "src", "demo.ts"))).toBe(false);
+    } finally {
+      safeRmSync(dir);
+    }
   });
 });

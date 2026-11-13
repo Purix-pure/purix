@@ -5,7 +5,7 @@
 // provider is faked at fetch(); nothing here touches a network.
 import { describe, test, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -14,6 +14,7 @@ import { createPurixMcpServer, TOOL_METADATA } from "./server";
 import { closeDb, writeManifest, readManifest } from "@purix/core/manifest/store";
 import type { ManifestEntry } from "@purix/core/manifest/schema";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
+import { createConfigStore } from "@purix/core/state/config";
 
 const entry = (id: string, files: string[]): ManifestEntry => ({
   component_id: id, component_type: "module", current_version: 1, schema_version: 3,
@@ -59,6 +60,7 @@ describe("MCP change surface", () => {
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
     });
 
+    createConfigStore(tmpDir).set("language", "typescript"); // AI-04: creating a component needs a project language
     writeFileSync(join(tmpDir, "billing.ts"), "export const a = 1;\n");
     writeManifest(entry("billing-service", ["billing.ts"]));
     writeManifest(entry("invoice-parser", ["src/invoice/parser.ts"]));
@@ -94,7 +96,7 @@ describe("MCP change surface", () => {
     const by = Object.fromEntries(tools.map((t) => [t.name, t.annotations as any]));
     expect(by.purix_find.readOnlyHint).toBe(true);
     expect(by.purix_status.readOnlyHint).toBe(true);
-    expect(by.purix_delete.destructiveHint).toBe(true);
+    expect(by.purix_approval_status.readOnlyHint).toBe(true);
     expect(by.purix_create.destructiveHint).toBe(false);
     expect(by.purix_change.readOnlyHint).toBe(false);
   });
@@ -154,11 +156,30 @@ describe("MCP change surface", () => {
     expect(readManifest("rate-limiter")?.files).toEqual(["x.ts"]);
   });
 
-  test("purix_backup refuses paths outside the project directory", async () => {
-    expect((await call("purix_backup", { outFile: "../escape.json" })).isError).toBe(true);
-    expect((await call("purix_backup", { outFile: "/tmp/escape-purix.json" })).isError).toBe(true);
-    expect((await call("purix_backup", { outFile: "." })).isError).toBe(true);
-    expect((await call("purix_backup", { outFile: "backup.json" })).isError).toBe(false);
-    expect(existsSync(join(tmpDir, "backup.json"))).toBe(true);
+  test("AI-04: purix_create follows the project language in the prompt it sends", async () => {
+    createConfigStore(tmpDir).set("language", "python");
+    await call("purix_create", { name: "throttle", dryRun: true });
+    const planning = llmBodies.filter((b) => b.includes("starter_content"));
+    expect(planning.length).toBe(1);
+    expect(planning[0]).toContain("The project language is Python.");
+    expect(planning[0]).not.toContain("plain TypeScript for Node.js");
+  });
+
+  test("AI-04: purix_create with no project language stops before any model call and says how to set one", async () => {
+    createConfigStore(tmpDir).set("language", "");
+    const r = await call("purix_create", { name: "throttle", dryRun: true });
+    expect(llmBodies.length).toBe(0);
+    expect(r.text).toContain("No project language is set");
+    expect(r.text).toContain("purix config set language typescript");
+    expect(r.text).toContain("purix config set language python");
+    expect(readManifest("throttle")).toBeFalsy();
+  });
+
+  test("operator tools are not on the MCP surface and cannot be called through it (D-21)", async () => {
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const gone of ["purix_delete", "purix_accept_drift", "purix_migration_activate", "purix_migration_rollback", "purix_backup", "purix_reconcile"]) {
+      expect(names).not.toContain(gone);
+      expect((await call(gone, {})).isError).toBe(true);
+    }
   });
 });

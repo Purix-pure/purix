@@ -1,0 +1,102 @@
+// packages/core/scripts/generate-tool-catalog.mjs
+//
+// Regenerates src/tools/catalog_data.ts from src/tools/catalog_manifest.json (ADR-060 D2).
+// Needs network, `uv` (for universal pip locks) and `npm`. Run it only when changing the catalog,
+// then review the diff: a lock change IS a supply-chain change.
+//
+//   node scripts/generate-tool-catalog.mjs                 (regenerate every entry)
+//   node scripts/generate-tool-catalog.mjs --only eslint   (only the named ids; every other entry
+//                                                           stays byte-identical, so adding a tool
+//                                                           never silently re-resolves an existing lock)
+//
+// pip entries:  uv pip compile --universal --python-version 3.10 --generate-hashes
+//               ("universal" keeps Windows-only and old-Python-only dependencies, with hashes)
+// npm entries:  npm install --package-lock-only --ignore-scripts  (lockfile carries sha512 integrity)
+// releasedAt:   PyPI: earliest upload time of that version; npm: registry `time` map.
+//
+// hashLockFiles() below MUST match catalog.ts; catalog.test.ts recomputes every hash from the
+// committed data and fails if they ever diverge.
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const manifest = JSON.parse(readFileSync(join(here, "../src/tools/catalog_manifest.json"), "utf-8"));
+
+function hashLockFiles(files) {
+  const h = createHash("sha256");
+  for (const name of Object.keys(files).sort()) {
+    h.update(name);
+    h.update("\0");
+    h.update(files[name]);
+    h.update("\0");
+  }
+  return h.digest("hex");
+}
+
+async function pypiReleasedAt(pkg, version) {
+  const res = await fetch(`https://pypi.org/pypi/${pkg}/${version}/json`);
+  if (!res.ok) throw new Error(`PyPI ${pkg}@${version}: HTTP ${res.status}`);
+  const json = await res.json();
+  const times = json.urls.map((u) => u.upload_time_iso_8601).sort();
+  if (times.length === 0) throw new Error(`PyPI ${pkg}@${version}: no files`);
+  return times[0];
+}
+
+const onlyIdx = process.argv.indexOf("--only");
+const only = onlyIdx === -1 ? null : new Set((process.argv[onlyIdx + 1] ?? "").split(",").filter(Boolean));
+const dataPath = join(here, "../src/tools/catalog_data.ts");
+const DATA_MARK = "export const CATALOG_DATA: CatalogEntry[] = ";
+let existing = new Map();
+if (only) {
+  if (only.size === 0) throw new Error("--only needs a comma-separated list of ids");
+  const text = readFileSync(dataPath, "utf-8");
+  const start = text.indexOf(DATA_MARK) + DATA_MARK.length;
+  const end = text.lastIndexOf("];");
+  existing = new Map(JSON.parse(text.slice(start, end + 1)).map((e) => [e.id, e]));
+  for (const id of only) if (!manifest.some((m) => m.id === id)) throw new Error(`--only ${id}: not in catalog_manifest.json`);
+}
+
+const out = [];
+for (const m of manifest) {
+  if (only && !only.has(m.id)) {
+    const kept = existing.get(m.id);
+    if (!kept) throw new Error(`${m.id} is in the manifest but not in catalog_data.ts; include it in --only`);
+    out.push(kept);
+    continue;
+  }
+  const dir = mkdtempSync(join(tmpdir(), `purix-cat-${m.id}-`));
+  let files;
+  let releasedAt;
+  if (m.method === "pip-venv") {
+    writeFileSync(join(dir, "in.txt"), `${m.package}==${m.version}\n`);
+    execFileSync("uv", ["pip", "compile", "-q", "--universal", "--python-version", "3.10", "--generate-hashes", "--no-header", "--no-annotate", join(dir, "in.txt"), "-o", join(dir, "requirements.txt")], { stdio: "inherit" });
+    files = { "requirements.txt": readFileSync(join(dir, "requirements.txt"), "utf-8").replace(/\r\n/g, "\n") };
+    releasedAt = await pypiReleasedAt(m.package, m.version);
+  } else {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `purix-tool-${m.id}`, version: "1.0.0", private: true, dependencies: { [m.package]: m.version } }, null, 2) + "\n");
+    execFileSync("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: dir, stdio: "inherit" });
+    files = {
+      "package.json": readFileSync(join(dir, "package.json"), "utf-8"),
+      "package-lock.json": readFileSync(join(dir, "package-lock.json"), "utf-8"),
+    };
+    const time = JSON.parse(execFileSync("npm", ["view", `${m.package}@${m.version}`, "time", "--json"], { encoding: "utf-8" }));
+    releasedAt = time[m.version];
+    if (!releasedAt) throw new Error(`npm ${m.package}@${m.version}: no release time`);
+  }
+  out.push({ ...m, releasedAt, files, lockSha256: hashLockFiles(files) });
+  console.log(`${m.id}@${m.version}: ${Object.keys(files).join(", ")} released ${releasedAt}`);
+}
+
+const header = `// packages/core/src/tools/catalog_data.ts
+//
+// GENERATED by scripts/generate-tool-catalog.mjs from catalog_manifest.json. Do not edit by hand.
+// A change here is a supply-chain change: review the diff of every lock text (ADR-060 D2/D3).
+import type { CatalogEntry } from "./types.js";
+
+export const CATALOG_DATA: CatalogEntry[] = `;
+writeFileSync(dataPath, header + JSON.stringify(out, null, 2) + ";\n");
+console.log(`wrote ${out.length} entries`);

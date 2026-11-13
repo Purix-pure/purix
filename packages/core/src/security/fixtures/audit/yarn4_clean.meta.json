@@ -1,0 +1,8 @@
+{
+ "tool": "yarn",
+ "version": "4.18.1",
+ "command": "yarn npm audit --json --no-deprecations",
+ "exitCode": 0,
+ "stdoutBytes": 0,
+ "stderrFirstLine": ""
+}

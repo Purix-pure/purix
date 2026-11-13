@@ -3,7 +3,7 @@
   "mcp": {
     "purix": {
       "type": "local",
-      "command": ["pnpm", "--filter", "@purix/cli", "exec", "tsx", "src/cli.ts", "mcp-serve"],
+      "command": ["pnpm", "exec", "tsx", "packages/cli/src/cli.ts", "mcp-serve"],
       "environment": {
         "PURIX_MCP_AGENT_ID": "opencode"
       },

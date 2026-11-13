@@ -2,6 +2,7 @@
 import { listManifest } from "./store.js";
 import { listEvents } from "./events.js";
 import type { Provenance } from "./schema.js";
+import { getOverrideAudits, type OverrideAuditEntry } from "../security/override_audit.js";
 
 export interface AuditGateEvidence {
   confidence: number | null;
@@ -10,6 +11,8 @@ export interface AuditGateEvidence {
   coverage_flagged: boolean;
   escalation_involved: boolean;
   approvals: { checkpoint_kind: string; approved: boolean; timestamp: string }[];
+  /** Gate overrides a person recorded in this version's window. Overrides carry no component id, so this is by time, not by component. */
+  overrides: { gate_name: string; reason: string; actor: string; finding: string; timestamp: string }[];
 }
 
 export interface AuditTrailEntry {
@@ -28,14 +31,16 @@ export interface AuditTrailReport {
   component_filter: string | null;
   since: string | null;
   entries: AuditTrailEntry[];
+  /** Overrides recorded at a time no listed version's window holds (for example an override whose change did not land, or a --since/--component filter that left out the version). */
+  overrides_not_attached: OverrideAuditEntry[];
   note: string;
 }
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
 const SCOPE_NOTE =
-  "Covers landed commits only (real version_history entries). Aborted or human-declined attempts aren't stitched in here — see 'purix stats' for rejection/decline rates.";
+  "Covers landed commits only (real version_history entries). Aborted or human-declined attempts aren't stitched in here — see 'purix stats' for rejection/decline rates. Gate overrides are listed under the version whose time window holds them, or separately when none does.";
 
-function gatherGateEvidence(componentId: string, windowStart: string, windowEnd: string): AuditGateEvidence {
+function gatherGateEvidence(componentId: string, windowStart: string, windowEnd: string, overrides: OverrideAuditEntry[]): AuditGateEvidence {
   const windowEvents = listEvents({ componentId }).filter((e) => e.timestamp > windowStart && e.timestamp <= windowEnd);
   const classificationEvents = windowEvents.filter((e) => e.kind === "classification");
   const lastClassification = classificationEvents[classificationEvents.length - 1];
@@ -56,6 +61,9 @@ function gatherGateEvidence(componentId: string, windowStart: string, windowEnd:
     coverage_flagged: windowEvents.some((e) => e.kind === "coverage_gate_flag"),
     escalation_involved: windowEvents.some((e) => e.kind === "escalation_start"),
     approvals,
+    overrides: overrides
+      .filter((o) => o.timestamp > windowStart && o.timestamp <= windowEnd)
+      .map((o) => ({ gate_name: o.gate_name, reason: o.reason, actor: o.actor, finding: o.finding, timestamp: o.timestamp })),
   };
 }
 
@@ -63,6 +71,8 @@ export function buildAuditTrail(opts: { componentId?: string; since?: string } =
   const all = listManifest();
   const filtered = opts.componentId ? all.filter((e) => e.component_id === opts.componentId) : all;
 
+  const overrides = getOverrideAudits();
+  const attached = new Set<string>();
   const entries: AuditTrailEntry[] = [];
   for (const entry of filtered) {
     const history = [...entry.version_history].sort((a, b) => a.version - b.version);
@@ -78,8 +88,9 @@ export function buildAuditTrail(opts: { componentId?: string; since?: string } =
         contract_changed: v.contract_changed,
         timestamp: v.timestamp,
         provenance: v.provenance,
-        gate_evidence: gatherGateEvidence(entry.component_id, windowStart, v.timestamp),
+        gate_evidence: gatherGateEvidence(entry.component_id, windowStart, v.timestamp, overrides),
       });
+      for (const o of overrides) if (o.timestamp > windowStart && o.timestamp <= v.timestamp) attached.add(o.id);
     }
   }
 
@@ -90,6 +101,7 @@ export function buildAuditTrail(opts: { componentId?: string; since?: string } =
     component_filter: opts.componentId ?? null,
     since: opts.since ?? null,
     entries,
+    overrides_not_attached: overrides.filter((o) => !attached.has(o.id) && (!opts.since || o.timestamp >= opts.since)),
     note: SCOPE_NOTE,
   };
 }
@@ -110,8 +122,18 @@ export function formatAuditTrailMarkdown(report: AuditTrailReport): string {
   lines.push(`> ${report.note}`);
   lines.push("");
 
+  const unattached = (): void => {
+    if (report.overrides_not_attached.length === 0) return;
+    lines.push(`## Overrides not tied to a landed version`);
+    lines.push("");
+    for (const o of report.overrides_not_attached) lines.push(`- ${o.gate_name} (${o.timestamp}, ${o.actor}): ${o.reason} — ${o.finding}`);
+    lines.push("");
+  };
+
   if (report.entries.length === 0) {
     lines.push(`No matching version history entries.`);
+    lines.push("");
+    unattached();
     return lines.join("\n");
   }
 
@@ -141,8 +163,15 @@ export function formatAuditTrailMarkdown(report: AuditTrailReport): string {
         lines.push(`  - ${a.checkpoint_kind}: ${a.approved ? "approved" : "declined"} (${a.timestamp})`);
       }
     }
+    if (g.overrides.length === 0) {
+      lines.push(`- Overrides in this window: none recorded`);
+    } else {
+      lines.push(`- Overrides in this window (by time; an override has no component id):`);
+      for (const o of g.overrides) lines.push(`  - ${o.gate_name} (${o.timestamp}, ${o.actor}): ${o.reason} — ${o.finding}`);
+    }
     lines.push("");
   }
 
+  unattached();
   return lines.join("\n");
 }

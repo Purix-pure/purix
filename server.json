@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.purix-pure/purix",
+  "title": "Purix",
+  "description": "Verifies AI code changes in a sandbox and records evidence before they land. TypeScript, JS, Python.",
+  "repository": {
+    "url": "https://github.com/purix-pure/purix",
+    "source": "github"
+  },
+  "version": "0.4.0-beta.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@purix/cli",
+      "version": "0.4.0-beta.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp-serve"
+        }
+      ]
+    }
+  ]
+}

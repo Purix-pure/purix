@@ -5,9 +5,9 @@
 // toolchain-generated artifacts (venvs, package caches, compiled binaries,
 // build output) out of the source tree entirely.
 //
-// The sanctioned location for that kind of thing is baseDir/.purix-tmp/<lang>/
+// The sanctioned location for that kind of thing is baseDir/.purix/tmp/<lang>/
 // (see packages/core/src/platform/toolchain_tmp.ts). Anything matching the
-// denylist below found ANYWHERE under packages/ EXCEPT inside a .purix-tmp/
+// denylist below found ANYWHERE under packages/ EXCEPT inside a .purix/
 // directory fails the check — that's a provider writing to the wrong place,
 // or someone's local toolchain run leaking a file into source that never
 // got cleaned up before committing.
@@ -33,7 +33,7 @@ const FORBIDDEN_DIR_NAMES = new Set([
   ".cargo",
   "vendor",       // bundler's default gem vendor dir when BUNDLE_PATH unset
   ".bundle",
-  "Python",       // portable interpreter installs — belongs in .purix-tmp/python/, never packages/core/Python
+  "Python",       // portable interpreter installs — belongs in .purix/tmp/python/, never packages/core/Python
 ]);
 
 // File extensions that are always build output, never source.
@@ -42,7 +42,8 @@ const FORBIDDEN_EXTENSIONS = [".exe", ".pyc", ".pyd", ".dll", ".so"];
 // Never descend into these — not because they're allowed to hold junk, but
 // because they're either the sanctioned tmp location or already handled by
 // a different check (node_modules is gitignored + irrelevant here).
-const SKIP_DIR_NAMES = new Set([".purix-tmp", "node_modules", ".turbo", ".git"]);
+// ".purix" holds .purix/tmp (the sanctioned location); ".purix-tmp" is the pre-2026-10 name, still skipped so an old leftover is not reported twice.
+const SKIP_DIR_NAMES = new Set([".purix", ".purix-tmp", "node_modules", ".turbo", ".git"]);
 
 interface Violation {
   path: string;
@@ -71,7 +72,7 @@ function walk(dir: string, violations: Violation[]): void {
       if (FORBIDDEN_DIR_NAMES.has(entry)) {
         violations.push({
           path: relative(PACKAGES_ROOT, full),
-          reason: `toolchain-generated directory "${entry}" found outside .purix-tmp/`,
+          reason: `toolchain-generated directory "${entry}" found outside .purix/tmp/`,
         });
         continue; // don't descend into it — one violation for the whole dir is enough
       }
@@ -81,7 +82,7 @@ function walk(dir: string, violations: Violation[]): void {
       if (match) {
         violations.push({
           path: relative(PACKAGES_ROOT, full),
-          reason: `build artifact (${match}) found outside .purix-tmp/`,
+          reason: `build artifact (${match}) found outside .purix/tmp/`,
         });
       }
     }
@@ -97,11 +98,11 @@ if (violations.length > 0) {
     console.error(`  packages/${v.path}  —  ${v.reason}`);
   }
   console.error(
-    `\nThese belong under <baseDir>/.purix-tmp/<lang>/ instead (see platform/toolchain_tmp.ts).` +
+    `\nThese belong under <baseDir>/.purix/tmp/<lang>/ instead (see platform/toolchain_tmp.ts).` +
     ` If a provider wrote one of these directly, fix the provider's call site rather than deleting` +
     ` the file and moving on — the same run will just recreate it.`
   );
   process.exit(1);
 } else {
-  console.log("No toolchain artifacts found outside .purix-tmp/.");
+  console.log("No toolchain artifacts found outside .purix/tmp/.");
 }

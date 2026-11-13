@@ -256,7 +256,10 @@ it("runs", () => {
     expect(result.flagged).toBe(false);
   });
 
-  it("does not flag a file present in before but absent from after (out of scope for this check)", () => {
+  // A6-1 (research 06 section 3; ADR-010 promised this flag): a test file that was there and is gone used to be invisible, because
+  // the comparison only walked the `after` list. Callers pass the whole change set on both sides (cli lifecycle.ts, mcp-server
+  // server.ts: mergeFileChanges keeps every original), so a path missing from `after` is a file the change removed.
+  it("flags a test file present in before but absent from after: it was deleted or renamed away", () => {
     const before = makeFiles(
       PATH,
       `
@@ -266,14 +269,14 @@ it("runs", () => {
 });
 `
     );
-    // after has no entry for PATH at all — checkTestIntegrity only walks
-    // `after`, so a wholesale file deletion isn't this function's job.
     const result = checkTestIntegrity(before, []);
-    expect(result.flagged).toBe(false);
-    expect(result.findings).toHaveLength(0);
+    expect(result.flagged).toBe(true);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.path).toBe(PATH);
+    expect(result.findings[0]!.reason).toMatch(/no longer present/);
   });
 
-  it("only evaluates files present in the after list, ignoring unrelated before-only files", () => {
+  it("flags only the file that went missing, and leaves an intact file alone", () => {
     const before = [
       { path: PATH, content: `import { it, expect } from "bun:test";\nit("a", () => { expect(1).toBe(1); expect(2).toBe(2); });\n` },
       { path: "src/other/thing.test.ts", content: `import { it, expect } from "bun:test";\nit("b", () => { expect(3).toBe(3); });\n` },
@@ -283,7 +286,7 @@ it("runs", () => {
     ];
 
     const result = checkTestIntegrity(before, after);
-    expect(result.flagged).toBe(false);
+    expect(result.findings.map((f) => f.path)).toEqual(["src/other/thing.test.ts"]);
   });
 
   it("reports one finding per offending file across multiple files", () => {
@@ -322,7 +325,12 @@ describe("isTestFilePath", () => {
     expect(isTestFilePath("src/verify/testing_utils.ts")).toBe(false);
   });
 
-  it("rejects non-ts extensions even if otherwise matching", () => {
-    expect(isTestFilePath("src/verify/test_integrity.test.js")).toBe(false);
+  it("accepts .test.js too: discovery runs JS tests, so the integrity check must cover them", () => {
+    expect(isTestFilePath("src/verify/test_integrity.test.js")).toBe(true);
+  });
+
+  it("still rejects a non-code file that carries the test suffix", () => {
+    expect(isTestFilePath("src/verify/test_integrity.test.json")).toBe(false);
+    expect(isTestFilePath("src/verify/test_integrity.test.md")).toBe(false);
   });
 });

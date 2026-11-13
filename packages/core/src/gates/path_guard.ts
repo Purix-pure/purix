@@ -1,6 +1,6 @@
 // src/gates/path_guard.ts
 import { resolve, sep, dirname } from "node:path";
-import { existsSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 
 export interface PathCheckResult {
   ok: boolean;
@@ -43,26 +43,45 @@ export interface PathCheckResult {
  * exist yet, e.g. in tests or a not-yet-scaffolded repo, which must
  * stay a safe/no-op case, not a false escape).
  */
-function findSymlinkEscape(root: string, resolved: string): string | null {
+function findSymlinkEscape(root: string, resolved: string, depth: number = 0): string | null {
   const rootWithSep = root.endsWith(sep) ? root : root + sep;
+  const inside = (p: string) => p === root || p.startsWith(rootWithSep);
+  if (depth > 8) return resolved; // a chain of links this long is not a project layout; refuse rather than follow it forever
   let current = resolved;
-  while (current === root || current.startsWith(rootWithSep)) {
-    if (existsSync(current)) {
+  while (inside(current)) {
+    // lstat, not existsSync: existsSync follows links, so a DANGLING link (its target does not exist yet) read as "nothing here",
+    // the walk went on up to a safe parent, and a write through the link then created the file outside the root.
+    let st;
+    try {
+      st = lstatSync(current);
+    } catch {
+      st = null; // nothing at this component yet: look at its parent
+    }
+    if (st) {
       let real: string;
       try {
         real = realpathSync(current);
       } catch {
-        // Race or broken symlink — not this check's concern; the
-        // operation that actually touches the filesystem will surface
-        // its own error if this path turns out to be unusable.
+        if (st.isSymbolicLink()) {
+          // A dangling link. Where it points decides: outside the root is an escape (a write would create the target there).
+          let target: string;
+          try {
+            target = resolve(dirname(current), readlinkSync(current));
+          } catch {
+            return current; // a link that cannot be read cannot be shown safe
+          }
+          if (!inside(target)) return target;
+          return findSymlinkEscape(root, target, depth + 1); // inside the root, but that path may itself run through a link
+        }
+        // Race or an unreadable component that is not a link — not this check's concern; the operation that actually touches the
+        // filesystem will surface its own error if this path turns out to be unusable.
         return null;
       }
       if (real !== root && !real.startsWith(rootWithSep)) {
         return real;
       }
-      // The nearest existing component resolves safely inside root, and
-      // anything below it (deeper, not-yet-created path segments)
-      // cannot itself be a symlink since it doesn't exist yet.
+      // The nearest existing component resolves safely inside root, and anything below it (deeper, not-yet-created path
+      // segments) cannot itself be a symlink since it doesn't exist yet.
       return null;
     }
     if (current === root) return null; // walked to root — nothing on disk yet

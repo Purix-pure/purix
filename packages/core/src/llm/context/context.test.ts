@@ -191,7 +191,7 @@ describe("end to end: the pack reaches the real prompt", () => {
     key = process.env.OPENAI_API_KEY; process.env.OPENAI_API_KEY = "sk-test";
     persistProviderChoice("openai");
     globalThis.fetch = (async (_u: unknown, init: { body: string }) => {
-      sent = JSON.parse(init.body).messages[0].content;
+      sent = (JSON.parse(init.body).messages as { content: string }[]).map((m) => m.content).join("\n");
       return new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
     }) as unknown as typeof fetch;
   });
@@ -205,25 +205,26 @@ describe("end to end: the pack reaches the real prompt", () => {
   it("classifyModification and refineIntent include the AGENTS.md slice when present", async () => {
     writeFileSync(join(dir, "AGENTS.md"), "## Security\nAll routes need Clerk middleware.\n");
     const files = [{ path: "a.ts", content: "export const a = 1;" }];
-    sent = ""; try { await classifyModification("c", "do it", files); } catch {}
+    sent = ""; try { await classifyModification("c", "do it", files); } catch { /* the call is expected to fail; only the request that was sent matters */ }
     expect(sent).toContain("All routes need Clerk middleware.");
     expect(sent.indexOf("Clerk")).toBeGreaterThan(sent.indexOf("export const a = 1;"));
     expect(sent.indexOf("Clerk")).toBeLessThan(sent.indexOf("The developer's request"));
-    sent = ""; try { await refineIntent("c", "do it", files); } catch {}
+    sent = ""; try { await refineIntent("c", "do it", files); } catch { /* the call is expected to fail; only the request that was sent matters */ }
     expect(sent).toContain("All routes need Clerk middleware.");
   });
 
   it("classifyGreenfield (create) gets the project notes too — the 'what kind of app / which auth' case", async () => {
     writeFileSync(join(dir, "AGENTS.md"), "## Tech stack\nNext.js 15 with Clerk auth.\n");
-    sent = ""; try { await classifyGreenfield("checkout-button"); } catch {}
+    sent = ""; try { await classifyGreenfield("checkout-button"); } catch { /* the call is expected to fail; only the request that was sent matters */ }
     expect(sent).toContain("Next.js 15 with Clerk auth.");
-    expect(sent.indexOf("Next.js")).toBeLessThan(sent.indexOf("Do NOT assume any framework"));
+    // Rules now live in the system message (sent first); project notes arrive in the user message, after them.
+    expect(sent.indexOf("Next.js")).toBeGreaterThan(sent.indexOf("Do not assume a framework"));
   });
 
   it("PURIX_CONTEXT_PACK=off removes it again", async () => {
     writeFileSync(join(dir, "AGENTS.md"), "## Security\nAll routes need Clerk middleware.\n");
     process.env.PURIX_CONTEXT_PACK = "off";
-    sent = ""; try { await classifyModification("c", "do it", [{ path: "a.ts", content: "x" }]); } catch {}
+    sent = ""; try { await classifyModification("c", "do it", [{ path: "a.ts", content: "x" }]); } catch { /* the call is expected to fail; only the request that was sent matters */ }
     expect(sent).not.toContain("Clerk");
   });
 });

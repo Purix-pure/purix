@@ -33,27 +33,35 @@ function makeEntry(id: string, opts: Partial<ManifestEntry> = {}): ManifestEntry
 let originalCwd: string;
 let tmpDir: string;
 
+let savedEnv: { env: string | undefined; tier: string | undefined };
+
 beforeEach(() => {
+  // Release 1's free tier has no cap, so these tests ask for the test-only capped tier (limit 25).
+  savedEnv = { env: process.env.NODE_ENV, tier: process.env.PURIX_DEV_TIER };
+  process.env.NODE_ENV = "test";
+  process.env.PURIX_DEV_TIER = "capped";
   originalCwd = process.cwd();
   tmpDir = mkdtempSync(join(tmpdir(), "purix-store-limit-test-"));
   process.chdir(tmpDir);
 });
 
 afterEach(() => {
+  if (savedEnv.env === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedEnv.env;
+  if (savedEnv.tier === undefined) delete process.env.PURIX_DEV_TIER; else process.env.PURIX_DEV_TIER = savedEnv.tier;
   closeDb();
   process.chdir(originalCwd);
   safeRmSync(tmpDir);
 });
 
 describe("writeManifestWithLimitCheck", () => {
-  it("allows writes under the Free-tier default limit (25)", () => {
+  it("allows writes under the capped-tier limit (25)", () => {
     for (let i = 0; i < 25; i++) {
       writeManifestWithLimitCheck(makeEntry(`comp-${i}`));
     }
     expect(listManifest().length).toBe(25);
   });
 
-  it("throws once a 26th genuinely new component would exceed the Free-tier limit", () => {
+  it("throws once a 26th genuinely new component would exceed the limit", () => {
     for (let i = 0; i < 25; i++) {
       writeManifestWithLimitCheck(makeEntry(`comp-${i}`));
     }

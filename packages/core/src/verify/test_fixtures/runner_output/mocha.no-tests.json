@@ -1,0 +1,4 @@
+{
+ "exitCode": 0,
+ "stdout": "{\n  \"stats\": {\n    \"suites\": 0,\n    \"tests\": 0,\n    \"passes\": 0,\n    \"pending\": 0,\n    \"failures\": 0,\n    \"start\": \"2026-11-01T10:01:42.448Z\",\n    \"end\": \"2026-11-01T10:01:42.448Z\",\n    \"duration\": 0\n  },\n  \"tests\": [],\n  \"pending\": [],\n  \"failures\": [],\n  \"passes\": []\n}"
+}

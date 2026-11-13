@@ -30,6 +30,19 @@ export function registerProviderCommands(program: Command) {
           process.exitCode = 1;
           return;
         }
+        // A malformed or non-HTTP(S) base URL used to be saved and only failed on the first LLM call.
+        let urlOk: boolean;
+        try {
+          const u = new URL(opts.baseUrl);
+          urlOk = u.protocol === "https:" || u.protocol === "http:";
+        } catch {
+          urlOk = false;
+        }
+        if (!urlOk) {
+          console.error(`"${opts.baseUrl}" is not a valid http(s) URL. Example: --base-url https://api.example.ai/v1`);
+          process.exitCode = 1;
+          return;
+        }
         persistCustomProvider({
           baseUrl: opts.baseUrl,
           keyEnvVar: opts.keyEnv,
@@ -51,10 +64,36 @@ export function registerProviderCommands(program: Command) {
     });
 
   providerCmd
+    .command("trust")
+    .description("Accept the custom endpoint this project's provider-config.json names, so Purix may send your API key there")
+    .action(async () => {
+      const { projectCustomProvider, trustCustomProvider } = await import("@purix/core/llm/providers");
+      const found = projectCustomProvider();
+      if (!found) {
+        console.log(`This project has no custom provider to trust. (Registered providers need nothing: "purix provider set <id>".)`);
+        return;
+      }
+      if (found.trusted) {
+        console.log(`Already accepted: ${found.baseUrl} with the key ${found.keyEnvVar}.`);
+        return;
+      }
+      console.log(`This project's provider-config.json asks Purix to send requests to:\n    ${found.baseUrl}\nusing the API key stored as ${found.keyEnvVar}, along with the code and instructions in each request.`);
+      console.log(`Only accept this if you set it up yourself or know who runs that endpoint.`);
+      const { confirm } = await import("@purix/core/cli-io/confirm");
+      if (!(await confirm(`Send your ${found.keyEnvVar} key to ${found.baseUrl}?`))) {
+        console.log(`Not accepted. Nothing changed.`);
+        process.exitCode = 1;
+        return;
+      }
+      trustCustomProvider(found);
+      console.log(`✅ Accepted. This endpoint and key name are remembered for you on this machine, in any project.`);
+    });
+
+  providerCmd
     .command("status")
     .description("Show which LLM provider is active and whether a key is configured")
     .action(async () => {
-      const { listProviders, activeProviderId, getProvider } = await import("@purix/core/llm/providers");
+      const { listProviders, activeProviderId, getProvider, providerKeyStatus } = await import("@purix/core/llm/providers");
       let id: string;
       try {
         id = activeProviderId();
@@ -68,7 +107,11 @@ export function registerProviderCommands(program: Command) {
         const p = getProvider(id);
         console.log(`Model (low tier):  ${p.modelFor("low")}`);
         console.log(`Model (high tier): ${p.modelFor("high")}`);
-        console.log(`(Key resolution happens on first call — run a real "purix modify" to fully verify it.)`);
+        const key = providerKeyStatus(id);
+        if (key?.source === "stored") console.log(`API key (${key.envVar}): stored in Purix`);
+        else if (key?.source === "environment") console.log(`API key (${key.envVar}): found in the environment`);
+        else if (key) console.log(`API key (${key.envVar}): NOT FOUND. Run: purix secret set ${key.envVar} <your-key>`);
+        console.log(`(Whether the provider accepts the key is only known on the first real call.)`);
       } catch (err) {
         console.log(`🛑 ${err instanceof Error ? err.message : String(err)}`);
       }

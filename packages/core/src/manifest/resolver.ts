@@ -28,6 +28,7 @@
 // this resolver needs: manifest IDs and file paths from every entry, and
 // indexed symbol names from that one entry's `components` array.
 import type { ManifestEntry } from "./schema.js";
+import { storedPosixPath } from "../platform/layout.js";
 
 export type ResolverMatchReason = "component_id" | "file_path" | "symbol_name";
 
@@ -180,7 +181,8 @@ export function resolveTarget(input: ResolveTargetInput): ResolverResult {
         // component in the manifest (already deleted, or the index is
         // stale) is not a usable target, so it's skipped rather than
         // resolved to nothing.
-        const owner = manifest.find((e) => e.component_id !== CODEBASE_INDEX_COMPONENT_ID && (e.files ?? []).includes(record.file_location));
+        const recordFile = storedPosixPath(record.file_location);
+        const owner = manifest.find((e) => e.component_id !== CODEBASE_INDEX_COMPONENT_ID && (e.files ?? []).some((f) => storedPosixPath(f) === recordFile));
         if (owner) {
           consider(owner.component_id, "symbol_name", record.symbol_name, mention);
         }

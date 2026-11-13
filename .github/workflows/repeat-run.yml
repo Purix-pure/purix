@@ -1,0 +1,47 @@
+name: Repeat run (flaky-test hunt)
+
+# N-08. One red run in 700 tests says little. This runs the whole suite many times in a row and reports which
+# tests failed and in how many runs, so a flaky test shows up as the same name again and again. It is not part of
+# the pull request checks: it takes a long time and its job is to produce a list, not to gate a merge.
+on:
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'How many times to run the suite (1 to 200)'
+        required: false
+        default: '20'
+
+# Least privilege: every job here only reads the repository. Nothing in this file writes to it or publishes.
+permissions:
+  contents: read
+
+jobs:
+  repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+        with:
+          version: 12.4.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm run build
+      - name: Run the suite repeatedly
+        env:
+          RUNS: ${{ github.event.inputs.runs || '20' }}
+          REPEAT_RUN_LOGS: ${{ runner.temp }}/repeat-run-logs
+        run: node scripts/repeat-run.mjs --runs "$RUNS" --keep-going -- pnpm run test
+      - name: Keep the logs of the failed runs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repeat-run-logs
+          path: ${{ runner.temp }}/repeat-run-logs

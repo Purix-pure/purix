@@ -1,0 +1,15 @@
+name: Feature request
+description: Something you would like Purix to do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem you are trying to solve
+      description: Describe the situation first, then the feature. Other languages are not in Release 1 (see BETA_SCOPE.md), but say which one you need.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead

@@ -31,7 +31,7 @@ packages/
   cli/          @purix/cli         — the `purix` command-line tool. Thin over core.
   mcp-server/   @purix/mcp-server  — the stdio MCP server exposing the same pipeline as tools
                                       to other agents (purix_create, purix_change, purix_find, etc).
-scripts/        — boundary-check, artifact-check, benchmark, smoke-test.
+scripts/        — boundary-check, single-point-check, artifact-check, benchmark, smoke-test, generate-tool-catalog (core/scripts).
 docs/compliance/ — SOC2/EU-AI-Act-adjacent documentation; not architecture, don't confuse the two.
 ```
 
@@ -47,7 +47,10 @@ the lockfile silently.
 | `pnpm typecheck` | `turbo run typecheck` across all three packages. Must be clean before anything else is trusted. |
 | `pnpm test` | `turbo run test` — each package's own `tsx --test` run (`src/**/*.test.ts` glob; a test file outside `src/` in a package silently never runs — this has bitten this repo before, see the vault's `IDEA-078` history). |
 | `pnpm boundary-check` | Fails if anything in `packages/core` imports from `cli` or `api`. Core must stay standalone. |
-| `pnpm artifact-check` | Fails if toolchain artifacts leak outside `.purix-tmp/`. |
+| `pnpm artifact-check` | Fails if toolchain artifacts leak outside `.purix/tmp/`. |
+| `pnpm tool-boundary-check` | Guard (ADR-060): fails if `pip install`, `npx`, `npm install/ci`, venv creation, or spawning a catalog tool by bare name appears in `packages/core/src` outside `core/src/tools/`. Zero required, no baseline. Ask the broker (`locateTool`, `missingToolHint`) instead. |
+| `pnpm single-point-check` | Ratchet (ADR-061): per-file counts of `console.*`, `fetch(`, `.purix` text and `process.env` in `packages/core` may only fall; `core/src/tools/` must be zero. `--update` after a migration lowers the baseline. |
+| `node packages/core/scripts/generate-tool-catalog.mjs [--only <id,...>]` | Regenerates the tool catalog locks (needs network, `uv`, `npm`). `--only` leaves every other entry byte-identical. A lock change is a supply-chain change: review the diff (ADR-060). |
 | `node scripts/smoke-test.mjs` | Real stdio MCP server smoke test (tool listing, a live call round-trip). |
 | `pnpm --filter @purix/cli test` / `pnpm --filter @purix/mcp-server test` | Run one package's suite alone when iterating on it. |
 

@@ -1,5 +1,6 @@
 // src/verify/test_integrity.ts
 import { Project, Node, ts, type SourceFile } from "ts-morph";
+import { isTestPath } from "./test_discovery.js";
 
 export interface TestIntegrityFinding {
   path: string;
@@ -14,7 +15,10 @@ export interface TestIntegrityResult {
 interface TestFileProfile {
   assertionCount: number;
   assertionTargets: string[];
+  /** Each assertion as written (matcher and expected value included), whitespace-insensitive. */
+  assertionExpressions: string[];
   skipCount: number;
+  weakeners: Record<string, number>;
 }
 
 function parseInMemory(content: string, path: string): SourceFile | null {
@@ -47,18 +51,41 @@ function analyzeTestFile(content: string, path: string): TestFileProfile | null 
 
   let assertionCount = 0;
   const assertionTargets: string[] = [];
+  const assertionExpressions: string[] = [];
+  const weakeners: Record<string, number> = {};
   let skipCount = 0;
+  const bump = (label: string): void => {
+    weakeners[label] = (weakeners[label] ?? 0) + 1;
+  };
+
+  // One assertion: its target (first argument, as before), its full expression, and where it sits. An assertion that no longer
+  // runs (inside a swallowing try/catch, a branch that never runs, or outside any test) is as good as a deleted one.
+  const record = (call: Node, target: string, expression: Node): void => {
+    assertionCount += 1;
+    assertionTargets.push(target);
+    assertionExpressions.push(compact(expression.getText()));
+    let inTest = false;
+    for (let child: Node = call, a = call.getParent(); a; child = a, a = a.getParent()) {
+      if (Node.isCallExpression(a) && TEST_CALLEE.test(a.getExpression().getText())) inTest = true;
+      if (Node.isTryStatement(a) && child === a.getTryBlock()) {
+        const handler = a.getCatchClause();
+        if (handler && !handler.getDescendants().some((d) => Node.isThrowStatement(d))) bump("swallowed");
+      }
+      if (Node.isIfStatement(a) && child === a.getThenStatement() && isNeverTrue(a.getExpression())) bump("dead");
+    }
+    if (!inTest) bump("outside_test");
+  };
 
   sourceFile.forEachDescendant((node) => {
     if (!Node.isCallExpression(node)) return;
     const expr = node.getExpression();
 
     // expect(x)... — counts once per expect() call, not once per chained
-    // matcher, since expect(x).toBe(1) is one checked assertion.
+    // matcher, since expect(x).toBe(1) is one checked assertion. The full chain (matcher and expected value) is kept too,
+    // so changing toBe(3) to toBeDefined(), or to toBe(add(1, 2)), is seen (research 06: 9 of 13 evasions were invisible).
     if (Node.isIdentifier(expr) && expr.getText() === "expect") {
       const args = node.getArguments();
-      assertionCount += 1;
-      assertionTargets.push(args.length > 0 ? args[0]!.getText() : "(no argument)");
+      record(node, args.length > 0 ? args[0]!.getText() : "(no argument)", chainTop(node));
       return;
     }
 
@@ -72,8 +99,29 @@ function analyzeTestFile(content: string, path: string): TestFileProfile | null 
     const calleeText = expr.getText();
     if (/^assert(\.\w+)*$/.test(calleeText) || /\.assert(\.\w+)+$/.test(calleeText)) {
       const args = node.getArguments();
-      assertionCount += 1;
-      assertionTargets.push(args.length > 0 ? args[0]!.getText() : "(no argument)");
+      record(node, args.length > 0 ? args[0]!.getText() : "(no argument)", node);
+      return;
+    }
+
+    // chai's should-style (x.should.equal(1)) and supertest's .expect(200): deleting them went unseen. Counted once per chain
+    // (should) or once per call (supertest chains several .expect()s, each a check).
+    if (/\.should\b/.test(calleeText) && chainTop(node) === node) {
+      record(node, calleeText, node);
+      return;
+    }
+    if (Node.isPropertyAccessExpression(expr) && expr.getName() === "expect" && !Node.isIdentifier(expr.getExpression())) {
+      const args = node.getArguments();
+      record(node, args.length > 0 ? args[0]!.getText() : "(no argument)", node);
+      return;
+    }
+
+    // it.only / test.only / describe.only: every other test in the run silently stops running.
+    if (Node.isPropertyAccessExpression(expr) && expr.getName() === "only" && /^(it|test|describe|suite|specify)$/.test(expr.getExpression().getText())) {
+      bump("only");
+      return;
+    }
+    if (Node.isIdentifier(expr) && (expr.getText() === "fit" || expr.getText() === "fdescribe")) {
+      bump("only");
       return;
     }
 
@@ -89,7 +137,30 @@ function analyzeTestFile(content: string, path: string): TestFileProfile | null 
     }
   });
 
-  return { assertionCount, assertionTargets, skipCount };
+  return { assertionCount, assertionTargets, assertionExpressions, skipCount, weakeners };
+}
+
+const TEST_CALLEE = /^[xf]?(it|test|specify)(\.\w+)*$/;
+
+/** Whitespace and trailing commas do not change what an assertion says: `expect(\n  a,\n).toBe(1)` is `expect(a).toBe(1)`. */
+function compact(text: string): string {
+  return text.replace(/\s+/g, "").replace(/,([)\]}])/g, "$1");
+}
+
+/** The outermost expression of a call/property chain that starts at `node` (expect(x).not.toBe(1) from expect(x)). */
+function chainTop(node: Node): Node {
+  let top = node;
+  for (;;) {
+    const parent = top.getParent();
+    if (parent && (Node.isPropertyAccessExpression(parent) || Node.isCallExpression(parent)) && parent.getExpression() === top) top = parent;
+    else return top;
+  }
+}
+
+/** A condition that is a literal false: `if (false)`, `if (0)`, `if (null)`, `if (undefined)`, `if (!1)`. */
+function isNeverTrue(cond: Node): boolean {
+  const text = cond.getText().trim();
+  return /^(false|0|null|undefined|""|''|!\s*(true|1))$/.test(text);
 }
 
 /**
@@ -103,8 +174,23 @@ function analyzeTestFile(content: string, path: string): TestFileProfile | null 
 export interface BaseTestProfile {
   assertionCount: number;
   assertionTargets?: string[];
+  /** Each assertion as written. A checker that supplies it gets "an assertion changed or disappeared" for free. */
+  assertionExpressions?: string[];
   skipCount: number;
+  /**
+   * Counts of things that make a test pass without checking, by label: "only", "swallowed", "dead", "outside_test", "xfail".
+   * A label whose count goes up is a finding. Optional: a checker that cannot tell simply omits it.
+   */
+  weakeners?: Record<string, number>;
 }
+
+const WEAKENER_TEXT: Record<string, string> = {
+  only: "a focused test (.only) was added, so the other tests in the run no longer run",
+  swallowed: "assertion(s) are now inside a try/catch that does not rethrow, so a failure is swallowed",
+  dead: "assertion(s) are now inside a branch that never runs",
+  outside_test: "assertion(s) now sit outside any test (for example in a helper that is never called)",
+  xfail: "an expected-failure marker was added, so a failing test no longer fails the run",
+};
 
 /**
  * Shared comparison logic for §6.4 Test-Integrity Check (Node 3c) across
@@ -137,7 +223,16 @@ export function diffTestProfiles<P extends BaseTestProfile>(
   unparsableReason: string
 ): TestIntegrityResult {
   const beforeByPath = new Map(before.map((f) => [f.path, f.content]));
+  const afterPaths = new Set(after.map((f) => f.path));
   const findings: TestIntegrityFinding[] = [];
+
+  // A test file that was there before and is not now (deleted, or renamed away and so no longer a test file by name). The loop
+  // below only ever looked at files that survive, so deleting a failing test file was invisible, although ADR-010 promises the
+  // flag. Whether the deletion is legitimate is a human call; the check only makes sure it is seen.
+  for (const file of before) {
+    if (!isRelevantPath(file.path) || afterPaths.has(file.path)) continue;
+    findings.push({ path: file.path, reason: "this test file is no longer present (deleted, or renamed so it is no longer a test file)" });
+  }
 
   for (const file of after) {
     if (!isRelevantPath(file.path)) continue;
@@ -173,6 +268,26 @@ export function diffTestProfiles<P extends BaseTestProfile>(
       }
     }
 
+    // An assertion as written (matcher and expected value) that is gone while the count held: it was changed. That is also how a
+    // legitimate update looks, so this flags for a person to look; it never decides.
+    if (priorProfile.assertionExpressions && newProfile.assertionExpressions) {
+      const now = new Set(newProfile.assertionExpressions);
+      const changed = priorProfile.assertionExpressions.find((e) => !now.has(e));
+      if (changed !== undefined) {
+        findings.push({
+          path: file.path,
+          reason: `an assertion was changed or removed: \`${changed.length > 80 ? changed.slice(0, 77) + "..." : changed}\` no longer appears as written (its matcher or expected value may have been loosened)`,
+        });
+        continue;
+      }
+    }
+
+    const weakened = Object.keys(WEAKENER_TEXT).find((label) => (newProfile.weakeners?.[label] ?? 0) > (priorProfile.weakeners?.[label] ?? 0));
+    if (weakened !== undefined) {
+      findings.push({ path: file.path, reason: WEAKENER_TEXT[weakened]! });
+      continue;
+    }
+
     if (newProfile.skipCount > priorProfile.skipCount) {
       findings.push({
         path: file.path,
@@ -197,9 +312,15 @@ export function checkTestIntegrity(
   );
 }
 
-/** Convenience: filters a file list down to the project's own test-naming convention (matches tests.ts). */
+/**
+ * Which files the integrity check (and the self-heal test lock in compile.ts) treats as tests. It is the
+ * SAME rule test discovery uses (test_discovery.ts isTestPath: .test/.spec files, *_test and test-* names,
+ * anything under test/ or __tests__/, JS as well as TS). It used to recognise only .test.ts and
+ * .test.tsx, so weakening an assertion in test/a.ts or a.spec.ts was never checked, while discovery
+ * happily ran those files as tests.
+ */
 export function isTestFilePath(path: string): boolean {
-  return path.endsWith(".test.ts") || path.endsWith(".test.tsx");
+  return isTestPath(path);
 }
 
 export interface TestIntegrityChecker {

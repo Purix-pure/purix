@@ -20,6 +20,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeRmSync } from "../platform/fs_retry.js";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("LLM Classify & Call Pipeline", () => {
   let originalFetch: typeof globalThis.fetch;
@@ -95,7 +99,7 @@ describe("LLM Classify & Call Pipeline", () => {
       );
     });
 
-    const res = await callLlm("test prompt", "low", 1, {
+    const res = await callLlm("test prompt", "change_classification", "low", 1, {
       call: "intent_refinement",
       decision: { tier: "low", reason: "budget saving" },
     });
@@ -110,7 +114,7 @@ describe("LLM Classify & Call Pipeline", () => {
     });
 
     const before = getBudgetSnapshot();
-    await expect(callLlm("prompt", "low")).rejects.toThrow(/Unauthorized/);
+    await expect(callLlm("prompt", "change_classification", "low")).rejects.toThrow(/Unauthorized/);
     const after = getBudgetSnapshot();
 
     // Before the fix, assertBudgetAvailable()'s $0.05 reservation was
@@ -132,7 +136,7 @@ describe("LLM Classify & Call Pipeline", () => {
     // transient-error retry chain reaches, without needing to actually
     // wait out the real 1s/2s/4s/8s backoff between the 5 attempts that
     // would get there.
-    await expect(callLlm("prompt", "low", 5, undefined)).rejects.toThrow(/Service Unavailable/);
+    await expect(callLlm("prompt", "change_classification", "low", 5, undefined)).rejects.toThrow(/Service Unavailable/);
     const after = getBudgetSnapshot();
 
     expect(after?.totalSpentUsd).toBeCloseTo(before?.totalSpentUsd ?? 0, 6);

@@ -1,4 +1,5 @@
 // packages/core/src/cli-io/confirm.ts (moved from src/cli/confirm.ts — security/auth.ts and recovery/escalate.ts import this directly, so it must live in core, not in the cli package, or the core→cli boundary check would fail)
+import { ambientEnv } from "../platform/env.js";
 import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 
@@ -25,7 +26,7 @@ import { stdin, stdout } from "node:process";
  * were permanently indistinguishable in the audit trail.
  */
 export function isAutoConfirmActive(): boolean {
-  return process.env.NODE_ENV === "test" && process.env.AUTO_CONFIRM === "1";
+  return ambientEnv("NODE_ENV") === "test" && ambientEnv("AUTO_CONFIRM") === "1";
 }
 
 // One process-wide line reader shared by every prompt (confirm() and the

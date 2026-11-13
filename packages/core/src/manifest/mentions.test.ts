@@ -109,4 +109,9 @@ describe("deriveComponentName", () => {
   it("falls back when nothing usable", () => {
     expect(deriveComponentName("add the")).toBe("new-component");
   });
+  it("drops pronouns, spoken fillers and opening verbs from a dictated request", () => {
+    const seed = deriveComponentName("build a website for me in which we can connect to other people with same interest, uh, um");
+    expect(seed).not.toMatch(/\b(me|we|uh|um|build|which|other|same)\b/);
+    expect(seed).toBe("website-connect-people-interest");
+  });
 });

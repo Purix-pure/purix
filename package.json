@@ -1,6 +1,6 @@
 {
   "name": "purix-monorepo",
-  "version": "0.2.0-beta.0",
+  "version": "0.4.0-beta.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,10 +13,28 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "boundary-check": "node --import tsx scripts/check-core-boundary.ts",
+    "cycle-check": "node scripts/check-import-cycles.mjs",
+    "exports-check": "node scripts/check-core-exports.mjs",
+    "cycle-check:test": "node --test scripts/check-import-cycles.test.mjs",
+    "eval:l1": "node --import tsx scripts/eval-l1.ts",
+    "single-point-check": "node --import tsx scripts/check-single-point.ts",
+    "single-point-check:test": "node --import tsx --test scripts/check-single-point.test.ts",
+    "env-docs-check": "node --import tsx scripts/check-env-docs.ts",
+    "env-docs-check:test": "node --import tsx --test scripts/check-env-docs.test.ts",
+    "checks-page": "node scripts/generate-checks-page.mjs",
+    "checks-page:check": "node scripts/generate-checks-page.mjs --check && node --test scripts/generate-checks-page.test.mjs",
+    "test:all": "node scripts/purix-04-run-all.mjs",
+    "speed": "node scripts/speed-test.mjs",
+    "ci-lock-flow": "node scripts/ci-lock-flow.mjs",
+    "ci-hook-flow": "node scripts/ci-hook-flow.mjs",
+    "ci-bypass-flow": "node scripts/ci-bypass-flow.mjs",
+    "connect-harness": "node scripts/connect-harness.mjs",
+    "tool-boundary-check": "node --import tsx scripts/check-tool-boundary.ts",
+    "tool-boundary-check:test": "node --import tsx --test scripts/check-tool-boundary.test.ts",
     "artifact-check": "node --import tsx scripts/check-no-toolchain-artifacts.ts",
     "lint": "turbo run build --filter=@purix/core && eslint .",
     "lint:fix": "turbo run build --filter=@purix/core && eslint . --fix",
-    "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-coverage-include=\"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.ts\" --test-coverage-exclude=\"**/*.test.ts\" \"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.test.ts\""
+    "coverage": "node --import ./scripts/test-home-preload.mjs --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-coverage-include=\"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.ts\" --test-coverage-exclude=\"**/*.test.ts\" \"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "22.13.0",
@@ -28,7 +46,7 @@
     "typescript-eslint": "^8.46.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "cross-spawn": "^7.0.6"
   },
   "description": "Governance-first AI coding agent platform. Purix classifies and verifies AI-driven code modifications *before* they run — in a sandbox, against your test suite, with a human confirmation checkpoint for anything risky — rather than applying a change and hoping it was safe.",
@@ -38,5 +56,5 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "Apache-2.0"
 }

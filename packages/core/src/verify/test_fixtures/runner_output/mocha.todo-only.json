@@ -1,0 +1,4 @@
+{
+ "exitCode": 0,
+ "stdout": "{\n  \"stats\": {\n    \"suites\": 0,\n    \"tests\": 1,\n    \"passes\": 0,\n    \"pending\": 1,\n    \"failures\": 0,\n    \"start\": \"2026-11-01T10:01:42.113Z\",\n    \"end\": \"2026-11-01T10:01:42.114Z\",\n    \"duration\": 1\n  },\n  \"tests\": [\n    {\n      \"title\": \"pending todo\",\n      \"fullTitle\": \"pending todo\",\n      \"file\": \"/tmp/cap-TgIGUB/src/a.test.js\",\n      \"currentRetry\": 0,\n      \"err\": {}\n    }\n  ],\n  \"pending\": [\n    {\n      \"title\": \"pending todo\",\n      \"fullTitle\": \"pending todo\",\n      \"file\": \"/tmp/cap-TgIGUB/src/a.test.js\",\n      \"currentRetry\": 0,\n      \"err\": {}\n    }\n  ],\n  \"failures\": [],\n  \"passes\": []\n}"
+}

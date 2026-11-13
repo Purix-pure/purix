@@ -29,15 +29,68 @@
 //   - "fail closed, never guess" — an unknown/misconfigured provider throws
 //     with an actionable message, it never silently falls back to Gemini.
 
+import { dataDrivenEnv, purixEnv } from "../platform/env.js";
+import { netFetch } from "../platform/net.js";
+import { asArray, asObject } from "../platform/json_shape.js";
 import { getSecret } from "../security/secrets_manager.js";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { sanitizeErrorText } from "../security/error_text.js";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { quarantineCorruptFile, readJsonFile, writeJsonAtomic } from "../platform/atomic_write.js";
 import { join } from "node:path";
+import { purixDir } from "../platform/layout.js";
+import { createHash } from "node:crypto";
+import { userStateDir } from "../usage/consent.js";
+
+/**
+ * H3: the first 500 characters of a provider's error body, with key fragments, known tokens and machine paths removed.
+ * The clean-up runs BEFORE the cut to 500: cutting first could slice a key in half so the pattern no longer matches it. The
+ * 20,000-character pre-cut only bounds the work on a very large body.
+ */
+function providerErrorBody(body: string): string {
+  return sanitizeErrorText(body.slice(0, 20_000), { maxChars: 500 });
+}
 
 export type ModelTier = "low" | "high";
 
 export interface ProviderUsage {
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Input tokens the provider served from its prompt cache, when it reports them (AI-05). Measurement only: Purix sends no cache
+   * markers, so this shows how often a provider's automatic caching already hits. Absent means the provider did not say, which is
+   * not the same as zero. Anthropic reports it separately from `inputTokens`; OpenAI-compatible and Gemini count it inside.
+   */
+  cachedInputTokens?: number;
+}
+
+/** `{ cachedInputTokens }` when the provider reported a number, nothing when it did not, so absent stays distinct from zero. */
+function cachedField(value: unknown): { cachedInputTokens?: number } {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? { cachedInputTokens: value } : {};
+}
+
+// H1: a provider's reply is data from outside, so nothing below assumes its shape. Each reader returns an empty value for a wrong type
+// (the same thing a missing field already gave), never throws, and never lets a non-number reach the usage figures.
+/** A token count: a finite number of at least 0, else 0 (a string, an object or a negative number must not reach the cost figures). */
+function tokenCount(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+}
+/** Text from a message body that is a string or, for some OpenAI-compatible servers, a list of `{ type: "text", text }` parts. Anything else: "". */
+function textOfContent(v: unknown): string {
+  if (typeof v === "string") return v;
+  return asArray(v)
+    .map((part) => {
+      const o = asObject(part);
+      return typeof o.text === "string" && (o.type === undefined || o.type === "text") ? o.text : "";
+    })
+    .join("");
+}
+/** An HTTP failure carrying the status the retry logic reads. */
+function httpError(message: string, status: number): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}
+function transientCheck(err: unknown): boolean {
+  const o = asObject(err);
+  return genericTransientCheck(typeof o.status === "number" ? o.status : undefined, typeof o.message === "string" ? o.message : "");
 }
 
 export interface ProviderResult {
@@ -48,7 +101,14 @@ export interface ProviderResult {
 export interface LlmProvider {
   id: string;
   modelFor(tier: ModelTier): string;
-  generate(prompt: string, tier: ModelTier): Promise<ProviderResult>;
+  /**
+   * `system` is optional. When given it is sent through the provider's own
+   * system/instruction channel (OpenAI-style "system" message, Anthropic's
+   * top-level `system`, Gemini's `systemInstruction`) — the channel providers
+   * rank above user-turn text, which is where untrusted repository content
+   * goes. When omitted the request is exactly what it always was.
+   */
+  generate(prompt: string, tier: ModelTier, system?: string): Promise<ProviderResult>;
   isTransientError(err: unknown): boolean;
 }
 
@@ -221,7 +281,7 @@ const REGISTRY_BY_ID = new Map(REGISTRY.map((d) => [d.id, d]));
 export type ProviderId = string; // any REGISTRY id, or "custom"
 
 function resolveKey(envVarName: string, providerLabel: string): string {
-  const key = getSecret(envVarName) ?? process.env[envVarName];
+  const key = getSecret(envVarName) ?? dataDrivenEnv(envVarName);
   if (!key) {
     throw new Error(
       `${envVarName} isn't available. Purix does not ship or bill against a shared key — ` +
@@ -243,7 +303,7 @@ function genericTransientCheck(status: number | undefined, message: string): boo
 
 function modelOverride(def: ProviderDefinition, tier: ModelTier): string {
   const envKey = `PURIX_${def.id.toUpperCase()}_MODEL_${tier.toUpperCase()}`;
-  return process.env[envKey] ?? def.models[tier];
+  return dataDrivenEnv(envKey) ?? def.models[tier];
 }
 
 // ---------------------------------------------------------------------------
@@ -259,27 +319,30 @@ function openAiCompatibleAdapter(def: ProviderDefinition): LlmProvider {
   return {
     id: def.id,
     modelFor: (tier) => modelOverride(def, tier),
-    isTransientError: (err: any) => genericTransientCheck(err?.status, String(err?.message ?? "")),
-    async generate(prompt, tier) {
+    isTransientError: transientCheck,
+    async generate(prompt, tier, system) {
       const key = resolveKey(def.keyEnvVar, def.label);
       const model = modelOverride(def, tier);
-      const res = await fetch(`${def.baseUrl!.replace(/\/$/, "")}/chat/completions`, {
+      const messages = system
+        ? [{ role: "system", content: system }, { role: "user", content: prompt }]
+        : [{ role: "user", content: prompt }];
+      const res = await netFetch("llm-provider", `${def.baseUrl!.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
+        body: JSON.stringify({ model, messages }),
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        const err: any = new Error(`${def.label} ${res.status}: ${body.slice(0, 500)}`);
-        err.status = res.status;
-        throw err;
+        throw httpError(`${def.label} ${res.status}: ${providerErrorBody(body)}`, res.status);
       }
-      const data = (await res.json());
+      const data = asObject(await res.json());
+      const usage = asObject(data.usage);
       return {
-        text: data.choices?.[0]?.message?.content ?? "",
+        text: textOfContent(asObject(asObject(asArray(data.choices)[0]).message).content),
         usage: {
-          inputTokens: data.usage?.prompt_tokens ?? 0,
-          outputTokens: data.usage?.completion_tokens ?? 0,
+          inputTokens: tokenCount(usage.prompt_tokens),
+          outputTokens: tokenCount(usage.completion_tokens),
+          ...cachedField(asObject(usage.prompt_tokens_details).cached_tokens),
         },
       };
     },
@@ -287,29 +350,44 @@ function openAiCompatibleAdapter(def: ProviderDefinition): LlmProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Native Gemini adapter (different wire format — Google's own SDK).
+// Native Gemini adapter (Google's generateContent REST endpoint, through the network door).
+// It used to load @google/genai, whose client opens its own connections and so bypassed netFetch; the
+// REST call below is the same request, and the key travels in a header, never in the URL.
 // ---------------------------------------------------------------------------
+const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 function geminiAdapter(def: ProviderDefinition): LlmProvider {
-  let client: any = null;
-  async function getClient() {
-    if (client) return client;
-    const { GoogleGenAI } = await import("@google/genai");
-    client = new GoogleGenAI({ apiKey: resolveKey(def.keyEnvVar, def.label) });
-    return client;
-  }
   return {
     id: def.id,
     modelFor: (tier) => modelOverride(def, tier),
-    isTransientError: (err: any) => genericTransientCheck(err?.status, String(err?.message ?? "")),
-    async generate(prompt, tier) {
-      const ai = await getClient();
+    isTransientError: transientCheck,
+    async generate(prompt, tier, system) {
+      const key = resolveKey(def.keyEnvVar, def.label);
       const model = modelOverride(def, tier);
-      const result = await ai.models.generateContent({ model, contents: prompt });
+      const res = await netFetch("llm-provider", `${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw httpError(`Gemini ${res.status}: ${providerErrorBody(body)}`, res.status);
+      }
+      const data = asObject(await res.json());
+      const meta = asObject(data.usageMetadata);
+      const text = asArray(asObject(asObject(asArray(data.candidates)[0]).content).parts)
+        .map(asObject)
+        .filter((p) => typeof p.text === "string" && !p.thought)
+        .map((p) => p.text as string)
+        .join("");
       return {
-        text: result.text ?? "",
+        text,
         usage: {
-          inputTokens: result.usageMetadata?.promptTokenCount ?? 0,
-          outputTokens: result.usageMetadata?.candidatesTokenCount ?? 0,
+          inputTokens: tokenCount(meta.promptTokenCount),
+          outputTokens: tokenCount(meta.candidatesTokenCount),
+          ...cachedField(meta.cachedContentTokenCount),
         },
       };
     },
@@ -323,28 +401,37 @@ function anthropicAdapter(def: ProviderDefinition): LlmProvider {
   return {
     id: def.id,
     modelFor: (tier) => modelOverride(def, tier),
-    isTransientError: (err: any) => genericTransientCheck(err?.status, String(err?.message ?? "")),
-    async generate(prompt, tier) {
+    isTransientError: transientCheck,
+    async generate(prompt, tier, system) {
       const key = resolveKey(def.keyEnvVar, def.label);
       const model = modelOverride(def, tier);
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await netFetch("llm-provider", "https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: "user", content: prompt }] }),
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          ...(system ? { system } : {}),
+          messages: [{ role: "user", content: prompt }],
+        }),
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        const err: any = new Error(`Anthropic ${res.status}: ${body.slice(0, 500)}`);
-        err.status = res.status;
-        throw err;
+        throw httpError(`Anthropic ${res.status}: ${providerErrorBody(body)}`, res.status);
       }
-      const data = (await res.json());
-      const text = (data.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+      const data = asObject(await res.json());
+      const usage = asObject(data.usage);
+      const text = asArray(data.content)
+        .map(asObject)
+        .filter((b) => b.type === "text" && typeof b.text === "string")
+        .map((b) => b.text as string)
+        .join("");
       return {
         text,
         usage: {
-          inputTokens: data.usage?.input_tokens ?? 0,
-          outputTokens: data.usage?.output_tokens ?? 0,
+          inputTokens: tokenCount(usage.input_tokens),
+          outputTokens: tokenCount(usage.output_tokens),
+          ...cachedField(usage.cache_read_input_tokens),
         },
       };
     },
@@ -379,18 +466,114 @@ interface PersistedProviderConfig {
   custom?: { baseUrl: string; keyEnvVar: string; modelLow: string; modelHigh: string; label?: string };
 }
 
-function configPath(): string {
-  return join(process.cwd(), ".purix", "provider-config.json");
+// Project-local by design (it lives in the project's .purix/). It is resolved from the working
+// directory at call time; callers that know the project root (tests, an MCP session started
+// elsewhere) pass baseDir so a subdirectory or a differently-rooted process cannot read or write
+// the wrong file (PURIX-17 P1-B).
+function configPath(baseDir: string = process.cwd()): string {
+  return join(purixDir(baseDir), "provider-config.json");
 }
 
-function readPersistedConfig(): PersistedProviderConfig | null {
+// ---------------------------------------------------------------------------
+// Trust for a project's custom endpoint (periodic security check 2026-10-15, poc1).
+//
+// provider-config.json lives in the PROJECT, so a repository someone else wrote can carry a "custom" block that names any
+// URL and any environment variable. Purix would then send the request, with whichever key that variable holds (an
+// OPENAI_API_KEY the user set for real work), to the URL in the file, along with the code in the prompt. The fix is a
+// record the project cannot write: the user's own state folder lists the endpoint + key-variable pairs the person has
+// accepted. `purix provider set custom` records one (the person just typed it); `purix provider trust` accepts one that
+// came with a project; nothing else does. A custom block that is not on the list is refused before any key is read.
+// The record is keyed by the pair, not the project, so a moved or re-cloned folder keeps working.
+// ---------------------------------------------------------------------------
+interface TrustFile {
+  schema: 1;
+  endpoints: string[];
+}
+
+function trustFilePath(): string {
+  return join(userStateDir(), "trusted-custom-providers.json");
+}
+
+/** Where a custom provider would send the key, reduced to a comparable form: scheme, lower-cased host, port and path, no trailing slash. */
+function normalizedEndpoint(baseUrl: string): string {
   try {
-    const p = configPath();
+    const u = new URL(baseUrl.trim());
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
+  } catch {
+    return baseUrl.trim().replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+export function customEndpointFingerprint(cfg: { baseUrl: string; keyEnvVar: string }): string {
+  return createHash("sha256").update(`${normalizedEndpoint(cfg.baseUrl)}\n${cfg.keyEnvVar}`).digest("hex");
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return h === "localhost" || h === "::1" || /^127\.\d+\.\d+\.\d+$/.test(h);
+}
+
+/** A key may go to an https address, or to this machine over http (a local model server). Anything else would send it in the clear. */
+export function assertCustomEndpointTransport(baseUrl: string): void {
+  let u: URL;
+  try {
+    u = new URL(baseUrl);
+  } catch {
+    throw new Error(`The custom provider address "${baseUrl}" is not a valid URL.`);
+  }
+  if (u.protocol === "https:" || (u.protocol === "http:" && isLoopbackHost(u.hostname))) return;
+  throw new Error(`The custom provider address ${baseUrl} would send your API key without encryption. Use an https address (plain http is only allowed for this machine).`);
+}
+
+function readTrust(): string[] {
+  const read = readJsonFile<TrustFile>(trustFilePath());
+  if (read.kind !== "ok" || read.value?.schema !== 1 || !Array.isArray(read.value.endpoints)) return [];
+  return read.value.endpoints.filter((e) => typeof e === "string");
+}
+
+export function isCustomProviderTrusted(cfg: { baseUrl: string; keyEnvVar: string }): boolean {
+  return readTrust().includes(customEndpointFingerprint(cfg));
+}
+
+/** Records that the person accepts sending the key named by `keyEnvVar` to `baseUrl`. Only the CLI calls this, after the person says yes. */
+export function trustCustomProvider(cfg: { baseUrl: string; keyEnvVar: string }): void {
+  assertCustomEndpointTransport(cfg.baseUrl);
+  const fp = customEndpointFingerprint(cfg);
+  const current = readTrust();
+  if (current.includes(fp)) return;
+  writeJsonAtomic(trustFilePath(), { schema: 1, endpoints: [...current, fp] } satisfies TrustFile);
+}
+
+/** What a project's own provider-config.json asks for, for display. Undefined when it holds no custom block. */
+export function projectCustomProvider(baseDir: string = process.cwd()): { baseUrl: string; keyEnvVar: string; trusted: boolean } | undefined {
+  const c = readPersistedConfig(baseDir)?.custom;
+  if (!c || typeof c.baseUrl !== "string" || typeof c.keyEnvVar !== "string") return undefined;
+  return { baseUrl: c.baseUrl, keyEnvVar: c.keyEnvVar, trusted: isCustomProviderTrusted(c) };
+}
+
+function readPersistedConfig(baseDir: string = process.cwd()): PersistedProviderConfig | null {
+  try {
+    const p = configPath(baseDir);
     if (!existsSync(p)) return null;
-    return JSON.parse(readFileSync(p, "utf8"));
+    return persistedConfigFrom(JSON.parse(readFileSync(p, "utf8")));
   } catch {
     return null;
   }
+}
+
+/**
+ * H1: the file lives in the project, so it may hold anything. A file that is not an object with a text `provider` is read as absent; a
+ * `custom` block that lacks any of its four text fields is dropped (a half-filled custom endpoint is never half-used).
+ */
+function persistedConfigFrom(raw: unknown): PersistedProviderConfig | null {
+  const o = asObject(raw);
+  if (typeof o.provider !== "string") return null;
+  const c = asObject(o.custom);
+  const custom =
+    typeof c.baseUrl === "string" && typeof c.keyEnvVar === "string" && typeof c.modelLow === "string" && typeof c.modelHigh === "string"
+      ? { baseUrl: c.baseUrl, keyEnvVar: c.keyEnvVar, modelLow: c.modelLow, modelHigh: c.modelHigh, ...(typeof c.label === "string" ? { label: c.label } : {}) }
+      : undefined;
+  return { provider: o.provider, ...(custom ? { custom } : {}) };
 }
 
 // Part 2 (hot reload): mtimeMs of provider-config.json at the moment it was
@@ -408,7 +591,7 @@ function configMtimeMs(): number | null {
 }
 
 export function activeProviderId(): string {
-  const fromEnv = process.env.PURIX_LLM_PROVIDER;
+  const fromEnv = purixEnv("PURIX_LLM_PROVIDER");
   if (fromEnv) return fromEnv;
   const config = readPersistedConfig();
   if (!config) {
@@ -470,6 +653,14 @@ export function getProvider(id?: string): LlmProvider {
           `--key-env <ENV_VAR_NAME> --model-low <id> --model-high <id>`
       );
     }
+    if (cfg.custom.baseUrl) assertCustomEndpointTransport(cfg.custom.baseUrl);
+    if (cfg.custom.baseUrl && !isCustomProviderTrusted(cfg.custom)) {
+      throw new Error(
+        `This project's provider-config.json sends requests, and the key named ${cfg.custom.keyEnvVar}, to ${cfg.custom.baseUrl}, ` +
+          `and you have not accepted that endpoint. A project folder can contain this file without you writing it, so Purix will not use it yet. ` +
+          `If you set it up yourself, run: purix provider trust   (it shows the address and asks first). Otherwise remove the "custom" block.`
+      );
+    }
     const def: ProviderDefinition = {
       id: "custom",
       label: cfg.custom.label ?? "Custom OpenAI-compatible endpoint",
@@ -497,14 +688,46 @@ export function getProvider(id?: string): LlmProvider {
   return _active;
 }
 
-export function persistProviderChoice(id: string): void {
+export type ProviderKeySource = "stored" | "environment" | "missing";
+
+export interface ProviderKeyStatus {
+  /** The variable name the provider's key is looked up under, for example OPENAI_API_KEY. */
+  envVar: string;
+  /** Where the key was found. Never the key itself. */
+  source: ProviderKeySource;
+}
+
+/**
+ * Where a provider's API key would come from, without reading it out or making a call. Same lookup
+ * order as the real call (the encrypted store first, then the environment), so the answer matches what
+ * the first request will do. It says nothing about whether the provider accepts the key. Returns
+ * undefined for a provider that is not configured (an unknown id, or "custom" with no custom block).
+ */
+export function providerKeyStatus(id?: string): ProviderKeyStatus | undefined {
+  const wanted = id ?? activeProviderId();
+  let envVar: string | undefined;
+  if (wanted === "custom") envVar = readPersistedConfig()?.custom?.keyEnvVar;
+  else envVar = REGISTRY_BY_ID.get(wanted)?.keyEnvVar;
+  if (!envVar) return undefined;
+  let stored: string | null | undefined;
+  try {
+    stored = getSecret(envVar);
+  } catch {
+    stored = undefined; // an unreadable store must not crash a status command; fall through to the environment
+  }
+  if (stored) return { envVar, source: "stored" };
+  if (dataDrivenEnv(envVar)) return { envVar, source: "environment" };
+  return { envVar, source: "missing" };
+}
+
+export function persistProviderChoice(id: string, baseDir: string = process.cwd()): void {
   if (id !== "custom" && !REGISTRY_BY_ID.has(id)) {
     throw new Error(`Unknown provider "${id}". Run "purix provider list" to see supported ids.`);
   }
-  const dir = join(process.cwd(), ".purix");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const existing = readPersistedConfig();
-  writeFileSync(configPath(), JSON.stringify({ ...existing, provider: id }, null, 2));
+  const path = configPath(baseDir);
+  if (readJsonFile(path).kind === "corrupt") quarantineCorruptFile(path);
+  const existing = readPersistedConfig(baseDir);
+  writeJsonAtomic(path, { ...existing, provider: id });
   _active = null;
   _activeId = null;
   _customConfigMtimeAtBuild = null;
@@ -516,10 +739,12 @@ export function persistCustomProvider(cfg: {
   modelLow: string;
   modelHigh: string;
   label?: string;
-}): void {
-  const dir = join(process.cwd(), ".purix");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(configPath(), JSON.stringify({ provider: "custom", custom: cfg }, null, 2));
+}, baseDir: string = process.cwd()): void {
+  const path = configPath(baseDir);
+  if (readJsonFile(path).kind === "corrupt") quarantineCorruptFile(path);
+  if (cfg.baseUrl) assertCustomEndpointTransport(cfg.baseUrl); // an empty address is reported by the adapter, with its own message
+  writeJsonAtomic(path, { provider: "custom", custom: cfg });
+  if (cfg.baseUrl) trustCustomProvider(cfg); // the person just typed this endpoint, so it is their choice
   _active = null;
   _activeId = null;
   _customConfigMtimeAtBuild = null;

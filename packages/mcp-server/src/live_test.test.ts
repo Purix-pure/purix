@@ -139,35 +139,33 @@ describe("MCP Server Live Protocol Test across Languages", () => {
     const toolsResult = await client.listTools();
     const toolNames = toolsResult.tools.map((t) => t.name).sort();
     // 19 -> 21 (2026-09-24, IDEA-078): purix_find and purix_change added.
-    expect(toolNames).toHaveLength(21);
+    // 21 -> 22: purix_adopt added (brownfield: make an indexed file changeable).
+    // 22 -> 24 (2026-10-03, ADR-060): purix_tools_plan (read-only) and purix_tools_request_install (writes a pending request only).
+    // 24 -> 19 (2026-10-12, D-21): delete, accept_drift, both migration tools, backup and reconcile moved to the CLI only;
+    // purix_approval_status (read-only poll for a pending approval) added.
+    // 19 -> 14 (2026-10-14, MCP-5): library, stats, migrations_list, audit and remember moved to the CLI only.
+    expect(toolNames).toHaveLength(14);
     expect(toolNames).toEqual(
       [
-        "purix_accept_drift",
-        "purix_audit",
+        "purix_adopt",
+        "purix_approval_status",
         "purix_audit_trail",
         "purix_audit_verify",
-        "purix_backup",
         "purix_change",
         "purix_create",
-        "purix_delete",
         "purix_find",
         "purix_ingest",
         "purix_index",
-        "purix_library",
-        "purix_migration_activate",
-        "purix_migration_rollback",
-        "purix_migrations_list",
         "purix_modify",
-        "purix_reconcile",
-        "purix_remember",
-        "purix_stats",
         "purix_status",
         "purix_tools",
+        "purix_tools_plan",
+        "purix_tools_request_install",
       ].sort()
     );
 
     // 2. Call purix_status
-    const statusResult = await client.callTool({ name: "purix_status", arguments: {} });
+    const statusResult = await client.callTool({ name: "purix_status", arguments: { detail: "full" } });
     const statusContent = statusResult.content as Array<{ type: string; text?: string }>;
     const statusText = statusContent[0]?.text ?? "";
     const components = JSON.parse(statusText);
@@ -196,7 +194,9 @@ describe("MCP Server Live Protocol Test across Languages", () => {
     expect(pyText.length).toBeGreaterThan(0);
     expect(pyText).not.toContain("Sandbox execution passed successfully");
     const pyGenuinelySucceeded = pyText.includes("Modification verified and committed");
-    const pyGenuinelyFailedWithReason = pyText.includes("Sandbox verification and escalation both failed") || pyText.includes("Escalation failed");
+    const pyGenuinelyFailedWithReason = pyText.includes("Sandbox verification and escalation both failed") || pyText.includes("Escalation failed") ||
+      // Release 1 surface: a missing Python tool is "could not check" (not a failure of the code), and the result must say so.
+      pyText.includes("Could not check") || pyText.includes("Not checked: unsupported language");
     expect(pyGenuinelySucceeded || pyGenuinelyFailedWithReason).toBe(true);
     if (pyGenuinelySucceeded) {
       // If this environment does have a full enough Python toolchain for

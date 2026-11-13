@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSessionStore } from "./session";
-import { createApiClient, ApiUnreachableError, ApiRequestError } from "./api_client";
+import { createApiClient, ApiUnreachableError, ApiRequestError, LoginRequiredError, ClientTooOldError } from "./api_client";
 
 // Every test builds its own session store bound to a throwaway directory
 // and its own apiClient wired to that store's loadSession — this repo's
@@ -87,5 +87,34 @@ describe("createApiClient", () => {
 
     await expect(client.getEntitlements()).rejects.toBeInstanceOf(ApiRequestError);
     expect(fetchCalled).toBe(false);
+  });
+
+  test("a 426 surfaces as ClientTooOldError, still an ApiRequestError, with an upgrade instruction", async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: "Client version 0.0.1 is below the minimum" }), { status: 426 });
+    sessionStore.saveSession("existing-token", "dev@example.com");
+    const err = await client.getEntitlements().catch((e) => e);
+    expect(err).toBeInstanceOf(ClientTooOldError);
+    expect(err).toBeInstanceOf(ApiRequestError);
+    expect(err.status).toBe(426);
+    expect(err.message).toContain("upgrade Purix");
+  });
+
+  test("a 401 on an authenticated call surfaces as LoginRequiredError and keeps the server's message", async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: "Not logged in." }), { status: 401 });
+    sessionStore.saveSession("existing-token", "dev@example.com");
+    const err = await client.getEntitlements().catch((e) => e);
+    expect(err).toBeInstanceOf(LoginRequiredError);
+    expect(err.message).toBe("Not logged in.");
+  });
+
+  test("no session at all is a LoginRequiredError before any request is made", async () => {
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return new Response("{}", { status: 200 });
+    };
+    const err = await client.getEntitlements().catch((e) => e);
+    expect(err).toBeInstanceOf(LoginRequiredError);
+    expect(called).toBe(false);
   });
 });

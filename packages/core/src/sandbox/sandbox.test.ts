@@ -14,7 +14,7 @@
 // needing to mock a real LLM call to prove it.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyInSandbox } from "./sandbox";
@@ -22,6 +22,8 @@ import { closeDb } from "../manifest/store";
 import { registerLanguageProvider } from "../language/registry";
 import type { LanguageProvider } from "../language/provider";
 import { safeRmSync } from "../platform/fs_retry.js";
+import { placeFakeInstall } from "../tools/test_helpers.js";
+import { locateTool } from "../tools/broker.js";
 
 let originalCwd: string;
 let tmpDir: string;
@@ -114,17 +116,15 @@ describe("verifyInSandbox — secret scan gate (ADR-037)", () => {
     // this tmpDir (tsconfig.json present, nothing else), resolves to
     // "typescript" regardless of the file's real language. This pins that
     // the fallback still happens absent an override...
-    it("without an override, a non-.ts file under a synthetic componentId is dispatched via whole-repo auto-detection (typescript here)", () => {
+    it("without an override, a file in a language no provider covers is reported as not checked, never handed to the TypeScript toolchain", () => {
+      // A10a-1. This test used to pin the opposite: that component.rs was dispatched through whole-repo auto-detection to the
+      // TypeScript provider, which "never actually checked component.rs's content". That was the false-pass defect (ADR-017).
       const candidateFiles = [{ path: "component.rs", new_content: `fn add(a: i32, b: i32) -> i32 { a + b }\n` }];
       const result = verifyInSandbox("comp-1", candidateFiles, tmpDir);
-      // No Rust provider is registered, so this file gets run through the
-      // TypeScript provider (whether that reports "pass" or "not_installed"
-      // depends on whether `tsc` is resolvable in this test environment) —
-      // either way, it never actually checked component.rs's content. The
-      // one outcome that would disprove this test is a failure whose
-      // reason engages with the Rust content at all, which "pass" and
-      // "not_installed" both rule out.
-      expect(["pass", "not_installed"]).toContain(result.status);
+      expect(result.status).toBe("fail");
+      if (result.status !== "fail") return;
+      expect(result.infrastructure).toBe("unsupported_language");
+      expect(result.reason).toMatch(/unsupported language, not checked/i);
     });
 
     // ...and that passing the caller's own already-known language closes
@@ -211,6 +211,36 @@ describe("verifyInSandbox — secret scan gate (ADR-037)", () => {
       const result = verifyInSandbox("comp-1", [{ path: "component.fakelang-isolated", new_content: "x" }], tmpDir, "fakelang-isolated");
       expect(result.status).toBe("pass");
       expect(result.status === "pass" && result.isolation).toBe("network-namespace");
+    });
+  });
+
+  describe("tools installed through `purix tools` are visible inside the verification copy", () => {
+    it("the copy reads the real project's tools state, so a provider's broker lookup finds the tool there", () => {
+      const bin = placeFakeInstall(tmpDir, "pytest");
+      let seen: ReturnType<typeof locateTool> = null;
+      let copyDir = "";
+      registerLanguageProvider({
+        id: "fakelang-tools",
+        minSupportedVersion: "1.0.0",
+        detect: () => true,
+        verify: (_paths: string[], baseDir: string) => {
+          copyDir = baseDir;
+          seen = locateTool({ baseDir }, "pytest");
+          return { status: "pass", isolation: "none" };
+        },
+        runTests: () => ({ status: "no_tests", quarantinedFailures: [] }),
+        checkIdiom: () => ({ findings: [], ran: false }),
+        auditDependencies: async () => ({ pinning: [], vulnerabilities: [], ran: false }),
+        getFingerprint: async () => ({}),
+      });
+
+      verifyInSandbox("comp-1", [{ path: "component.fakelang-tools", new_content: "x" }], tmpDir, "fakelang-tools");
+
+      expect(copyDir).not.toBe(tmpDir); // it really ran on the copy
+      expect(seen).not.toBeNull();
+      expect(seen!.source).toBe("purix");
+      expect(seen!.command[0]).toBe(bin); // T1: found in the user's tools state through the copy's alias, not inside the copy
+      expect(existsSync(bin)).toBe(true); // and the real install was left untouched
     });
   });
 });

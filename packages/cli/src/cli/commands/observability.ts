@@ -11,22 +11,42 @@ export function registerObservabilityCommands(program: Command) {
     .command("status")
     .description("List all manifest components")
     .action(async () => {
-      const { listManifest } = await import("@purix/core/manifest/store");
-      const all = listManifest();
+      const { listManifest, storeExists, NO_STATE_MESSAGE } = await import("@purix/core/manifest/store");
+      if (!storeExists()) { console.log(NO_STATE_MESSAGE); return; }
+      const { splitIndexRow, indexedFilesLine } = await import("./status_index_line.js");
+      // D-b: the aggregate index row is shown as one "indexed files" line, not as a component.
+      const { components: all, indexRow } = splitIndexRow(listManifest());
+      const indexedLine = indexedFilesLine(indexRow);
       if (all.length === 0) {
         console.log("No components registered yet. Run \"purix create <name>\".");
+        if (indexedLine) console.log(indexedLine);
         return;
       }
+      const { storedStatusLabel, notTestedBadge } = await import("@purix/core/verify/outcome");
+      const { latestNotTestedByComponent, latestSearchCutFilesByComponent } = await import("@purix/core/manifest/not_tested");
+      const notTested = latestNotTestedByComponent();
+      const searchCut = latestSearchCutFilesByComponent();
+      // F04-04: a row whose latest pass followed an edit that kept the rest of a line says so, like a not-tested gap does.
+      const { latestPartialLineByComponent } = await import("@purix/core/manifest/not_tested");
+      const { partialLineBadge } = await import("@purix/core/verify/partial_line_record");
+      const partialLine = latestPartialLineByComponent();
       for (const e of all) {
         const fileCount = e.files?.length ?? 0;
-        console.log(`${e.component_id}  v${e.current_version}  [${e.verification_status}]  (${fileCount} file(s))`);
+        const gap = notTested.get(e.component_id);
+        const gapNote = gap ? `  ⚠ ${notTestedBadge(gap, { searchCut: searchCut.has(e.component_id), ...(searchCut.get(e.component_id) ? { cutFiles: searchCut.get(e.component_id)! } : {}) })}` : "";
+        const partial = partialLine.get(e.component_id);
+        const partialNote = partial && e.verification_status === "pass" ? `  ⚠ ${partialLineBadge(partial)}` : "";
+        console.log(`${e.component_id}  v${e.current_version}  [${storedStatusLabel(e.verification_status)}]  (${fileCount} file(s))${gapNote}${partialNote}`);
       }
+      if (indexedLine) console.log(indexedLine);
     });
 
   program
     .command("library")
     .description("Show the self-extending local operation library")
     .action(async () => {
+      const { storeExists, NO_STATE_MESSAGE } = await import("@purix/core/manifest/store");
+      if (!storeExists()) { console.log(NO_STATE_MESSAGE); return; }
       const { listLibrary } = await import("@purix/core/manifest/library");
       const entries = listLibrary();
       if (entries.length === 0) {
@@ -41,10 +61,32 @@ export function registerObservabilityCommands(program: Command) {
   program
     .command("stats")
     .description("§10 Observability: measured metrics (escalation rate, confidence trend, failure clustering, test-integrity/coverage flag rates, approval fatigue, library growth)")
-    .action(async () => {
-      const { buildObservabilityReport, formatObservabilityReport } = await import("@purix/core/manifest/observability");
-      const report = buildObservabilityReport();
-      console.log(formatObservabilityReport(report));
+    .option("--calls", "per call type and per model: count, median tokens, estimate-to-actual ratio, retry and format-error share, plus repair rounds to a fix (sizes only, never prompt text)")
+    .action(async (opts: { calls?: boolean }) => {
+      const { storeExists, NO_STATE_MESSAGE } = await import("@purix/core/manifest/store");
+      const { usageSummaryLines } = await import("@purix/core/usage/summary");
+      if (opts.calls) {
+        if (!storeExists()) { console.log(NO_STATE_MESSAGE); return; }
+        const { buildCallReport, formatCallReport } = await import("@purix/core/llm/call_log");
+        const callReport = buildCallReport();
+        console.log(formatCallReport(callReport));
+        // AI-16: the repair success-by-round curve, from the events table, with the recorded spend of the repair call type.
+        const { listEvents } = await import("@purix/core/manifest/events");
+        const { buildRepairCurve, formatRepairCurve } = await import("@purix/core/manifest/repair_curve");
+        const repairRow = callReport.byType.find((t) => t.callType === "repair");
+        console.log(formatRepairCurve(buildRepairCurve(listEvents()), repairRow ? { calls: repairRow.count, costUsd: repairRow.costUsd } : undefined));
+        return;
+      }
+      if (!storeExists()) {
+        console.log(NO_STATE_MESSAGE);
+      } else {
+        const { buildObservabilityReport, formatObservabilityReport } = await import("@purix/core/manifest/observability");
+        const report = buildObservabilityReport();
+        console.log(formatObservabilityReport(report));
+      }
+      // The local usage ledger (closed schema, this machine only) feeds the stats view.
+      const usage = usageSummaryLines();
+      if (usage.length > 0) console.log(`\n${usage.join("\n")}`);
     });
 
   program
@@ -103,9 +145,12 @@ export function registerObservabilityCommands(program: Command) {
           throw new Error(`--since "${opts.since}" is not a valid ISO timestamp (e.g. 2026-09-01 or 2026-09-01T12:00:00Z).`);
         }
         if (opts.component) {
-          const { readManifest } = await import("@purix/core/manifest/store");
+          const { readManifest, storeExists: hasStore } = await import("@purix/core/manifest/store");
+          if (!hasStore()) throw new Error(`No manifest entry for "${opts.component}" (no Purix state here yet).`);
           if (!readManifest(opts.component)) throw new Error(`No manifest entry for "${opts.component}". Run "purix status" to see what's tracked.`);
         }
+        const { storeExists, NO_STATE_MESSAGE } = await import("@purix/core/manifest/store");
+        if (!storeExists()) { console.error(NO_STATE_MESSAGE); return; }
         const format = opts.format === "json" ? "json" : "markdown";
         const report = buildAuditTrail({ componentId: opts.component, since: opts.since });
         const output = format === "json" ? formatAuditTrailJson(report) : formatAuditTrailMarkdown(report);
@@ -123,22 +168,56 @@ export function registerObservabilityCommands(program: Command) {
 
   auditLogCmd
     .command("verify")
-    .description("Verify local tamper-evident audit chain integrity")
-    .action(async () => {
-      const { verifyAuditChain } = await import("@purix/core/security/audit_tamper_evidence");
-      const result = verifyAuditChain();
-      if (!result.valid) {
-        console.error(`🛑 Audit chain verification failed at record index ${result.compromisedIndex ?? "unknown"}: ${result.reason}`);
+    .description("Verify the local tamper-evident audit chain, and check it against the head recorded in a git commit")
+    .option("--commit <ref>", "check against the Purix-Evidence trailer of this commit (default: the newest commit that has one)")
+    .option("--expect-head <hash>", "check against this chain head (sha256:<hex>) instead of reading git")
+    .option("--require-anchor", "exit with an error when nothing anchors the end of the chain (for CI)")
+    .action(async (opts: { commit?: string; expectHead?: string; requireAnchor?: boolean }) => {
+      const { inspectStore, NO_STATE_MESSAGE } = await import("@purix/core/manifest/store");
+      const inspected = inspectStore();
+      if (inspected.state === "absent") { console.log(NO_STATE_MESSAGE); return; }
+      if (inspected.state === "damaged") {
+        // A tamper-evidence check must never rebuild the store it is checking.
+        const { describeStoreProblem } = await import("@purix/core/platform/disk_full");
+        const { storeDirectory } = await import("@purix/core/manifest/store");
+        console.error(`🛑 Audit chain cannot be verified: ${describeStoreProblem(inspected.detail, storeDirectory())} Nothing was changed or rebuilt.`);
         process.exitCode = 1;
         return;
       }
-      // TEST-REPORT F16: success used to print nothing at all, so "verified"
-      // and "did nothing" looked identical (and the MCP tool already said "passed").
-      console.log(
-        result.recordCount === 0
-          ? "Audit chain is empty (0 records) — nothing to verify yet."
-          : `Audit chain verification passed — ${result.recordCount ?? "all"} record(s), no tampering detected.`
-      );
+      const { readAuditChain } = await import("@purix/core/security/audit_tamper_evidence");
+      const { findAnchorInGit, judgeChain, describeVerdict, parseSuppliedHead } = await import("@purix/core/evidence/anchor");
+      let lookup: import("@purix/core/evidence/anchor").AnchorLookup;
+      if (opts.expectHead !== undefined) {
+        const head = parseSuppliedHead(opts.expectHead);
+        if (!head) {
+          console.error(`🛑 --expect-head must be sha256:<64 hex characters> (the Purix-Evidence value from a commit).`);
+          process.exitCode = 1;
+          return;
+        }
+        lookup = { found: true, anchor: { head, source: "supplied" } };
+      } else {
+        lookup = findAnchorInGit(process.cwd(), { ref: opts.commit, exact: opts.commit !== undefined });
+      }
+      const { rows, checkpoint } = readAuditChain();
+      const verdict = judgeChain(rows, checkpoint, lookup);
+      const text = describeVerdict(verdict);
+      if (verdict.state === "failed") {
+        console.error(`🛑 Audit chain ${text}`);
+        process.exitCode = 1;
+        return;
+      }
+      if (verdict.state === "not_anchored") {
+        if (verdict.recordCount === 0) {
+          console.log("Audit chain is empty (0 records) — nothing to verify yet.");
+          return;
+        }
+        // An explicitly requested anchor that cannot be read is an error, not a shrug.
+        const mustFail = opts.requireAnchor === true || opts.commit !== undefined;
+        (mustFail ? console.error : console.warn)(`${mustFail ? "🛑" : "⚠"} Audit chain ${text}`);
+        if (mustFail) process.exitCode = 1;
+        return;
+      }
+      console.log(`✅ Audit chain ${text}`);
     });
 
   program

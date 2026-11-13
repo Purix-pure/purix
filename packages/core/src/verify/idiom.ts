@@ -1,7 +1,8 @@
 // src/verify/idiom.ts
-import { spawnSync } from "../platform/spawn_sync.js";
 import { existsSync } from "node:fs";
 import { resolve, relative } from "node:path";
+import { locateTool } from "../tools/broker.js";
+import { runToolIsolated } from "../sandbox/tool_run.js";
 
 export interface IdiomFinding {
   path: string;
@@ -24,12 +25,13 @@ export interface IdiomCheckResult {
  * by design; it only ever returns findings. Correctness gates the
  * commit (verify.ts / tests.ts). Style does not.
  *
- * Skips cleanly (ran: false) if the project has no local ESLint or no
- * config — same fallback discipline as verify.ts's tsc check. This
+ * Skips cleanly (ran: false) if no ESLint is available (the project's own or one
+ * installed through `purix tools`) or the project has no config — same fallback discipline as verify.ts's tsc check. This
  * doesn't force an ESLint dependency onto every project.
  */
 export function checkIdioms(filePaths: string[], baseDir: string = process.cwd()): IdiomCheckResult {
-  const localEslint = resolve(baseDir, "node_modules/.bin/eslint");
+  // The project's own ESLint, else the pinned copy installed through `purix tools install eslint`.
+  const eslint = locateTool({ baseDir }, "eslint");
   // Full list of config file names ESLint 9+ actually resolves (flat config)
   // plus the legacy formats it still accepts, per ESLint's own documented
   // config-file resolution. Previously only 5 of these 12 were recognized —
@@ -52,18 +54,23 @@ export function checkIdioms(filePaths: string[], baseDir: string = process.cwd()
     ".eslintrc",
   ].some((f) => existsSync(resolve(baseDir, f)));
 
-  if (!existsSync(localEslint) || !hasConfig) {
+  if (!eslint || !hasConfig) {
     return { findings: [], ran: false };
   }
 
-  const result = spawnSync(
-    [localEslint, "--format", "json", "--no-error-on-unmatched-pattern", ...filePaths.map((p) => resolve(p))],
-    { cwd: baseDir, stdout: "pipe", stderr: "pipe" }
+  // T1 (security review V1): the project's own ESLint runs through the sandbox (see sandbox/tool_run.ts). If it could not run (strict
+  // isolation with no sandbox tool, or the program could not start), the style check did not happen: ran: false, never read as clean.
+  const run = runToolIsolated(
+    [...eslint.command, "--format", "json", "--no-error-on-unmatched-pattern", ...filePaths.map((p) => resolve(p))],
+    baseDir,
+    { toolHome: eslint.toolHome, what: "The style check" }
   );
+  if (run.kind === "infrastructure" || run.kind === "timed_out") return { findings: [], ran: false };
+  const result = { stdout: run.stdout };
 
   let parsed: any[];
   try {
-    parsed = JSON.parse(result.stdout.toString());
+    parsed = JSON.parse(result.stdout);
   } catch {
     return { findings: [], ran: false }; // parse failure ≠ clean, just unknown — don't fake a result
   }

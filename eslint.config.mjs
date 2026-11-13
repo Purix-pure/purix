@@ -27,6 +27,9 @@ export default tseslint.config(
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
+      // Purix keeps downloaded toolchains (a whole Python install, for the conformance run) under .purix/tmp; not our source.
+      "**/.purix/**",
+      "**/.purix-tmp/**",
       "packages/core/src/language/conformance/fixtures/**",
     ],
   },

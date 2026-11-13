@@ -6,7 +6,7 @@ already follows that a PR is expected to follow too.
 
 ## Setup
 
-See [SETUP.md](./SETUP.md) for the full local development walkthrough. The
+See [SETUP.md](../../SETUP.md) for the full local development walkthrough. The
 short version:
 
 ```bash
@@ -19,19 +19,20 @@ pnpm run test
 Node 22.13.0+ (22 line) or 24+, and pnpm@12.4.1 (see `packageManager` in the root `package.json`;
 `corepack enable` will pick it up automatically).
 
+Be kind: see [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md). For questions and bug reports, see [SUPPORT.md](../../SUPPORT.md).
+
 ## Before opening a PR
 
-Run the same four checks CI runs on every PR:
+CI runs `node scripts/purix-04-run-all.mjs` (`--list` shows every stage). Run at least these four first:
 
 ```bash
 pnpm run boundary-check   # packages/core must never import from packages/cli or packages/api
-pnpm run artifact-check   # no leftover toolchain/build artifacts committed outside .purix-tmp/
+pnpm run artifact-check   # no leftover toolchain/build artifacts committed outside .purix/tmp/
 pnpm run typecheck        # tsc --noEmit across all three packages
-pnpm run test             # the full test suite — 386 tests as of this writing
+pnpm run test             # the full test suite
 ```
 
-All four have to pass before a PR can merge — `.github/workflows/ci.yml` enforces
-this. Running them locally first saves a round trip.
+The `validate` job in `.github/workflows/ci.yml` runs them and has to pass before a PR can merge. Running them locally first saves a round trip.
 
 ## Conventions this codebase already enforces — please match them
 
@@ -53,7 +54,7 @@ this. Running them locally first saves a round trip.
   make an error go away — narrow it for real (a destructure + explicit
   `if (!x) throw`, or an explicit length/bounds check). This flag exists to
   catch a real class of bug; suppressing it locally defeats the point.
-- **TypeScript and Python only, for now.** See [BETA_SCOPE.md](./BETA_SCOPE.md)
+- **TypeScript and Python only, for now.** See [BETA_SCOPE.md](../../BETA_SCOPE.md)
   for why Rust/Go/Ruby support was removed rather than just gated off, and
   what re-adding a language actually involves.
 - **Test-support helpers over duplicated inline logic.** If you find yourself
@@ -75,9 +76,9 @@ layout.
 ## Security issues
 
 Please don't open a public issue for a security vulnerability. See
-[SECURITY.md](./SECURITY.md) for how to report one privately.
+[SECURITY.md](../../SECURITY.md) for how to report one privately.
 
 ## License
 
 By contributing, you agree your contributions are licensed under this
-repository's [Apache 2.0 license](./LICENSE).
+repository's [Apache 2.0 license](../../LICENSE).

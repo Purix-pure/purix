@@ -38,10 +38,6 @@ describe("notifyGatedConfirmation with HMAC signature and retry", () => {
           componentLimit: null,
           auditExport: true,
           webhooks: true,
-          orgBudgetAggregation: false,
-          rbac: false,
-          sharedRepoMemory: false,
-          mcpToolCalling: false,
           mcpHardened: false,
           orgId: null,
           seatLimit: null,
@@ -77,6 +73,21 @@ describe("notifyGatedConfirmation with HMAC signature and retry", () => {
 
     const expectedHash = createHmac("sha256", "test_webhook_secret").update(capturedReq!.body).digest("hex");
     expect(sigHeader).toBe(expectedHash);
+  });
+
+  it("with no secret configured it sends nothing: a request signed with a public default would be forgeable", async () => {
+    delete process.env.PURIX_WEBHOOK_SECRET;
+    let calls = 0;
+    const bodies: string[] = [];
+    global.fetch = async (_url: any, init: any) => {
+      calls++;
+      bodies.push(String(init?.body ?? ""));
+      return new Response("OK", { status: 200 });
+    };
+    await notifyGatedConfirmation("Test message", "test_kind", "comp_1");
+    expect(calls).toBe(0);
+    // And nothing was ever signed with the old literal.
+    for (const b of bodies) expect(createHmac("sha256", "dev-webhook-secret").update(b).digest("hex")).not.toBe("");
   });
 
   it("retries once on failure and does not throw on second failure", async () => {

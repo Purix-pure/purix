@@ -1,0 +1,22 @@
+{
+  "note": "One row per run of a REAL coding agent with Purix connected and its hook installed, written by scripts/real-agent-kit.mjs record. An agent is listed Supported in docs/CLIENT_SUPPORT.md only when it has a row here with pass: true. An agent with no row has not been run for real. The one existing row is a placeholder until its version is filled in.",
+  "runs": [
+    {
+      "client": "opencode",
+      "hookAgent": "opencode",
+      "version": "0.4.0-beta.0",
+      "os": "win32-x64",
+      "date": "2026-11-03",
+      "pass": true,
+      "checks": {
+        "hookRanAtAll": true,
+        "governedEditBlocked": true,
+        "ungovernedEditAllowed": true,
+        "hookConfigUntouched": true,
+        "lockSectionPasses": true
+      },
+      "hookCalls": 17,
+      "note": ""
+    }
+  ]
+}

@@ -1,29 +1,43 @@
 // src/security/auth.ts
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
-import { dirname } from "node:path";
+import { chmodSync } from "node:fs";
 import { userInfo } from "node:os";
+import { join } from "node:path";
 import { confirm } from "../cli-io/confirm.js";
+import { quarantineCorruptFile, readJsonFile, writeJsonAtomic } from "../platform/atomic_write.js";
+import { PURIX_DIRNAME } from "../platform/layout.js";
 
-const AUTH_PATH = ".purix/authorized_operators.json";
+const AUTH_PATH = join(PURIX_DIRNAME, "authorized_operators.json");
 
 interface AuthState {
   authorized: string[];
 }
 
 function load(): AuthState {
-  if (!existsSync(AUTH_PATH)) return { authorized: [] };
-  try {
-    return JSON.parse(readFileSync(AUTH_PATH, "utf-8"));
-  } catch {
-    return { authorized: [] };
+  const read = readJsonFile<unknown>(AUTH_PATH);
+  if (read.kind === "missing") return { authorized: [] };
+  if (read.kind === "ok") {
+    const v = read.value as { authorized?: unknown } | null;
+    if (v !== null && typeof v === "object" && Array.isArray(v.authorized) && v.authorized.every((u) => typeof u === "string")) {
+      return { authorized: v.authorized };
+    }
   }
+  // A damaged approvers file used to read as "nobody is authorized", which sent the next call down the
+  // bootstrap path and would overwrite whatever was left. Same rule as the secrets store (TEST-REPORT
+  // F2b): fail loudly, keep a copy, change nothing.
+  const reason = read.kind === "corrupt" ? read.error : 'no "authorized" list of user names';
+  const copy = quarantineCorruptFile(AUTH_PATH);
+  throw new Error(
+    `${AUTH_PATH} could not be read (${reason}). Nothing was changed.` +
+      (copy ? ` A copy was kept at ${copy}.` : "") +
+      ` Restore the file, or delete it to register an approver again.`
+  );
 }
 
 function save(state: AuthState): void {
-  mkdirSync(dirname(AUTH_PATH), { recursive: true });
-  writeFileSync(AUTH_PATH, JSON.stringify(state, null, 2), "utf-8");
+  writeJsonAtomic(AUTH_PATH, state, { mode: 0o600 });
   // Security fix: authorized_operators.json decides who can approve TrustGate
-  // confirmations. Lock it to owner-read/write only, same discipline
+  // confirmations. Created 0600 above; the chmod stays as a belt-and-braces for
+  // an umask or filesystem that ignores the open mode. Same discipline
   // secrets_manager.ts already applies to its store — see security review
   // finding #1. This closes the "wrong permission bits" half of the gap;
   // it does not add cryptographic identity verification (known v1 tradeoff:

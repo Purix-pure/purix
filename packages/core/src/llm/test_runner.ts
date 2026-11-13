@@ -75,3 +75,37 @@ import assert from "node:assert/strict";
 ${explicit}`;
   }
 }
+
+// ---- AI-04: guidance keyed by the project's language -------------------------------------------------------------
+//
+// The greenfield prompt used to assume TypeScript on Node whatever the project was. Preflight now chooses and saves
+// the language, so the prompt follows it. This table is the one place that maps a language id to prompt text, until the
+// language provider interface grows a guidance method (ADR-017); nothing else in llm/ names a language.
+
+const LANGUAGE_LABELS: Record<string, string> = { typescript: "TypeScript", python: "Python" };
+
+const PYTHON_TEST_GUIDANCE = `This project uses pytest. Any test file must be named test_<module>.py, sit next to the module or in a tests/ folder, and use plain assert statements with test functions named test_*.
+Import the module under test explicitly; do not rely on the working directory being on sys.path by accident.`;
+
+export interface GreenfieldLanguage {
+  /** Display name used in the prompt sentence, e.g. "Python". */
+  label: string;
+  /** The paragraph telling the model how tests are written and run for this language. */
+  testGuidance: string;
+}
+
+/**
+ * Prompt text for a project language. TypeScript keeps today's runner-detection text byte for byte; Python gets pytest
+ * guidance; a language with no entry here gets a neutral sentence rather than another language's rules.
+ */
+export function greenfieldLanguage(language: string, baseDir: string = process.cwd()): GreenfieldLanguage {
+  const label = LANGUAGE_LABELS[language] ?? language;
+  switch (language) {
+    case "typescript":
+      return { label, testGuidance: testRunnerGuidance(detectTestRunner(baseDir)) };
+    case "python":
+      return { label, testGuidance: PYTHON_TEST_GUIDANCE };
+    default:
+      return { label, testGuidance: `Write any test file with the standard test framework for ${label}, and import everything the test uses explicitly.` };
+  }
+}

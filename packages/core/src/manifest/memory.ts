@@ -1,8 +1,10 @@
 // src/manifest/memory.ts
 import { existsSync, appendFileSync, readFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { scrubFreeText } from "../security/secrets.js";
+import { PURIX_DIRNAME } from "../platform/layout.js";
 
-const MEMORY_LOG_PATH = ".purix/memory/log.jsonl";
+const MEMORY_LOG_PATH = join(PURIX_DIRNAME, "memory", "log.jsonl");
 
 /** Sentinel component_id for repo-wide conventions/decisions not tied to one component. */
 export const GLOBAL_SCOPE = "*";
@@ -21,10 +23,23 @@ export interface MemoryEntry {
  * "past design decisions," and not every decision comes out of an
  * escalation.
  */
-export function recordMemory(entry: Omit<MemoryEntry, "timestamp">): void {
+export function recordMemory(entry: Omit<MemoryEntry, "timestamp">): { scrubbedCount: number } {
+  // The log sits in the working tree (Team-tier shared memory is built on it,
+  // ADR-036) and its notes are placed into LLM prompts, so a secret typed into
+  // a note would be committed and later sent to a provider. Scrub before the
+  // write, with the same secret definition ADR-003 uses for LLM-bound text
+  // (beta test report 2026-09-30, problem 2).
+  const summary = scrubFreeText(entry.summary);
+  const detail = entry.detail === undefined ? undefined : scrubFreeText(entry.detail);
   mkdirSync(dirname(MEMORY_LOG_PATH), { recursive: true });
-  const full: MemoryEntry = { ...entry, timestamp: new Date().toISOString() };
+  const full: MemoryEntry = {
+    ...entry,
+    summary: summary.text,
+    ...(detail ? { detail: detail.text } : {}),
+    timestamp: new Date().toISOString(),
+  };
   appendFileSync(MEMORY_LOG_PATH, JSON.stringify(full) + "\n", "utf-8");
+  return { scrubbedCount: summary.scrubbedCount + (detail?.scrubbedCount ?? 0) };
 }
 
 function readAllEntries(): MemoryEntry[] {

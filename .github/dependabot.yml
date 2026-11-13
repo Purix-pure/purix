@@ -1,0 +1,22 @@
+# A4 (problem catalogue 2026-11-07): without this, a security fix in a dependency is noticed only when someone runs
+# `purix audit` by hand. Weekly, grouped so one pull request carries the minor and patch updates of a group.
+# Dependabot's "npm" ecosystem also reads pnpm-lock.yaml. Not run yet: GitHub checks this file when it lands on the default branch.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # The workflows pin actions by commit; this is what moves those pins on purpose instead of by accident.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -69,7 +69,14 @@ export function registerBackupCommands(program: Command) {
     .description("Force a reconciliation pass for crash-interrupted operations")
     .action(async () => {
       try {
-        const { reconcilePendingOperations } = await import("@purix/core/state/reconcile");
+        const [{ reconcilePendingOperations }, { storeExists }] = await Promise.all([
+          import("@purix/core/state/reconcile"),
+          import("@purix/core/manifest/store"),
+        ]);
+        if (!storeExists()) {
+          console.log("No Purix state here yet, so there is nothing to reconcile.");
+          return;
+        }
         await reconcilePendingOperations();
         console.log("Reconciliation check complete.");
       } catch (err) {

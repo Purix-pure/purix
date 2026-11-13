@@ -54,7 +54,7 @@ describe("runTestsWithQuarantine (real tsx)", { skip }, () => {
     expect(r.status).toBe("pass");
     expect(r.quarantinedFailures).toEqual([]);
   });
-  it("reports no_tests when no sibling test file exists", () => {
+  it("reports no_tests when no related test exists", () => {
     expect(runTestsWithQuarantine("comp-none", ["src/a.ts"], dir).status).toBe("no_tests");
   });
   it("fails a test that fails again on the re-run, naming it", () => {
@@ -75,9 +75,44 @@ describe("runTestsWithQuarantine (real tsx)", { skip }, () => {
     expect(r.status).toBe("fail");
     expect((r.reason ?? "").length).toBeGreaterThan(0);
   });
-  it("passes when the test file runs cleanly but declares no tests", () => {
+  // A6-1 (research 06, ADR-069 count rule): a run that exercised nothing is NOT TESTED, whatever the exit code said. It used to
+  // be "pass" (this test asserted that). "no_tests" is the status every consumer already reads as "not tested, not a pass,
+  // not worth a repair"; the changed source files travel in discovery.uncovered, which sandbox.ts turns into the Not-Tested trailer.
+  it("is NOT TESTED, not a pass, when the test file runs cleanly but declares no tests", () => {
     testFile("const unused = 1; void unused;");
-    expect(runTestsWithQuarantine("comp-empty", ["src/a.ts"], dir).status).toBe("pass");
+    const r = runTestsWithQuarantine("comp-empty", ["src/a.ts"], dir);
+    expect(r.status).toBe("no_tests");
+    expect(r.notRun).toBe("no_tests_ran");
+    expect(r.discovery?.uncovered).toEqual(["src/a.ts"]);
+    expect(r.reason).toMatch(/no test ran/i);
+  });
+  it("is NOT TESTED when every test is skipped", () => {
+    testFile('test("never runs", { skip: true }, () => { assert.equal(1, 2); });');
+    const r = runTestsWithQuarantine("comp-allskip", ["src/a.ts"], dir);
+    expect(r.status).toBe("no_tests");
+    expect(r.notRun).toBe("all_skipped");
+    expect(r.counts).toEqual({ passed: 0, failed: 0, skipped: 1 });
+    expect(r.discovery?.uncovered).toEqual(["src/a.ts"]);
+  });
+  it("is NOT TESTED when the only entries are todo", () => {
+    testFile('test.todo("later");');
+    const r = runTestsWithQuarantine("comp-todo", ["src/a.ts"], dir);
+    expect(r.status).toBe("no_tests");
+    expect(r.notRun).toBe("all_skipped");
+  });
+  it("passes when at least one test passed, and reports how many were skipped", () => {
+    testFile('test("adds", () => { assert.equal(1 + 1, 2); });\ntest("later", { skip: true }, () => { assert.equal(1, 2); });');
+    const r = runTestsWithQuarantine("comp-mixed", ["src/a.ts"], dir);
+    expect(r.status).toBe("pass");
+    expect(r.counts).toEqual({ passed: 1, failed: 0, skipped: 1 });
+    expect(r.notRun).toBeUndefined();
+  });
+  it("a skipped test is never re-run or 'forgiven': a failing test next to it still fails", () => {
+    testFile('test("later", { skip: true }, () => {});\ntest("broken", () => { assert.equal(1, 2); });');
+    const r = runTestsWithQuarantine("comp-skip-fail", ["src/a.ts"], dir);
+    expect(r.status).toBe("fail");
+    expect(r.reason).toContain("broken");
+    expect(r.reason).not.toContain("later");
   });
 
   it("blocks a deterministic regression of a test that has already passed several times", () => {
@@ -115,6 +150,69 @@ describe("runTestsWithQuarantine (real tsx)", { skip }, () => {
     writeFileSync(join(dir, "Dockerfile"), "FROM node:22\n");
     for (const f of ["README.md", ".gitignore", "Dockerfile"]) {
       expect(runTestsWithQuarantine("comp-docs", [f], dir).status).toBe("no_tests");
+    }
+  });
+
+  it("finds and runs a test kept in test/ that imports the changed file (the sibling rule called this untested)", () => {
+    mkdirSync(join(dir, "test"));
+    writeFileSync(join(dir, "test", "a.test.ts"), `import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { a } from "../src/a.ts";\ntest("a is 1", () => { assert.equal(a, 1); });\n`);
+    const r = runTestsWithQuarantine("comp-dir", ["src/a.ts"], dir);
+    expect(r.status).toBe("pass");
+    expect(r.discovery?.tests).toEqual(["test/a.test.ts"]);
+  });
+  it("a failing test in test/ blocks, proving the discovered test really ran", () => {
+    mkdirSync(join(dir, "test"));
+    writeFileSync(join(dir, "test", "a.test.ts"), `import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { a } from "../src/a.ts";\ntest("a is 2", () => { assert.equal(a, 2); });\n`);
+    const r = runTestsWithQuarantine("comp-dir-fail", ["src/a.ts"], dir);
+    expect(r.status).toBe("fail");
+    expect(r.reason).toContain("a is 2");
+  });
+  it("reads leaf tests inside describe() blocks, and the suite itself is not counted as a test", () => {
+    writeFileSync(join(dir, "src", "a.test.ts"), `import { describe, it } from "node:test";\nimport assert from "node:assert/strict";\ndescribe("group", () => {\n  it("one", () => { assert.ok(true); });\n  it("two", () => { assert.equal(1, 2); });\n});\n`);
+    const r = runTestsWithQuarantine("comp-describe", ["src/a.ts"], dir);
+    expect(r.status).toBe("fail");
+    expect(r.reason).toContain("two");
+    expect(r.reason).not.toContain("group");
+    expect(r.reason).not.toContain("one");
+  });
+  it("a failing hook in a suite (no failing child) still fails instead of being swallowed as a rollup", () => {
+    writeFileSync(join(dir, "src", "a.test.ts"), `import { describe, it, before } from "node:test";\nimport assert from "node:assert/strict";\ndescribe("needs setup", () => {\n  before(() => { throw new Error("setup broke"); });\n  it("never runs", () => { assert.ok(true); });\n});\n`);
+    expect(runTestsWithQuarantine("comp-hook", ["src/a.ts"], dir).status).toBe("fail");
+  });
+  it("no_tests says what is uncovered and why, so it can be reported as 'not tested'", () => {
+    const r = runTestsWithQuarantine("comp-unc", ["src/a.ts"], dir);
+    expect(r.status).toBe("no_tests");
+    expect(r.reason).toContain("src/a.ts");
+    expect(r.discovery?.uncovered).toEqual(["src/a.ts"]);
+  });
+  it("runs a changed JavaScript file's tests too (the old rule ignored everything but .ts)", () => {
+    mkdirSync(join(dir, "lib"));
+    writeFileSync(join(dir, "lib", "m.js"), "export const m = 3;\n");
+    writeFileSync(join(dir, "lib", "m.test.js"), `import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { m } from "./m.js";\ntest("m", () => { assert.equal(m, 3); });\n`);
+    const r = runTestsWithQuarantine("comp-js", ["lib/m.js"], dir);
+    expect(r.status).toBe("pass");
+    expect(r.discovery?.tests).toEqual(["lib/m.test.js"]);
+  });
+});
+
+describe("runTestsWithQuarantine with no runner available", () => {
+  it("reports not_installed with the purix tools hint instead of reaching for the network", () => {
+    const d = mkdtempSync(join(tmpdir(), "purix-norunner-"));
+    const prev = process.cwd();
+    try {
+      process.chdir(d);
+      writeFileSync(join(d, "package.json"), JSON.stringify({ name: "p", type: "module", devDependencies: { "@types/node": "*" } }));
+      mkdirSync(join(d, "src"));
+      writeFileSync(join(d, "src", "a.ts"), "export const a = 1;\n");
+      writeFileSync(join(d, "src", "a.test.ts"), 'import { test } from "node:test";\ntest("x", () => {});\n');
+      const r = runTestsWithQuarantine("comp-norunner", ["src/a.ts"], d);
+      expect(r.status).toBe("not_installed");
+      expect(r.actionHint).toBe("Run: purix tools install tsx");
+      expect(r.reason).toMatch(/tsx is not installed/);
+    } finally {
+      process.chdir(prev);
+      closeDb();
+      safeRmSync(d);
     }
   });
 });

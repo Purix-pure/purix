@@ -49,8 +49,18 @@ const MIGRATIONS: Record<number, Migration> = {
   }),
 };
 
+/** Wording the store-problem text looks for (platform/disk_full.ts describeStoreProblem). Keep the two in step. */
+export const NEWER_SCHEMA_PHRASE = "written by a newer Purix";
+
 export function migrateManifestEntry(entry: ManifestEntry): { entry: ManifestEntry; migrated: boolean } {
   let current: any = { ...entry, schema_version: entry.schema_version ?? 1 };
+  // H4: a record from a newer Purix is refused, never read as if current and never written back (same rule as Terraform state).
+  if (current.schema_version > CURRENT_SCHEMA_VERSION) {
+    throw new Error(
+      `Component "${current.component_id}" was ${NEWER_SCHEMA_PHRASE} (its schema_version is ${current.schema_version}; this Purix reads up to ${CURRENT_SCHEMA_VERSION}). ` +
+        `Upgrade Purix, then run the command again. Nothing was changed.`
+    );
+  }
   let migrated = false;
 
   while (current.schema_version < CURRENT_SCHEMA_VERSION) {

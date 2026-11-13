@@ -1,27 +1,17 @@
 // src/verify/verify.ts
-import { spawnSync } from "../platform/spawn_sync.js";
 import { existsSync, rmSync } from "fs";
 import { resolve } from "path";
 import type { IsolationLevel } from "../sandbox/sandbox_exec.js";
+import { locateTool, missingToolHint } from "../tools/broker.js";
+import type { InfrastructureKind } from "./outcome.js";
+import { runToolIsolated, type ToolRun } from "../sandbox/tool_run.js";
+
+export type FailureErrorClass = "syntax";
 
 export type VerificationResult =
-  | { status: "pass"; isolation: IsolationLevel }
-  | { status: "fail"; reason: string }
+  | { status: "pass"; isolation: IsolationLevel; /** F06-05: true when the search for tests stopped at its file limit, so a file listed in notTested may have a test that was never looked at. Absent when the search finished. */ testSearchCut?: boolean; /** C3: which of the notTested files the cut search covered. Absent means a cut search covered all of them (and in records from before this field). */ testSearchCutFiles?: string[]; /** Changed source files that no test is related to. A pass with entries here means "checked, but NOT tested", never "tested". */ notTested?: string[]; /** A10a-1: changed files in a language Purix has no provider for. Nothing ran on them. A pass with entries here is NOT a clean pass for those files. */ notChecked?: string[]; /** F01-06: credential-looking files that were left out of the verification copy. A test that needs one of them failed or was skipped for that reason, not because of the code. */ excludedForSafety?: string[]; /** C4: findings that did not block (Low and Medium severity) and files the security code rules did not read. Absent when there are none. */ securityAdvisories?: { path: string; line: number; category: string; message: string }[]; securityNotRead?: { path: string; reason: string }[]; /** F06-04: how much of the changed code the passing test run ran. Information only. Absent when coverage was not measured at all. */ changedCoverage?: import("./changed_line_coverage.js").ChangedCoverageSummary }
+  | { status: "fail"; reason: string; /** True when a deterministic security block (secret scan / security gate) failed it: no model call can legitimately fix this, so healing and escalation must not run. */ policyBlock?: boolean; /** What kind of failure this is, when a stage knows ("syntax": the parse check failed before anything was copied). Absent means unclassified. */ errorClass?: FailureErrorClass, /** A1: set when the check did not fail because of the code but because Purix could not run it (timeout, output over the cap, no sandbox, out of resources). An entry with this set is never repair-eligible and never renders as a failure of the change. Nothing sets it yet; the stages that can (A4, A8, A10) fill it in their own sessions. Absent means the code failed. */ infrastructure?: InfrastructureKind; /** F01-06: see the pass variant. */ excludedForSafety?: string[] }
   | { status: "not_installed"; reason: string; actionHint?: string };
-
-/**
- * BUG FIX: this used to hardcode "pnpm add -D typescript" regardless of
- * which package manager the TARGET project (baseDir) actually uses —
- * misleading advice for the (likely more common) npm/yarn case. Pick the
- * hint from whichever lockfile is actually present in baseDir, defaulting
- * to npm when none is found.
- */
-function installTypescriptHint(baseDir: string): string {
-  if (existsSync(resolve(baseDir, "pnpm-lock.yaml"))) return "pnpm add -D typescript";
-  if (existsSync(resolve(baseDir, "yarn.lock"))) return "yarn add -D typescript";
-  if (existsSync(resolve(baseDir, "bun.lock")) || existsSync(resolve(baseDir, "bun.lockb"))) return "bun add -D typescript";
-  return "npm install -D typescript";
-}
 
 /**
  * BUG FIX: this used to hardcode its own tsc flag set (ES2022/ESNext/
@@ -57,17 +47,12 @@ export function verifyComponent(filePaths: string[], baseDir: string = process.c
     return { status: "fail", reason: "No files to verify" };
   }
 
-  const localTscScript = resolve(baseDir, "node_modules/typescript/bin/tsc");
-  const localTscBin = resolve(baseDir, "node_modules/.bin/tsc");
-  const command = existsSync(localTscScript)
-    ? ["node", localTscScript]
-    : existsSync(localTscBin)
-    ? [localTscBin]
-    : null;
-
-  if (!command) {
-    return { status: "not_installed", reason: "TypeScript not installed locally", actionHint: `Run: ${installTypescriptHint(baseDir)}` };
+  // The project's own tsc, else the pinned copy installed through `purix tools install typescript`.
+  const tsc = locateTool({ baseDir }, "typescript");
+  if (!tsc) {
+    return { status: "not_installed", reason: "TypeScript is not installed", actionHint: missingToolHint({ baseDir }, "typescript") };
   }
+  const command = tsc.command;
 
 
   const tsconfigPath = resolve(baseDir, "tsconfig.json");
@@ -88,9 +73,11 @@ export function verifyComponent(filePaths: string[], baseDir: string = process.c
     "--noImplicitOverride",
     ...filePaths.map((p) => resolve(p)),
   ];
-  let result = hasTsconfig
-    ? spawnSync([...command, "-p", tsconfigPath, "--noEmit"], { cwd: baseDir, stdout: "pipe", stderr: "pipe" })
-    : spawnSync(fileListArgs, { cwd: baseDir, stdout: "pipe", stderr: "pipe" });
+  // T1 (security review V1): the project's own compiler runs through the sandbox like the test runners do: network off, the project
+  // read-only, a scratch folder for writes and HOME, the allow-listed environment. Where no sandbox tool exists it runs unisolated and the
+  // result says isolation: "none"; with PURIX_STRICT_ISOLATION on it does not run and the result says so (infrastructure, not a code failure).
+  const run = (args: string[]): ToolRun => runToolIsolated(args, baseDir, { toolHome: tsc.toolHome, what: "The TypeScript check" });
+  let result = hasTsconfig ? run([...command, "-p", tsconfigPath, "--noEmit"]) : run(fileListArgs);
 
   // TEST-REPORT F11: newer tsc (7.x) refuses the file-list form when a
   // tsconfig.json exists in an ANCESTOR directory (a monorepo subfolder, or
@@ -100,23 +87,36 @@ export function verifyComponent(filePaths: string[], baseDir: string = process.c
   // This branch deliberately ignores any config, so retry once with the flag
   // the compiler itself names. Older tsc never reaches this retry (it exits 0),
   // so the flag is only ever sent to a compiler that understands it.
-  if (!hasTsconfig && result.exitCode !== 0 && /TS5112/.test(`${result.stderr.toString()}${result.stdout.toString()}`)) {
-    result = spawnSync([...fileListArgs, "--ignoreConfig"], { cwd: baseDir, stdout: "pipe", stderr: "pipe" });
+  if (!hasTsconfig && result.kind === "ran" && result.exitCode !== 0 && /TS5112/.test(`${result.stderr}${result.stdout}`)) {
+    result = run([...fileListArgs, "--ignoreConfig"]);
+  }
+
+  if (result.kind === "infrastructure") {
+    return { status: "fail", reason: result.reason, infrastructure: result.infrastructure };
+  }
+  // F02-03: a compile that hit its time limit. Unlabelled on purpose: the repair loop confirms against the original code before it decides.
+  if (result.kind === "timed_out") {
+    return { status: "fail", reason: result.reason };
   }
 
   if (result.exitCode === 0) {
-    // BUG FIX (GAPS-REPORT §2.3): this check runs `tsc` directly via
-    // spawnSync — never through runIsolated() — so it genuinely has no
-    // sandbox isolation at all, on any platform. Reporting that honestly
-    // as "none" (rather than silently omitting it, which is what let a
-    // "pass" here look identical to a real-isolation "pass" everywhere
-    // downstream) is the whole point of this field: it's not a
-    // downgrade, it's the check finally saying what it's always done.
-    return { status: "pass", isolation: "none" };
+    // The isolation level is whatever the run really had: "network-namespace" or "os-sandbox" in a sandbox, "none" without one.
+    return { status: "pass", isolation: result.isolation };
   }
 
-  const stderr = result.stderr.toString().trim();
-  const stdout = result.stdout.toString().trim();
+  const stderr = result.stderr.trim();
+  const stdout = result.stdout.trim();
+  // A project that sets `incremental` or `composite` makes tsc write a .tsbuildinfo file even with --noEmit. The sandbox keeps the project
+  // read-only, so that write fails (TS5033). That is the sandbox, not the code, so it is reported as a check that could not run.
+  if (result.isolation !== "none" && /TS5033/.test(`${stderr}\n${stdout}`)) {
+    return {
+      status: "fail",
+      reason:
+        "The TypeScript check could not run in the sandbox: this project makes tsc write a build-info file (incremental or composite), and the sandbox keeps the project read-only. " +
+        "This is not a failure of your code. Details: " + (stderr || stdout).split("\n")[0],
+      infrastructure: "sandbox_unavailable",
+    };
+  }
   return { status: "fail", reason: stderr || stdout || "tsc failed with no output" };
 }
 

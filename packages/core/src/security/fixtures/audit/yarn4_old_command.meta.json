@@ -1,0 +1,8 @@
+{
+ "tool": "yarn",
+ "version": "4.18.1",
+ "command": "yarn audit --json",
+ "exitCode": 1,
+ "stdoutBytes": 189,
+ "stderrFirstLine": ""
+}

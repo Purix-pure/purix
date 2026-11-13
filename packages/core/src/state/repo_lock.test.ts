@@ -1,10 +1,10 @@
 // packages/core/src/state/repo_lock.test.ts
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireRepoLock, releaseRepoLock } from "./repo_lock";
+import { acquireRepoLock, releaseRepoLock, assertRepoLockHeld } from "./repo_lock";
 import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("Repository Advisory Lock", () => {
@@ -63,7 +63,23 @@ describe("Repository Advisory Lock", () => {
       // in for "the OS happened to reuse this PID for something else."
       JSON.stringify({ pid: process.pid, timestamp: longAgo, updatedAt: longAgo })
     );
+    // A holder that has stopped beating has not touched the file either: the file's modification time counts as a beat now.
+    utimesSync(join(purixDir, "repo.lock"), new Date(longAgo), new Date(longAgo));
 
+    expect(() => acquireRepoLock(tmpDir)).not.toThrow();
+    releaseRepoLock(tmpDir);
+  });
+
+  // A2b clock skew: a holder whose clock ran ahead (a shared folder, a machine whose clock was later corrected) wrote a beat
+  // that is "in the future" here. Taken at face value it keeps the lock alive until our clock catches up, possibly for days.
+  it("does not let a recorded heartbeat far in the future keep a dead holder's lock alive", () => {
+    const purixDir = join(tmpDir, ".purix");
+    mkdirSync(purixDir, { recursive: true });
+    const future = new Date(Date.now() + 24 * 3600_000).toISOString();
+    const longAgo = new Date(Date.now() - 60_000);
+    const lockFile = join(purixDir, "repo.lock");
+    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, timestamp: future, updatedAt: future, token: "skewed" }));
+    utimesSync(lockFile, longAgo, longAgo);
     expect(() => acquireRepoLock(tmpDir)).not.toThrow();
     releaseRepoLock(tmpDir);
   });
@@ -83,5 +99,25 @@ describe("Repository Advisory Lock", () => {
     // since releaseRepoLock only removes a lock whose pid === process.pid.
     // Clean up directly instead of pretending we hold it.
     safeRmSync(join(purixDir, "repo.lock"), { force: true });
+  });
+
+  it("assertRepoLockHeld passes while held, and throws once the lock is gone or taken over, and before any acquire", () => {
+    expect(() => assertRepoLockHeld(tmpDir)).toThrow(/no longer holds the repository lock/);
+    acquireRepoLock(tmpDir);
+    expect(() => assertRepoLockHeld(tmpDir)).not.toThrow();
+    const lockFile = join(tmpDir, ".purix", "repo.lock");
+    const now = new Date().toISOString();
+    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, timestamp: now, updatedAt: now, token: "someone-else" }));
+    expect(() => assertRepoLockHeld(tmpDir)).toThrow(/no longer holds the repository lock/);
+    releaseRepoLock(tmpDir);
+  });
+
+  it("a recent touch of the lock file keeps a live holder's lock even when its recorded updatedAt is old", () => {
+    const purixDir = join(tmpDir, ".purix");
+    mkdirSync(purixDir, { recursive: true });
+    const longAgo = new Date(Date.now() - 60_000).toISOString();
+    writeFileSync(join(purixDir, "repo.lock"), JSON.stringify({ pid: process.pid, timestamp: longAgo, updatedAt: longAgo, token: "t" }));
+    // mtime is "now" (just written): this is what the heartbeat worker's touch looks like to the next acquirer
+    expect(() => acquireRepoLock(tmpDir)).toThrow(/already locked by active process PID/);
   });
 });

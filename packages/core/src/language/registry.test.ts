@@ -44,11 +44,11 @@ describe("ADR-017 Registry & Language Gating", () => {
     expect(lang).toBe("typescript");
   });
 
-  it("blocks python on free tier and throws Pro feature error", () => {
+  it("allows python on the free tier (every language is free)", () => {
     process.env.PURIX_DEV_TIER = "free";
     const config = createConfigStore(tmpDir);
     config.set("language", "python");
-    expect(() => resolveLanguage(undefined, tmpDir)).toThrow(/Pro feature/);
+    expect(resolveLanguage(undefined, tmpDir)).toBe("python");
   });
 
   it("allows python on pro tier", () => {

@@ -1,0 +1,8 @@
+{
+ "tool": "pnpm",
+ "version": "11.28.11",
+ "command": "pnpm audit --json",
+ "exitCode": 0,
+ "stdoutBytes": 274,
+ "stderrFirstLine": ""
+}

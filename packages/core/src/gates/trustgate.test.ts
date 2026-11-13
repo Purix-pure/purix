@@ -135,6 +135,24 @@ describe("hasTestCoverage (filesystem-backed)", () => {
     expect(hasTestCoverage([{ path: "foo.ts" }], tmpDir)).toBe(false);
   });
 
+  it("finds a test in test/ that imports the file (the old sibling rule said false)", () => {
+    mkdirSync(join(tmpDir, "test"), { recursive: true });
+    writeFileSync(join(tmpDir, "foo.ts"), "export const foo = 1;");
+    writeFileSync(join(tmpDir, "test", "foo.test.ts"), 'import { foo } from "../foo";');
+    expect(hasTestCoverage([{ path: "foo.ts" }], tmpDir)).toBe(true);
+  });
+  it("counts a test of an importer as coverage, and a .spec file", () => {
+    writeFileSync(join(tmpDir, "util.ts"), "export const u = 1;");
+    writeFileSync(join(tmpDir, "svc.ts"), 'import { u } from "./util";');
+    writeFileSync(join(tmpDir, "svc.spec.ts"), 'import "./svc";');
+    expect(hasTestCoverage([{ path: "util.ts" }], tmpDir)).toBe(true);
+  });
+  it("a source nothing relates to is not covered even when other tests exist", () => {
+    writeFileSync(join(tmpDir, "a.ts"), "export const a = 1;");
+    writeFileSync(join(tmpDir, "b.ts"), "export const b = 1;");
+    writeFileSync(join(tmpDir, "a.test.ts"), 'import "./a";');
+    expect(hasTestCoverage([{ path: "b.ts" }], tmpDir)).toBe(false);
+  });
   it("treats a test file itself as not needing its own test file, and doesn't count it toward coverage", () => {
     expect(hasTestCoverage([{ path: "foo.test.ts" }], tmpDir)).toBe(false);
   });
@@ -168,26 +186,40 @@ describe("loadDofPatterns (filesystem-backed)", () => {
 
   it("falls back to built-in defaults when dof-patterns.json is absent", () => {
     const patterns = loadDofPatterns(tmpDir);
-    expect(patterns).toContain("src/security/**");
+    expect(patterns).toContain("**/security/**");
     expect(patterns.length).toBeGreaterThan(0);
   });
 
-  it("loads custom patterns from dof-patterns.json when present and valid", () => {
+  it("adds a project's patterns to the built-in floor and never replaces it", () => {
     writeFileSync(join(tmpDir, "dof-patterns.json"), JSON.stringify(["custom/**"]));
     const patterns = loadDofPatterns(tmpDir);
-    expect(patterns).toEqual(["custom/**"]);
+    expect(patterns).toContain("custom/**");
+    // The built-in floor is still there (security review: a repository must not be able to drop it).
+    expect(patterns).toContain("**/security/**");
+    expect(patterns).toContain("**/*.env*");
+    expect(patterns).toContain(".github/workflows/**");
+    // A2a-1: the files that define the floor are always held, even under a custom list.
+    expect(patterns).toEqual(expect.arrayContaining(["dof-patterns.json", "purix.config.json", ".purix/policy.json"]));
+  });
+
+  it("refuses an empty dof-patterns.json ([]): the floor stays on (a list of blank entries too)", () => {
+    const whole = loadDofPatterns(join(tmpDir, "no-such-folder"));
+    for (const body of [[], ["", "   "]]) {
+      writeFileSync(join(tmpDir, "dof-patterns.json"), JSON.stringify(body));
+      expect(loadDofPatterns(tmpDir)).toEqual(whole);
+    }
   });
 
   it("falls back to defaults, without throwing, when the config file isn't valid JSON", () => {
     writeFileSync(join(tmpDir, "dof-patterns.json"), "{ not valid json");
     const patterns = loadDofPatterns(tmpDir);
-    expect(patterns).toContain("src/security/**");
+    expect(patterns).toContain("**/security/**");
   });
 
   it("falls back to defaults, without throwing, when the config isn't an array of strings", () => {
     writeFileSync(join(tmpDir, "dof-patterns.json"), JSON.stringify({ not: "an array" }));
     const patterns = loadDofPatterns(tmpDir);
-    expect(patterns).toContain("src/security/**");
+    expect(patterns).toContain("**/security/**");
   });
 });
 
@@ -221,5 +253,61 @@ describe("checkDeterministicOverrideFloor (pure glob matching)", () => {
 
   it("returns no hit for an empty path list", () => {
     expect(checkDeterministicOverrideFloor([], patterns).hit).toBe(false);
+  });
+});
+
+describe("hasTestCoverage: every language through its own provider", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), "purix-trustgate-py-")); });
+  afterEach(() => { safeRmSync(tmpDir); });
+
+  it("Python: a test_x.py (or a test that imports the module) is coverage; a lone .py file is not", () => {
+    mkdirSync(join(tmpDir, "tests"), { recursive: true });
+    writeFileSync(join(tmpDir, "cart.py"), "def total(): return 1\n");
+    writeFileSync(join(tmpDir, "lonely.py"), "x = 1\n");
+    writeFileSync(join(tmpDir, "tests", "test_cart.py"), "def test_c(): pass\n");
+    expect(hasTestCoverage([{ path: "cart.py" }], tmpDir)).toBe(true);
+    expect(hasTestCoverage([{ path: "lonely.py" }], tmpDir)).toBe(false);
+    writeFileSync(join(tmpDir, "tests", "test_lonely.py"), "import lonely\n");
+    expect(hasTestCoverage([{ path: "lonely.py" }], tmpDir)).toBe(true);
+  });
+
+  it("Python files used to count as covered whenever the file existed; now they need a related test", () => {
+    writeFileSync(join(tmpDir, "orphan.py"), "x = 1\n");
+    expect(hasTestCoverage([{ path: "orphan.py" }], tmpDir)).toBe(false);
+  });
+
+  it("a Python test file does not count toward coverage", () => {
+    writeFileSync(join(tmpDir, "test_a.py"), "def test_a(): pass\n");
+    expect(hasTestCoverage([{ path: "test_a.py" }], tmpDir)).toBe(false);
+  });
+
+  it("files no language claims (prompt, config, markdown) keep the legacy rule: an existing file counts, a missing one does not", () => {
+    writeFileSync(join(tmpDir, "prompt.md"), "# prompt\n");
+    expect(hasTestCoverage([{ path: "prompt.md" }], tmpDir)).toBe(true);
+    expect(hasTestCoverage([{ path: "missing.json" }], tmpDir)).toBe(false);
+  });
+
+  it("a mixed change is covered when either language has a related test", () => {
+    writeFileSync(join(tmpDir, "a.ts"), "export const a = 1;\n");
+    writeFileSync(join(tmpDir, "b.py"), "x = 1\n");
+    writeFileSync(join(tmpDir, "test_b.py"), "import b\n");
+    expect(hasTestCoverage([{ path: "a.ts" }, { path: "b.py" }], tmpDir)).toBe(true);
+  });
+});
+
+describe("TrustGate and verification isolation", () => {
+  const clean = { confidence: 0.95, contractChanging: false, hasCoverage: true, testIntegrity: { flagged: false } };
+  it("does not auto-commit when verification ran with no isolation", () => {
+    const d = evaluateTrustGate({ ...clean, isolation: "none" });
+    expect(d.action).toBe("human_confirm");
+    expect(d.reason).toMatch(/no isolation/);
+  });
+  it("still auto-commits when isolated or when the caller gives no isolation", () => {
+    expect(evaluateTrustGate({ ...clean, isolation: "bwrap" }).action).toBe("auto_commit");
+    expect(evaluateTrustGate(clean).action).toBe("auto_commit");
+  });
+  it("does not turn an abort into a confirm", () => {
+    expect(evaluateTrustGate({ ...clean, confidence: 0.2, isolation: "none" }).action).toBe("abort");
   });
 });

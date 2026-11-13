@@ -22,7 +22,10 @@ export function registerMemoryCommands(program: Command) {
           return;
         }
       }
-      recordMemory({ component_id: opts.component ?? GLOBAL_SCOPE, kind: "decision", summary: note });
+      const { scrubbedCount } = recordMemory({ component_id: opts.component ?? GLOBAL_SCOPE, kind: "decision", summary: note });
+      if (scrubbedCount > 0) {
+        console.warn(`🔒 Redacted ${scrubbedCount} secret-shaped value(s) from the note before saving it. Repository Memory is meant for conventions and decisions, not credentials.`);
+      }
       console.log(opts.component ? `✅ Recorded under "${opts.component}".` : `✅ Recorded as a repo-wide convention.`);
     });
 }

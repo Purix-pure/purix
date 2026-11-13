@@ -2,7 +2,20 @@
   "id": "typescript",
   "minSupportedVersion": "5.0.0",
   "tier": "free",
-  "scaffoldExtensions": [".ts", ".tsx"],
+  "scaffoldExtensions": [
+    ".ts",
+    ".tsx"
+  ],
+  "fileExtensions": [
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs"
+  ],
   "capabilities": {
     "compileOrTypeCheck": true,
     "testExecution": true,

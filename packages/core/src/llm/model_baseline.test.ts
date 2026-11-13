@@ -2,6 +2,10 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { MODEL_BASELINES, evaluateModelBaseline } from "./model_baseline";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("ADR-012 Provider/Model Escalation Baseline", () => {
   it("evaluates a correct model response successfully", () => {

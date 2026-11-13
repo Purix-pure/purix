@@ -1,0 +1,4 @@
+➤ YN0081: Unsafe http requests must be explicitly whitelisted in your configuration (127.0.0.1)
+
+➤ Errors happened when preparing the environment required to run this command.
+➤ This might be caused by packages being missing from the lockfile, in which case running "yarn install" might help.

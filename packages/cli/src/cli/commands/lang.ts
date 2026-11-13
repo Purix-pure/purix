@@ -10,7 +10,7 @@ export function registerLangCommands(program: Command) {
     .action(async () => {
       const { getLanguageProvider, getLanguagePack } = await import("@purix/core/language/registry");
       const { getEntitlements } = await import("@purix/core/licensing/tier");
-      const { getCachedOrRescan } = await import("@purix/core/language/registry_cache");
+      const { discoverLanguages } = await import("@purix/core/language/discovery");
       const baseDir = process.cwd();
       const ent = getEntitlements(baseDir);
       // Sourced from the language_registry cache (discovered from real
@@ -24,7 +24,10 @@ export function registerLangCommands(program: Command) {
       // getLanguageProvider() doesn't resolve, so a manifest without a
       // matching code-side provider degrades to "not shown" rather than
       // a crash.
-      const languages = getCachedOrRescan().map((row) => row.languageId);
+      // Read-only command: read the manifests directly. getCachedOrRescan() opens the SQLite store,
+      // which creates .purix/manifest.db in a folder that has no Purix state. `lang refresh` (a
+      // write command) still rebuilds that cache explicitly.
+      const languages = discoverLanguages().map((d) => d.manifest.id);
 
       console.log("Language Providers & Packs:");
       for (const langId of languages) {
@@ -32,9 +35,8 @@ export function registerLangCommands(program: Command) {
         const pack = getLanguagePack(langId);
         if (!prov) continue;
         const entitled = ent.allowedLanguages.includes(langId);
-        const installed = pack ? pack.isFullyInstalled(baseDir) : true;
         const tier = pack?.tier ?? "free";
-        console.log(`  • ${langId} (min v${prov.minSupportedVersion}) — installed: ${installed} — entitled: ${entitled} — tier: ${tier}`);
+        console.log(`  • ${langId} (min v${prov.minSupportedVersion}) — tools: ${await toolsSummary(baseDir, langId)} — entitled: ${entitled} — tier: ${tier}`);
       }
     });
 
@@ -64,24 +66,31 @@ export function registerLangCommands(program: Command) {
       const pack = getLanguagePack(id);
       const prov = getLanguageProvider(id);
       if (!prov) {
-        console.log(`No language provider found for "${id}".`);
+        // An unknown language is a failed lookup, not a result: a script must be able to tell (standard-10 rule 6).
+        console.error(`No language provider found for "${id}". Run "purix lang list" to see the available languages.`);
+        process.exitCode = 1;
         return;
       }
       console.log(`Language Provider & Pack: ${id} (min version ${prov.minSupportedVersion})`);
       if (pack) {
-        console.log(`Fully installed: ${pack.isFullyInstalled(baseDir)}`);
         console.log("Capabilities:");
         for (const [cap, active] of Object.entries(pack.capabilities)) {
           console.log(`  - ${cap}: ${active ? "✓" : "✗"}`);
         }
-        console.log("Tools:");
-        for (const tool of pack.tools) {
-          const inst = tool.isInstalled(baseDir);
-          const path = tool.resolveBinPath(baseDir);
-          console.log(`  - ${tool.name} (pinned v${tool.pinnedVersion}): installed=${inst}, path=${path}`);
-        }
       } else {
-        console.log(`  • Built-in language (no external tool pack required).`);
+        console.log(`  • Built-in language (no separate language pack).`);
+      }
+      // Tools are the tools broker's business: this is its answer for this language, not a second one.
+      const broker = await import("@purix/core/tools/broker");
+      const plan = broker.planForLanguages({ baseDir }, [id]);
+      console.log("Tools (managed by `purix tools`):");
+      for (const n of plan.needs) {
+        if (!n.chosen) {
+          console.log(`  - ${n.need.capability}: ${n.note ?? "nothing in the catalog"}`);
+          continue;
+        }
+        const state = n.state === "installed" ? "installed" : n.state === "project-provided" ? "provided by your project" : `missing (purix tools install ${n.chosen.entry.id})`;
+        console.log(`  - ${n.need.capability}: ${n.chosen.entry.id}@${n.chosen.entry.version} ${state}`);
       }
     });
 
@@ -92,7 +101,8 @@ export function registerLangCommands(program: Command) {
       const { runConformanceSuite } = await import("@purix/core/language/conformance/run");
       const baseDir = process.cwd();
       console.log(`Running gate-parity conformance suite for "${id}"...`);
-      const { certified, report } = await runConformanceSuite(baseDir);
+      const { createHumanGate } = await import("@purix/core/tools/consent");
+      const { report } = await runConformanceSuite(baseDir, { consent: createHumanGate() });
       const langReport = report[id];
       if (!langReport) {
         console.error(`🛑 No conformance report generated for language "${id}".`);
@@ -114,132 +124,25 @@ export function registerLangCommands(program: Command) {
       }
     });
 
-  langCmd
-    .command("install <id>")
-    .description("Install tooling for a language pack in strict sequence")
-    .action(async (id: string) => {
-      const { getLanguagePack, getLanguageProvider } = await import("@purix/core/language/registry");
-      const { requireLanguage } = await import("@purix/core/licensing/tier");
-      const { confirm } = await import("@purix/core/cli-io/confirm");
-      const baseDir = process.cwd();
-
-      const pack = getLanguagePack(id);
-      if (!pack) {
-        // TEST-REPORT F17: `lang list` reports a built-in language (provider, no pack) as
-        // installed: true, so "No language pack registered" contradicted it.
-        if (getLanguageProvider(id)) {
-          console.log(`"${id}" is built in — there is no separate tooling pack to install (it uses the project's local toolchain).`);
-          return;
-        }
-        console.error(`🛑 No language pack registered for "${id}".`);
+  // Tool installation moved to `purix tools` (ADR-060). These two names stay only to point people there.
+  for (const name of ["install", "uninstall"] as const) {
+    langCmd
+      .command(`${name} <id>`, { hidden: true })
+      .description("(moved) tool installation is handled by `purix tools`")
+      .action((id: string) => {
+        console.error(`\n🛑 \`purix lang ${name}\` no longer exists. Tools are managed in one place: \`purix tools\`.`);
+        console.error(`   See what "${id}" needs: purix tools plan --for ${id}`);
+        console.error(name === "install" ? "   Install one tool: purix tools install <id>" : "   Remove one tool: purix tools remove <id>");
         process.exitCode = 1;
-        return;
-      }
+      });
+  }
+}
 
-      // 1. Check runtime present
-      const runtimeCheck = pack.checkRuntimePresent(baseDir);
-      if (!runtimeCheck.present) {
-        console.error(`🛑 Runtime check failed: ${runtimeCheck.message ?? "required runtime not found"}`);
-        process.exitCode = 1;
-        return;
-      }
-      console.log(`  ✅ Runtime check passed.`);
-
-      // 2. Tier check
-      try {
-        requireLanguage(id);
-      } catch (err: any) {
-        console.error(`🛑 Tier check failed: ${err.message}`);
-        process.exitCode = 1;
-        return;
-      }
-      console.log(`  ✅ Tier entitlement check passed.`);
-
-      // 3. Project validity check
-      const projCheck = pack.checkProjectValid(baseDir);
-      if (!projCheck.valid) {
-        console.error(`🛑 Project validity check failed: ${projCheck.reason ?? "invalid project directory for language"}`);
-        process.exitCode = 1;
-        return;
-      }
-      console.log(`  ✅ Project validity check passed.`);
-
-      if (pack.isFullyInstalled(baseDir)) {
-        console.log(`✅ All tools for "${id}" pack are already fully installed.`);
-        return;
-      }
-
-      console.log(`Language pack "${id}" requires the following tools (pinned versions):`);
-      for (const t of pack.tools) {
-        console.log(`  - ${t.name} @ ${t.pinnedVersion}`);
-      }
-
-      const proceed = await confirm(`Install these tools now?`);
-      if (!proceed) {
-        console.log(`Installation declined.`);
-        return;
-      }
-
-      console.log(`Installing ${id} language pack tools...`);
-      const results = await pack.install(baseDir);
-      for (const r of results) {
-        if (r.ok) {
-          console.log(`  ✅ ${r.tool} installed successfully`);
-        } else {
-          console.error(`  ❌ ${r.tool} failed to install: ${r.error}`);
-        }
-      }
-
-      // 4. Extra setup if defined
-      if (pack.extraSetup) {
-        console.log(`Running extra setup for ${id}...`);
-        const setupRes = await pack.extraSetup(baseDir);
-        if (!setupRes.ok) {
-          console.error(`  ❌ Extra setup failed: ${setupRes.error}`);
-          process.exitCode = 1;
-          return;
-        }
-        console.log(`  ✅ Extra setup completed successfully.`);
-      }
-
-      if (pack.isFullyInstalled(baseDir)) {
-        console.log(`✅ Language pack "${id}" successfully installed and verified.`);
-      } else {
-        console.error(`🛑 Language pack "${id}" installation incomplete.`);
-        process.exitCode = 1;
-      }
-    });
-
-  langCmd
-    .command("uninstall <id>")
-    .description("Uninstall tools for a language pack")
-    .action(async (id: string) => {
-      const { getLanguagePack, getLanguageProvider } = await import("@purix/core/language/registry");
-      const { confirm } = await import("@purix/core/cli-io/confirm");
-      const baseDir = process.cwd();
-      const pack = getLanguagePack(id);
-      if (!pack) {
-        if (getLanguageProvider(id)) {
-          console.log(`"${id}" is built in — there is no separate tooling pack to uninstall.`);
-          return;
-        }
-        console.error(`🛑 No language pack registered for "${id}".`);
-        process.exitCode = 1;
-        return;
-      }
-
-      const proceed = await confirm(`Uninstall language pack "${id}"?`);
-      if (!proceed) {
-        console.log(`Uninstall declined.`);
-        return;
-      }
-
-      const res = await pack.uninstall(baseDir);
-      if (res.ok) {
-        console.log(`✅ Language pack "${id}" uninstalled successfully.`);
-      } else {
-        console.error(`🛑 Failed to uninstall language pack "${id}": ${res.error}`);
-        process.exitCode = 1;
-      }
-    });
+/** One short phrase for `lang list`: are the tools this language needs available here? Read-only. */
+async function toolsSummary(baseDir: string, languageId: string): Promise<string> {
+  const broker = await import("@purix/core/tools/broker");
+  const planned = broker.planForLanguages({ baseDir }, [languageId]).needs.filter((n) => n.chosen);
+  if (planned.length === 0) return "none needed";
+  const missing = planned.filter((n) => n.state === "missing").length;
+  return missing === 0 ? "ready" : `${missing} of ${planned.length} missing (purix tools plan --for ${languageId})`;
 }

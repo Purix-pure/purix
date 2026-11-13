@@ -198,3 +198,22 @@ export function formatChangeSetDiff(files: FileDiffInput[]): string {
   if (changed.length === 0) return "  (no file content changes)";
   return changed.map((f) => formatFileDiff(f)).join("\n\n");
 }
+
+/** AI-13: how many lines a file change adds and removes. `null` counts are not returned: a file too large to diff reports `exact: false` and the line totals instead. */
+export interface LineChangeCount {
+  path: string;
+  added: number;
+  removed: number;
+  /** false when the file was too large to diff line by line; added/removed are then the new and old line totals. */
+  exact: boolean;
+}
+
+export function countLineChanges(input: FileDiffInput): LineChangeCount {
+  const { path, before, after } = input;
+  const oldLines = before === null ? [] : splitLines(before);
+  const newLines = after === null ? [] : splitLines(after);
+  if (before === null || after === null) return { path, added: newLines.length, removed: oldLines.length, exact: true };
+  const rows = diffRows(oldLines, newLines);
+  if (rows === null) return { path, added: newLines.length, removed: oldLines.length, exact: false };
+  return { path, added: rows.filter((r) => r.kind === "add").length, removed: rows.filter((r) => r.kind === "remove").length, exact: true };
+}

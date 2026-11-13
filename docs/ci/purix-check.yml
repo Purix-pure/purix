@@ -1,0 +1,36 @@
+# Template: run `purix check --strict` as a required check in YOUR project's CI.
+#
+# Why this needs a committed file: Purix's local store (what it recorded about each governed file) lives in your
+# working copy or in .git/purix-state/. A CI checkout is a fresh clone and has neither. So CI verifies against
+# purix.lock.json, a small file with one SHA-256 per governed file, the same idea as a package lockfile.
+#
+# One-time setup, where you do the work:
+#     purix lock                      # writes purix.lock.json
+#     git add purix.lock.json && git commit
+# After that `purix lock` runs by itself after every change Purix lands (create, modify, ingest, adopt, delete,
+# accept-drift) as long as purix.lock.json exists, so commit it together with the change.
+#
+# What this check can and cannot say (docs/CHECK.md):
+#   It fails when a governed file differs from the lock, is missing, or the lock is damaged.
+#   It does NOT prove the change was verified, and it does not check the audit chain: both live in the local store.
+#   Anyone who edits a governed file AND the lock in one commit passes. Branch protection and review stop that:
+#   make this job a REQUIRED status check and require review on purix.lock.json (for example with CODEOWNERS).
+name: purix-check
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  purix-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Pin the version you tested with; do not use "latest" in a required check.
+      - name: Install Purix
+        run: npm install --global @purix/cli@<version>
+      - name: purix check --strict
+        run: purix check --strict

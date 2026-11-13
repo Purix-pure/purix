@@ -101,3 +101,11 @@ describe("formatChangeSetDiff", () => {
     expect(formatChangeSetDiff([{ path: "a", before: "x", after: "x" }])).toContain("no file content changes");
   });
 });
+describe("countLineChanges (AI-13)", () => {
+  it("counts added and removed lines for an edit, a new file and a deletion", async () => {
+    const { countLineChanges } = await import("./diff_format.js");
+    expect(countLineChanges({ path: "a", before: "a\nb\nc\n", after: "a\nB\nc\nd\n" })).toEqual({ path: "a", added: 2, removed: 1, exact: true });
+    expect(countLineChanges({ path: "n", before: null, after: "x\ny\n" })).toEqual({ path: "n", added: 2, removed: 0, exact: true });
+    expect(countLineChanges({ path: "d", before: "x\n", after: null })).toEqual({ path: "d", added: 0, removed: 1, exact: true });
+  });
+});

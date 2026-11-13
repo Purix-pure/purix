@@ -8,6 +8,8 @@ import { findUnsafePaths } from "../gates/path_guard.js";
 import { scanForSecrets } from "../security/secrets.js";
 import { verifyComponent } from "../verify/verify.js";
 import { getLanguageProvider, resolveLanguage } from "../language/registry.js";
+import { discoverLanguages } from "../language/discovery.js";
+import { buildExtensionTable, languageForExtensionTable, type ExtensionTable } from "../language/extension_table.js";
 import { computeSyncHash } from "../state/hash.js";
 
 export async function writeScaffold(
@@ -112,27 +114,35 @@ export async function writeScaffold(
     for (const p of writtenPaths) {
       if (existsSync(p)) rmSync(p);
     }
-    throw new Error(`Scaffold failed verification, rolled back what was written: ${verification.reason}`);
+    // A tool that is not installed has a fix the broker already knows. Dropping it left people with
+    // "TypeScript is not installed" and no next step.
+    const hint = verification.status === "not_installed" && verification.actionHint ? `. ${verification.actionHint}` : "";
+    throw new Error(`Scaffold failed verification, rolled back what was written: ${verification.reason}${hint}`);
   }
 
   return writtenPaths;
 }
 
-// Only TypeScript/JS and Python are supported in this beta (see
-// BETA_SCOPE.md); Rust/Go/Ruby extensions were removed. A file with one of
-// those extensions now falls through to resolveLanguage() below, which
-// fails closed rather than silently mis-tagging it (see audit finding 3.1).
-export const SCAFFOLD_EXTENSION_LANGUAGES: [string, string][] = [
-  [".py", "python"],
-];
+// Which language a new file belongs to, by its extension, comes from the language manifests
+// (`scaffoldExtensions`), the same source languageForFile() uses. A file whose extension no manifest
+// claims (or two claim) falls through to resolveLanguage() below, which fails closed rather than
+// silently mis-tagging it (audit finding 3.1).
+function scaffoldExtensionTable(): ExtensionTable {
+  return buildExtensionTable(
+    discoverLanguages().map((d) => {
+      const { fileExtensions: _ignored, ...manifest } = d.manifest;
+      return { ...d, manifest };
+    })
+  );
+}
 
 export function detectScaffoldLanguage(files: { path: string }[], componentId: string, targetDir: string): string {
+  const table = scaffoldExtensionTable();
   for (const file of files) {
-    for (const [ext, lang] of SCAFFOLD_EXTENSION_LANGUAGES) {
-      if (file.path.endsWith(ext)) return lang;
-    }
+    const lang = languageForExtensionTable(file.path, table);
+    if (lang !== undefined) return lang;
   }
-  // None of this plan's files have a recognized non-TS/JS extension —
+  // None of this plan's files has an extension a language manifest claims —
   // fall back to real whole-repo detection rather than a blind
   // "typescript" default. Can throw if detection is genuinely ambiguous
   // (see registry.ts) — the caller above handles that by rolling back

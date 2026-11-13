@@ -21,6 +21,7 @@
 // is a final decision — the actual name ships the day this file's
 // env vars are set for real, driven by whatever domain gets purchased.
 
+import { dataDrivenEnv } from "../platform/env.js";
 export interface BrandConfig {
   /** Display name shown in CLI banners, web UI, emails. */
   productName: string;
@@ -34,7 +35,7 @@ export interface BrandConfig {
   supportEmail: string;
   /** "From" address used by transactional email (Resend). */
   emailFrom: string;
-  /** Public GitHub org/repo slug, e.g. "purix-dev/purix" — used to build links in CLI output. */
+  /** Public GitHub org/repo slug, e.g. "purix-pure/purix" — used to build links in CLI output. */
   githubRepo: string;
   /** X/Twitter or other primary social handle shown in CLI "star us" nudges, if any. */
   socialHandle: string | null;
@@ -47,12 +48,12 @@ const DEFAULTS: BrandConfig = {
   appUrl: "https://app.purix.example",
   supportEmail: "support@purix.example",
   emailFrom: "Purix <noreply@purix.example>",
-  githubRepo: "purix-dev/purix",
+  githubRepo: "purix-pure/purix",
   socialHandle: null,
 };
 
 function env(key: string, fallback: string): string {
-  const v = process.env[key];
+  const v = dataDrivenEnv(key);
   return v && v.trim().length > 0 ? v.trim() : fallback;
 }
 
@@ -76,7 +77,7 @@ export function getBrandConfig(): BrandConfig {
     supportEmail: env("BRAND_SUPPORT_EMAIL", DEFAULTS.supportEmail),
     emailFrom: env("BRAND_EMAIL_FROM", DEFAULTS.emailFrom),
     githubRepo: env("BRAND_GITHUB_REPO", DEFAULTS.githubRepo),
-    socialHandle: process.env.BRAND_SOCIAL_HANDLE?.trim() || null,
+    socialHandle: dataDrivenEnv("BRAND_SOCIAL_HANDLE")?.trim() || null,
   };
 }
 

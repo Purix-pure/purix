@@ -4,22 +4,34 @@
 // Outbound requests include an `X-Signature` header matching the pattern used for
 // inbound Lemon Squeezy webhook verification in lemonsqueezy_webhook.ts (HMAC-SHA256 hex digest).
 
+import { purixEnv } from "../platform/env.js";
+import { netFetch } from "../platform/net.js";
 import { createHmac } from "node:crypto";
 import { getSecret } from "../security/secrets_manager.js";
 
-function getWebhookSecret(): string {
-  const envSecret = process.env.PURIX_WEBHOOK_SECRET;
+/** The one place this file writes to the terminal. */
+function warn(message: string): void {
+  console.warn(`  [notify] ${message}`);
+}
+
+/**
+ * The key the receiver uses to check the signature. There is no default: a request signed with a string that ships in the source
+ * can be forged by anyone who reads it, so with no secret configured nothing is sent (fails closed; one-day security fix,
+ * "Purix Security After the Plan").
+ */
+function getWebhookSecret(): string | null {
+  const envSecret = purixEnv("PURIX_WEBHOOK_SECRET");
   if (envSecret) return envSecret;
   try {
     const stored = getSecret("purix_webhook_secret");
     if (stored) return stored;
-  } catch { /* no webhook secret stored yet — fall back to the dev default below */ }
-  return "dev-webhook-secret";
+  } catch { /* no webhook secret stored */ }
+  return null;
 }
 
 async function fetchWithRetry(url: string, init: RequestInit, retries = 1, backoffMs = 1000): Promise<Response> {
   try {
-    const res = await fetch(url, init);
+    const res = await netFetch("webhook", url, init);
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     return res;
   } catch (err) {
@@ -45,7 +57,7 @@ export async function notifyGatedConfirmation(
   checkpointKind: string,
   componentId: string | null
 ): Promise<void> {
-  const url = process.env.PURIX_WEBHOOK_URL;
+  const url = purixEnv("PURIX_WEBHOOK_URL");
   if (!url) return;
 
   // Pro-gated (see licensing/tier.ts). Deliberately fails silent rather than
@@ -55,10 +67,16 @@ export async function notifyGatedConfirmation(
   try {
     const { getEntitlements } = await import("../licensing/tier.js");
     if (!getEntitlements().webhooks) {
-      console.warn(`  [notify] webhook delivery is a Pro feature — skipping (tier-status for details)`);
+      warn(`webhook delivery is a Pro feature — skipping (tier-status for details)`);
       return;
     }
   } catch {
+    return;
+  }
+
+  const secret = getWebhookSecret();
+  if (!secret) {
+    warn("webhook not sent: no signing secret is set (set PURIX_WEBHOOK_SECRET or store purix_webhook_secret)");
     return;
   }
 
@@ -71,7 +89,6 @@ export async function notifyGatedConfirmation(
       timestamp: new Date().toISOString(),
     };
     const bodyStr = JSON.stringify(bodyObj);
-    const secret = getWebhookSecret();
     const signature = createHmac("sha256", secret).update(bodyStr).digest("hex");
 
     await fetchWithRetry(url, {
@@ -84,6 +101,6 @@ export async function notifyGatedConfirmation(
       signal: AbortSignal.timeout(3000),
     }, 1, 1000);
   } catch (err) {
-    console.warn(`  [notify] webhook call failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    warn(`webhook call failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 }

@@ -1,15 +1,29 @@
 {
   "name": "@purix/mcp-server",
-  "version": "0.3.0-beta.0",
+  "version": "0.4.0-beta.0",
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  },
+  "mcpName": "io.github.purix-pure/purix",
+  "description": "Purix MCP server: governance pipeline (classify, verify in a sandbox, record evidence) for AI coding agents, over stdio.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/purix-pure/purix.git",
     "directory": "packages/mcp-server"
   },
+  "homepage": "https://github.com/purix-pure/purix#readme",
+  "bugs": {
+    "url": "https://github.com/purix-pure/purix/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map",
+    "NOTICE"
   ],
   "main": "./dist/server.js",
   "types": "./dist/server.d.ts",
@@ -20,8 +34,8 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@purix/core": "workspace:^0.3.0-beta.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@purix/core": "workspace:^0.4.0-beta.0"
   },
   "devDependencies": {
     "@types/node": "22.13.0",

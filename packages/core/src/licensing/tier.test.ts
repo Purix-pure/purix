@@ -27,12 +27,25 @@ describe("Licensing Tier & Entitlements", () => {
   it("defaults to free tier when not logged in", () => {
     const ent = getEntitlements(tmpDir);
     expect(ent.tier).toBe("free");
-    expect(ent.componentLimit).toBe(25);
+    expect(ent.componentLimit).toBeNull();
   });
 
-  it("enforces component limit on free tier", () => {
-    expect(() => checkComponentLimit(25)).toThrow(/Free tier tracks up to 25 components/);
-    expect(() => checkComponentLimit(24)).not.toThrow();
+  it("does not cap components on the free tier", () => {
+    expect(() => checkComponentLimit(25)).not.toThrow();
+    expect(() => checkComponentLimit(10_000)).not.toThrow();
+  });
+
+  it("still enforces a limit when the tier carries one", () => {
+    const saved = { env: process.env.NODE_ENV, tier: process.env.PURIX_DEV_TIER };
+    process.env.NODE_ENV = "test";
+    process.env.PURIX_DEV_TIER = "capped";
+    try {
+      expect(() => checkComponentLimit(25)).toThrow(/tracks up to 25 components/);
+      expect(() => checkComponentLimit(24)).not.toThrow();
+    } finally {
+      if (saved.env === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved.env;
+      if (saved.tier === undefined) delete process.env.PURIX_DEV_TIER; else process.env.PURIX_DEV_TIER = saved.tier;
+    }
   });
 
   it("handles cache clearing and staleness checks", () => {
@@ -55,10 +68,6 @@ describe("Licensing Tier & Entitlements", () => {
             componentLimit: null,
             auditExport: true,
             webhooks: true,
-            orgBudgetAggregation: false,
-            rbac: false,
-            sharedRepoMemory: false,
-            mcpToolCalling: false,
             mcpHardened: false,
             orgId: null,
             seatLimit: null,
@@ -80,10 +89,6 @@ describe("Licensing Tier & Entitlements", () => {
             componentLimit: null,
             auditExport: true,
             webhooks: true,
-            orgBudgetAggregation: false,
-            rbac: false,
-            sharedRepoMemory: false,
-            mcpToolCalling: false,
             mcpHardened: false,
             orgId: null,
             seatLimit: null,
@@ -154,7 +159,7 @@ describe("Licensing Tier & Entitlements", () => {
     });
 
     const res = await refreshEntitlements(tmpDir);
-    expect(res.entitlements.componentLimit).toBe(25);
+    expect(res.entitlements.componentLimit).toBeNull();
   });
 
   it("refreshEntitlements handles offline gracefully (ApiUnreachableError)", async () => {

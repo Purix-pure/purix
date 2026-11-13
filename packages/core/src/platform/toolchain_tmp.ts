@@ -3,43 +3,58 @@
 // Single rule, everywhere: no language provider ever writes a venv, package
 // cache, or build/target directory directly into baseDir. Everything a
 // toolchain generates on its own (not authored by a human) goes under
-// baseDir/.purix-tmp/<lang>/ instead — one predictable, git-ignored folder
-// name, namespaced per language so a project using Python + Go + Rust
-// doesn't collide.
+// baseDir/.purix/tmp/<lang>/ — see platform/layout.ts for why that is one folder
+// inside .purix rather than a sibling .purix-tmp (the layout before 2026-10).
+// Namespaced per language so a project using several doesn't collide.
 //
-// baseDir here follows the same convention state/config.ts already uses for
-// .purix/ (join(baseDir, ".purix", ...), no upward directory search) — for
-// a real end-user project baseDir IS the project root, so this already
-// produces a single tmp folder at project root, which is exactly the
-// existing model. For Purix's own conformance fixtures, each scenario
-// subdirectory (fixtures/go/passing/, fixtures/go/broken_compile/, ...) is
-// legitimately its own tiny isolated project — it has its own go.mod /
-// Cargo.toml / Gemfile — so getting one .purix-tmp per scenario there is
-// correct, not a violation of "one tmp folder per project."
+// baseDir follows the same convention state/config.ts uses for .purix/
+// (join(baseDir, ".purix", ...), no upward directory search). For Purix's own
+// conformance fixtures each scenario directory is legitimately its own tiny
+// project, so it gets its own .purix/tmp — correct, not a violation.
 //
-// Language-specific wiring still needs doing at each call site (setting
-// RUFF_CACHE_DIR, and pointing venv creation + compiled-test-binary output
-// here) — this file only defines and creates the shared destination.
+// Language-specific wiring still happens at each call site (RUFF_CACHE_DIR, ...);
+// this file only defines and creates the shared destination. Tools themselves
+// (their virtualenvs and node_modules) are NOT here: the tools broker installs
+// them under .purix/tools/ (src/tools, ADR-060).
 //
-// Only "python" is supported in this beta (see BETA_SCOPE.md); Go/Rust/Ruby
-// were removed. If a language is reintroduced, add it back to this union
-// AND to core/src/language/registry.ts's provider list together, so the
-// two can't drift the way they had (see audit finding 3.1).
+// Only "python" is supported in this beta (see BETA_SCOPE.md). If a language is
+// reintroduced, add it to this union AND to language/registry.ts together.
 
 import { existsSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { purixDir, purixTmpRoot } from "./layout.js";
 
 export type ToolchainLang = "python";
 
-const TOOLCHAIN_TMP_DIRNAME = ".purix-tmp";
+/**
+ * Where baseDir/.purix/tmp/<lang> is (or would be). Creates NOTHING. Use this for lookups and
+ * "is it installed?" checks, so a read-only command never leaves a .purix folder behind.
+ * Only install paths should call resolveToolchainTmp(), which creates the folder.
+ */
+export function toolchainPath(baseDir: string, lang: ToolchainLang): string {
+  return join(purixDir(baseDir), "tmp", lang);
+}
 
 /**
- * Returns baseDir/.purix-tmp/<lang>, creating it (and any missing parent
+ * A working directory for probing a bare command name ("python --version", "pytest --version").
+ * The rule in this file's header still holds: a probe must never run with cwd inside the project
+ * (the Windows py launcher can self-install a runtime into its cwd). When the toolchain folder
+ * already exists that is where the probe runs; when it does not, the OS temp dir is used instead of
+ * creating the folder just to look around. Creates NOTHING.
+ */
+export function toolchainProbeCwd(baseDir: string, lang: ToolchainLang): string {
+  const dir = toolchainPath(baseDir, lang);
+  return existsSync(dir) ? dir : tmpdir();
+}
+
+/**
+ * Returns baseDir/.purix/tmp/<lang>, creating it (and any missing parent
  * segments) if it doesn't exist yet. Callers pass this as the venv location,
  * or use it to build a cache/target/bundle subpath.
  */
 export function resolveToolchainTmp(baseDir: string, lang: ToolchainLang): string {
-  const dir = join(baseDir, TOOLCHAIN_TMP_DIRNAME, lang);
+  const dir = join(purixTmpRoot(baseDir), lang);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -48,7 +63,7 @@ export function resolveToolchainTmp(baseDir: string, lang: ToolchainLang): strin
 
 /**
  * Convenience for the common "give me a named subfolder under this
- * language's tmp dir" case — e.g. toolchainSubdir(baseDir, "python", "venv").
+ * language's tmp dir" case — e.g. toolchainSubdir(baseDir, "python", "ruff_cache").
  */
 export function toolchainSubdir(baseDir: string, lang: ToolchainLang, name: string): string {
   return join(resolveToolchainTmp(baseDir, lang), name);

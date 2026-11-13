@@ -191,7 +191,8 @@ describe("Part 2: config hot reload — cross-process visibility", () => {
       // reclaims it; that's the documented, intended tradeoff of adding
       // real mutual exclusion, not a leak.
       if (entry === "config.lock") continue;
-      expect(entry).toMatch(/^\.config\.json\.\d+\..*\.tmp$/);
+      // The one atomic writer names its temp file ".<12 hex>.tmp" (platform/atomic_write.ts).
+      expect(entry).toMatch(/^\.[0-9a-f]{12}\.tmp$/);
     }
   });
 

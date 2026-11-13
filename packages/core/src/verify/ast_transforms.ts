@@ -122,6 +122,13 @@ function findTarget(
   return { ok: true, sourceFile, body: bodyResult.body };
 }
 
+/** The result keeps the file's own line endings. The transforms write their new text with "\n"; a CRLF file would otherwise come back mixed. */
+function matchLineEndings(original: string, output: string): string {
+  const crlf = (original.match(/\r\n/g) ?? []).length;
+  const bareLf = (original.match(/(?<!\r)\n/g) ?? []).length;
+  return crlf > bareLf ? output.replace(/\r?\n/g, "\r\n") : output;
+}
+
 // ---------------------------------------------------------------------------
 // add_error_handling: wraps a whole async function body in a capped retry loop.
 // ---------------------------------------------------------------------------
@@ -151,9 +158,20 @@ export function applyErrorHandlingTransform(
     return { ok: false, reason: `"${functionName}" already has a Purix-generated retry wrapper — refusing to double-wrap` };
   }
 
-  const originalBodyText = statements.map((s) => s.getFullText()).join("");
+  // A directive prologue ("use server", "use strict") only works as the first statements of the function, so it stays outside the loop.
+  let directiveCount = 0;
+  while (directiveCount < statements.length) {
+    const st = statements[directiveCount]!;
+    if (Node.isExpressionStatement(st) && Node.isStringLiteral(st.getExpression())) directiveCount++;
+    else break;
+  }
+  if (directiveCount === statements.length) {
+    return { ok: false, reason: `"${functionName}" has only directives in its body — nothing to wrap` };
+  }
+  const directiveText = statements.slice(0, directiveCount).map((s) => s.getFullText()).join("");
+  const originalBodyText = statements.slice(directiveCount).map((s) => s.getFullText()).join("");
 
-  const newBodyText = `{
+  const newBodyText = `{${directiveText}
   let __purix_lastError: unknown;
   for (let __purix_attempt = 1; __purix_attempt <= ${maxRetries}; __purix_attempt++) {
     try {
@@ -167,7 +185,7 @@ ${originalBodyText}
 }`;
 
   body.replaceWithText(newBodyText);
-  return { ok: true, content: sourceFile.getFullText() };
+  return { ok: true, content: matchLineEndings(content, sourceFile.getFullText()) };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,8 +299,11 @@ export function applyControlFlowTransform(
   const replacedSpan = statements.slice(minIdx, maxIdx + 1).map((s) => s.getFullText()).join("");
   const leadingTrivia = replacedSpan.match(/^\s*/)?.[0] ?? "\n  ";
 
-  const newBodyText = `{${before}${leadingTrivia}${newStatementText}${after}}`;
+  // The whitespace between the last statement and the closing brace belongs to the brace, not to any statement, so joining the
+  // statements dropped it and printed `return [a, b];}`. Put it back.
+  const closingTrivia = body.getText().match(/\s*(?=\}$)/)?.[0] ?? "";
+  const newBodyText = `{${before}${leadingTrivia}${newStatementText}${after}${closingTrivia}}`;
 
   body.replaceWithText(newBodyText);
-  return { ok: true, content: sourceFile.getFullText() };
+  return { ok: true, content: matchLineEndings(content, sourceFile.getFullText()) };
 }

@@ -1,10 +1,12 @@
 // packages/core/src/language/conformance/run.ts
-import { writeFileSync, readFileSync, existsSync, cpSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, cpSync, mkdirSync } from "node:fs";
+import { createFileExclusive } from "../../platform/atomic_write.js";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "../../platform/spawn_sync.js";
 import { getLanguageProvider } from "../registry.js";
-import { pythonPack } from "../providers/python.pack.js";
+import { installTool, locateTool } from "../../tools/broker.js";
+import type { ConsentGate } from "../../tools/consent.js";
+import { purixDir, PURIX_DIRNAME } from "../../platform/layout.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,7 +33,7 @@ function findRepoRoot(startDir: string): string {
 /**
  * Copies committed fixture source (packages/core/src/language/conformance/
  * fixtures/<lang>/) into a disposable runtime workspace at the repo root:
- * .purix-tmp/conformance/<lang>/. This is the ONLY place a fixture's own
+ * .purix/tmp/conformance/<lang>/. This is the ONLY place a fixture's own
  * node_modules / venv / package.json / lockfile / any installed or
  * generated file is allowed to live — packages/ must only ever contain
  * the authored .ts/.py fixture source itself, nothing installed or
@@ -40,7 +42,7 @@ function findRepoRoot(startDir: string): string {
  * already present), so this stays fast on repeat runs.
  */
 function prepareRuntimeWorkspace(repoRoot: string, langId: string, sourceFixtureDir: string): string {
-  const runtimeDir = resolve(repoRoot, ".purix-tmp", "conformance", langId);
+  const runtimeDir = resolve(purixDir(repoRoot), "tmp", "conformance", langId);
   mkdirSync(runtimeDir, { recursive: true });
   if (existsSync(sourceFixtureDir)) {
     cpSync(sourceFixtureDir, runtimeDir, { recursive: true });
@@ -49,49 +51,27 @@ function prepareRuntimeWorkspace(repoRoot: string, langId: string, sourceFixture
 }
 
 /**
- * Ensures TypeScript is installed LOCALLY to runtimeDir — never globally,
- * never inside packages/. verify.ts's own compileOrTypeCheck looks for
- * node_modules/typescript/bin/tsc scoped to whatever baseDir it's given
- * (no upward search, no reliance on a global `tsc`), by design, so this
- * just makes sure that local install exists before the checks run.
+ * The tools a language's fixtures need, by tools-broker id. Versions are the catalog's (pinned and
+ * hash-locked), so a certification result does not change when a new major ships (TEST-REPORT F11).
+ * The conformance run itself installs nothing by hand: it asks the broker, which verifies hashes,
+ * skips install scripts, and records what it did.
  */
-// TEST-REPORT F11: this used to run `npm install typescript tsx` with no
-// versions, so it pulled `latest` — TypeScript 7.0.2 at the time of testing,
-// while the repo itself is pinned to 5.7.2 — and it never installed ESLint at
-// all (so the idiom_check fixture could never pass). Pin all three to the
-// repo's own versions so a certification result doesn't change when a new
-// major ships, and re-install if a previously cached copy has a different
-// version (an existing .purix-tmp may still hold the old unpinned install).
-const CONFORMANCE_TS_VERSION = "5.7.2";
-const CONFORMANCE_TSX_VERSION = "4.19.2";
-const CONFORMANCE_ESLINT_VERSION = "9.17.0";
+const CONFORMANCE_TOOLS: Record<string, readonly string[]> = {
+  typescript: ["typescript", "tsx", "eslint"],
+  python: ["pyright", "pytest", "ruff", "pip-audit"],
+};
 
-function installedVersion(runtimeDir: string, pkg: string): string | null {
-  try {
-    const parsed = JSON.parse(readFileSync(resolve(runtimeDir, "node_modules", pkg, "package.json"), "utf8")) as { version?: string };
-    return parsed.version ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function ensureTypeScriptInstalled(runtimeDir: string): void {
-  const tscMarker = resolve(runtimeDir, "node_modules", "typescript", "bin", "tsc");
-  const upToDate =
-    existsSync(tscMarker) &&
-    installedVersion(runtimeDir, "typescript") === CONFORMANCE_TS_VERSION &&
-    installedVersion(runtimeDir, "eslint") === CONFORMANCE_ESLINT_VERSION;
-  if (upToDate) return;
-  console.log(`  Installing TypeScript ${CONFORMANCE_TS_VERSION}, tsx and ESLint locally into ${runtimeDir} (not global, not inside packages/)...`);
-  const res = spawnSync(
-    [
-      "npm", "install", "--no-save", "--no-audit", "--no-fund", "--prefix", runtimeDir,
-      `typescript@${CONFORMANCE_TS_VERSION}`, `tsx@${CONFORMANCE_TSX_VERSION}`, `eslint@${CONFORMANCE_ESLINT_VERSION}`,
-    ],
-    { cwd: runtimeDir, stdout: "pipe", stderr: "pipe" }
-  );
-  if (res.exitCode !== 0) {
-    console.warn(`  ⚠ Failed to install TypeScript into ${runtimeDir}: ${res.stderr.toString().trim() || res.stdout.toString().trim()}`);
+/**
+ * Makes sure each tool is available to the workspace. A tool the workspace can already locate
+ * (installed earlier, cached across runs) is left alone. Without a consent gate nothing is installed
+ * and the missing tool shows up as a failed check, with the broker's own hint.
+ */
+async function ensureToolsInstalled(runtimeDir: string, langId: string, consent: ConsentGate | undefined): Promise<void> {
+  for (const id of CONFORMANCE_TOOLS[langId] ?? []) {
+    if (locateTool({ baseDir: runtimeDir }, id)) continue;
+    console.log(`  Installing ${id} into ${runtimeDir}/${PURIX_DIRNAME}/tools/ (pinned, hash-checked; not global, not inside packages/)...`);
+    const res = await installTool({ baseDir: runtimeDir, ...(consent ? { consent } : {}) }, id);
+    if (!res.ok) console.warn(`  ⚠ Could not install ${id}: ${res.message}${res.hint ? ` ${res.hint}` : ""}`);
   }
 }
 
@@ -103,8 +83,8 @@ function ensureTypeScriptInstalled(runtimeDir: string): void {
  */
 function ensureEslintConfig(runtimeDir: string): void {
   const configPath = resolve(runtimeDir, "eslint.config.mjs");
-  if (existsSync(configPath)) return;
-  writeFileSync(
+  // Create-if-absent in one step (no existsSync-then-write gap); an existing file is left as it is.
+  createFileExclusive(
     configPath,
     `export default [\n  { files: ["**/*.ts"], rules: { "no-var": "error" } },\n];\n`
   );
@@ -123,22 +103,20 @@ function ensureEslintConfig(runtimeDir: string): void {
 function ensureAuditManifest(runtimeDir: string): void {
   const pkgPath = resolve(runtimeDir, "package.json");
   const lockPath = resolve(runtimeDir, "package-lock.json");
-  if (!existsSync(pkgPath)) {
-    writeFileSync(
-      pkgPath,
-      JSON.stringify(
-        {
-          name: "purix-conformance-typescript-fixture",
-          version: "1.0.0",
-          private: true,
-        },
-        null,
-        2
-      )
-    );
-  }
-  if (!existsSync(lockPath)) {
-    writeFileSync(
+  createFileExclusive(
+    pkgPath,
+    JSON.stringify(
+      {
+        name: "purix-conformance-typescript-fixture",
+        version: "1.0.0",
+        private: true,
+      },
+      null,
+      2
+    )
+  );
+  {
+    createFileExclusive(
       lockPath,
       JSON.stringify(
         {
@@ -158,19 +136,12 @@ function ensureAuditManifest(runtimeDir: string): void {
 }
 
 /**
- * Ensures Python's pinned toolchain (pyright/pytest/ruff/pip-audit) is
- * installed into runtimeDir's own .purix-tmp/python/venv — reuses the
- * EXACT same mechanism `purix lang install python` already uses for real
- * projects (see python.pack.ts), just pointed at the fixture runtime
- * workspace as baseDir instead of a user's project.
+ * The Python audit only audits a named requirements.txt (python.ts: pip-audit with no target would audit Purix's own
+ * tool venv, not the project), so a workspace without one always reports ran:false. The TypeScript side gets the same
+ * treatment from ensureAuditManifest. One pinned, tiny, dependency-free package gives pip-audit something real to scan.
  */
-async function ensurePythonInstalled(runtimeDir: string): Promise<void> {
-  if (pythonPack.isFullyInstalled(runtimeDir)) return;
-  console.log(`  Installing Python toolchain locally into ${runtimeDir}/.purix-tmp/python/ (not global, not inside packages/)...`);
-  const results = await pythonPack.install(runtimeDir);
-  for (const r of results) {
-    if (!r.ok) console.warn(`  ⚠ Failed to install ${r.tool}: ${r.error}`);
-  }
+function ensureAuditRequirements(runtimeDir: string): void {
+  createFileExclusive(resolve(runtimeDir, "requirements.txt"), "six==1.16.0\n");
 }
 
 interface LanguageParityStatus {
@@ -185,7 +156,15 @@ interface LanguageParityStatus {
   fixtures: Array<{ name: string; passed: boolean; error?: string }>;
 }
 
-export async function runConformanceSuite(baseDir: string = process.cwd()): Promise<{ certified: boolean; report: Record<string, LanguageParityStatus> }> {
+export interface ConformanceOptions {
+  /** How tool installs are approved. Omitted: nothing is installed and missing tools fail their checks. */
+  consent?: ConsentGate;
+}
+
+export async function runConformanceSuite(
+  baseDir: string = process.cwd(),
+  options: ConformanceOptions = {}
+): Promise<{ certified: boolean; report: Record<string, LanguageParityStatus> }> {
   // Rust/Go/Ruby removed from beta scope — see BETA_SCOPE.md. Re-add here
   // alongside their pack import when a language is un-gated in registry.ts.
   const languages = ["typescript", "python"];
@@ -208,12 +187,12 @@ export async function runConformanceSuite(baseDir: string = process.cwd()): Prom
     const sourceFixtureDir = resolve(__dirname, "fixtures", langId);
     const fixtureDir = prepareRuntimeWorkspace(repoRoot, langId, sourceFixtureDir);
 
+    await ensureToolsInstalled(fixtureDir, langId, options.consent);
     if (langId === "typescript") {
-      ensureTypeScriptInstalled(fixtureDir);
       ensureEslintConfig(fixtureDir);
       ensureAuditManifest(fixtureDir);
     }
-    if (langId === "python") await ensurePythonInstalled(fixtureDir);
+    if (langId === "python") ensureAuditRequirements(fixtureDir);
 
     const fixturesResults: Array<{ name: string; passed: boolean; error?: string }> = [];
 
@@ -359,8 +338,15 @@ export async function runConformanceSuite(baseDir: string = process.cwd()): Prom
   return { certified: allCertified, report };
 }
 
+/**
+ * Entry point for `tsx run.ts` (release-check and CI): there is no one to answer a prompt. Running the
+ * suite this way is the explicit act, and it only ever installs the catalog's pinned, hash-checked
+ * tools into the disposable conformance workspace. `purix lang verify` passes the human gate instead.
+ */
+const unattendedGate: ConsentGate = { confirmInstall: () => Promise.resolve(true) };
+
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("run.ts")) {
-  runConformanceSuite()
+  runConformanceSuite(undefined, { consent: unattendedGate })
     .then(({ certified, report }) => {
       console.log(`Language Parity Conformance Suite completed. Certified: ${certified}`);
       if (!certified) {

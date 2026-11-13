@@ -1,0 +1,4 @@
+{
+ "exitCode": 0,
+ "stdout": "{\n  \"stats\": {\n    \"suites\": 0,\n    \"tests\": 1,\n    \"passes\": 1,\n    \"pending\": 0,\n    \"failures\": 0,\n    \"start\": \"2026-11-01T10:01:41.627Z\",\n    \"end\": \"2026-11-01T10:01:41.628Z\",\n    \"duration\": 1\n  },\n  \"tests\": [\n    {\n      \"title\": \"ok\",\n      \"fullTitle\": \"ok\",\n      \"file\": \"/tmp/cap-icQe6p/src/a.test.js\",\n      \"duration\": 0,\n      \"currentRetry\": 0,\n      \"speed\": \"fast\",\n      \"err\": {}\n    }\n  ],\n  \"pending\": [],\n  \"failures\": [],\n  \"passes\": [\n    {\n      \"title\": \"ok\",\n      \"fullTitle\": \"ok\",\n      \"file\": \"/tmp/cap-icQe6p/src/a.test.js\",\n      \"duration\": 0,\n      \"currentRetry\": 0,\n      \"speed\": \"fast\",\n      \"err\": {}\n    }\n  ]\n}"
+}

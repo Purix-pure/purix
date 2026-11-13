@@ -3,6 +3,10 @@ import { describe, it } from "node:test";
 import { expect } from "expect";
 import { runSecurityGate, GOLDEN_CORPUS, setSecurityOverride } from "./security_gate";
 import { getOverrideAudits } from "../security/override_audit";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("ADR-009 Deterministic Security Gate", () => {
   it("stays silent on clean code", () => {

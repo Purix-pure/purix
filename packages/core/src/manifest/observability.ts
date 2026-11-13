@@ -6,6 +6,11 @@ const MIN_SAMPLES_FOR_TREND = 6;
 const APPROVAL_FATIGUE_MIN_SAMPLES = 10;
 const APPROVAL_FATIGUE_RATE_THRESHOLD = 0.95;
 
+/** AI-13 (D-AI-2): the interpretation prompt may be skipped only after this many human answers... */
+export const INTERPRETATION_SKIP_MIN_SAMPLES = 20;
+/** ...at or above the same acceptance rate the fatigue warning uses. */
+export const INTERPRETATION_SKIP_MIN_RATE = APPROVAL_FATIGUE_RATE_THRESHOLD;
+
 export interface RateWithSample {
   rate: number | null;
   count: number;
@@ -268,4 +273,34 @@ export function formatObservabilityReport(r: ObservabilityReport): string {
   }
 
   return lines.join("\n");
+}
+
+export interface CheckpointAcceptance {
+  approved: number;
+  declined: number;
+}
+
+/**
+ * AI-13: answers recorded for one checkpoint kind. Answers given by the AUTO_CONFIRM test bypass are left out: nobody read the
+ * prompt, so they say nothing about whether people accept it. (`purix stats` counts them; this count is deliberately stricter.)
+ */
+export function readCheckpointAcceptance(kind: string, events: EventRecord[] = listEvents({ kind: "confirm_response" })): CheckpointAcceptance {
+  let approved = 0;
+  let declined = 0;
+  for (const e of events) {
+    if (e.detail.checkpoint_kind !== kind || e.detail.auto_confirmed === true) continue;
+    if (e.detail.approved === true) approved += 1;
+    else declined += 1;
+  }
+  return { approved, declined };
+}
+
+/** AI-13: pure. The prompt is skipped only with no assumptions AND enough human answers at a high enough acceptance rate. */
+export function interpretationPromptSkip(i: { assumptions: number; acceptance: CheckpointAcceptance }): { skip: boolean; reason: string } {
+  const total = i.acceptance.approved + i.acceptance.declined;
+  if (i.assumptions > 0) return { skip: false, reason: "the interpretation lists assumptions" };
+  if (total < INTERPRETATION_SKIP_MIN_SAMPLES) return { skip: false, reason: `only ${total} recorded answers (need ${INTERPRETATION_SKIP_MIN_SAMPLES})` };
+  const rate = i.acceptance.approved / total;
+  if (rate < INTERPRETATION_SKIP_MIN_RATE) return { skip: false, reason: `acceptance ${(rate * 100).toFixed(0)}% is below ${(INTERPRETATION_SKIP_MIN_RATE * 100).toFixed(0)}%` };
+  return { skip: true, reason: `no assumptions, and ${i.acceptance.approved} of ${total} earlier answers accepted` };
 }

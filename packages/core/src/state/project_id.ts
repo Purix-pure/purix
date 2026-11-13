@@ -39,8 +39,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { createConfigStore } from "./config.js";
+import { createConfigStore, createConfigStoreInDir } from "./config.js";
 import { resolveSharedStateDir } from "./git_common_dir.js";
+import { PURIX_DIRNAME } from "../platform/layout.js";
 
 const PROJECT_ID_CONFIG_KEY = "project-id";
 
@@ -113,9 +114,18 @@ export function getProjectId(baseDir: string = process.cwd()): string {
   // worktree of several. Falls back to <baseDir>/.purix when baseDir
   // isn't inside a git repo at all (resolveSharedStateDir's own
   // documented fallback), matching prior behavior for non-repo usage.
-  const store = createConfigStore(resolveSharedStateDir(baseDir));
+  const sharedDir = resolveSharedStateDir(baseDir);
+  const store = createConfigStoreInDir(sharedDir);
   const cached = store.get(PROJECT_ID_CONFIG_KEY);
   if (typeof cached === "string" && cached.length > 0) return cached;
+
+  // Earlier versions wrote the cached id one level too deep: <sharedDir>/.purix/config.json (so .purix/.purix/ in a
+  // plain folder). Carry that id over, or the project would silently get a new id and split its budget ledger in two.
+  const legacyId = createConfigStoreInDir(join(sharedDir, PURIX_DIRNAME)).get(PROJECT_ID_CONFIG_KEY);
+  if (typeof legacyId === "string" && legacyId.length > 0) {
+    store.set(PROJECT_ID_CONFIG_KEY, legacyId);
+    return legacyId;
+  }
 
   // CONCURRENCY FIX (found investigating llm/budget_worktree.test.ts's
   // pre-existing flaky "ten concurrent workers" failure — see
@@ -136,7 +146,11 @@ export function getProjectId(baseDir: string = process.cwd()): string {
   // acquire the lock actually mints a value — everyone else re-reads
   // under that same lock and gets that value back instead of minting
   // (and briefly using) a competing one.
-  const shareIdentity = store.get("purix.shareProjectId") === true || store.get("isolateBudget") === false;
+  // The opt-in flags are user config: `purix config set` writes them to <baseDir>/.purix/config.json. They used to be
+  // read from the shared directory's store, which is a different file, so the opt-in never took effect.
+  const userConfig = createConfigStore(baseDir);
+  const flagOn = (c: { get(k: string): unknown }) => c.get("purix.shareProjectId") === true || c.get("isolateBudget") === false;
+  const shareIdentity = flagOn(userConfig) || flagOn(store);
   const remoteUrl = shareIdentity ? readGitRemoteUrl(baseDir) : null;
   const id = store.getOrCreate(PROJECT_ID_CONFIG_KEY, () =>
     remoteUrl ? createHash("sha256").update(remoteUrl).digest("hex") : randomUUID()

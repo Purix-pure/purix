@@ -14,9 +14,11 @@
 // the key encrypting it would come from whichever repo happened to be cwd
 // the first time `purix login` ran — silently contradicting "session
 // identity is machine-scoped." Two stores, two keys, closes that. 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, chmodSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { createFileExclusive, writeFileAtomic } from "../platform/atomic_write.js";
+import { purixDir } from "../platform/layout.js";
 
 const ROTATION_WARN_DAYS = 90;
 
@@ -86,7 +88,8 @@ export function ensureSecretFilesGitignored(baseDir: string, filenames: string[]
     if (missing.length === 0) return [];
     const prefix = existing.length > 0 && !existing.endsWith("\n") ? eol : "";
     const header = present.has("# Purix secrets — never commit") ? "" : `# Purix secrets — never commit${eol}`;
-    writeFileSync(gitignorePath, `${existing}${prefix}${header}${missing.join(eol)}${eol}`, "utf-8");
+    // The user's own .gitignore: a plain truncate-and-write that is interrupted would lose their rules.
+    writeFileAtomic(gitignorePath, `${existing}${prefix}${header}${missing.join(eol)}${eol}`);
     console.warn(`  [secrets] added ${missing.join(", ")} to ${gitignorePath} so they can't be committed by accident.`);
     return missing;
   } catch {
@@ -112,13 +115,30 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
   const storePath = join(baseDir, storeFilename);
   const masterKeyPath = join(baseDir, "secrets.master.key");
 
-  function loadMasterKey(): Buffer {
-    if (existsSync(masterKeyPath)) {
-      return Buffer.from(readFileSync(masterKeyPath, "utf-8").trim(), "base64");
+  function readMasterKey(): Buffer {
+    const key = Buffer.from(readFileSync(masterKeyPath, "utf-8").trim(), "base64");
+    // Never "repair" this by minting a new key: a new key makes every secret already stored
+    // undecryptable. A short or empty key file means damage (for example an interrupted write by an
+    // older version); say so and leave it alone.
+    if (key.length !== 32) {
+      throw new Error(
+        `The secrets master key at ${masterKeyPath} is damaged (expected 32 bytes, found ${key.length}). ` +
+          `Nothing was changed. Restore it from a backup; if none exists, delete it AND ${basename(storePath)} ` +
+          `to start over (existing secrets cannot be recovered without the key).`
+      );
     }
-    mkdirSync(dirname(masterKeyPath), { recursive: true });
+    return key;
+  }
+
+  function loadMasterKey(): Buffer {
+    if (existsSync(masterKeyPath)) return readMasterKey();
     const key = randomBytes(32);
-    writeFileSync(masterKeyPath, key.toString("base64"), "utf-8");
+    // Create-if-absent, complete on appearance, created 0600. "Check then write" let two first-time callers each
+    // generate a key; the later write won and everything the first caller encrypted became undecryptable.
+    if (!createFileExclusive(masterKeyPath, key.toString("base64"), { mode: 0o600 })) {
+      // Lost the race: another caller created the key a moment ago. Theirs is the key; ours is discarded unused.
+      return readMasterKey();
+    }
     try {
       chmodSync(masterKeyPath, 0o600);
     } catch {
@@ -150,15 +170,7 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
 
   function saveStore(store: StoreFile): void {
     ensureSecretFilesGitignored(baseDir, [basename(masterKeyPath), basename(storePath)]);
-    mkdirSync(dirname(storePath), { recursive: true });
-    const tmpPath = `${storePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-try {
-  writeFileSync(tmpPath, JSON.stringify(store, null, 2), { encoding: "utf-8", mode: 0o600 });
-  renameSync(tmpPath, storePath);
-} catch (err) {
-  try { unlinkSync(tmpPath); } catch { /* temp file may not exist */ }
-  throw err;
-}
+    writeFileAtomic(storePath, JSON.stringify(store, null, 2), { mode: 0o600 });
     try {
       chmodSync(storePath, 0o600);
     } catch { /* chmod best-effort — not all filesystems support it */ }
@@ -212,7 +224,7 @@ try {
 // these three names exactly as they always have; nothing at those call
 // sites changes.
 function projectStore(): SecretsStore {
-  return createSecretsStore(join(process.cwd(), ".purix"));
+  return createSecretsStore(purixDir(process.cwd()));
 }
 
 export const setSecret: SecretsStore["setSecret"] = (...args) => projectStore().setSecret(...args);

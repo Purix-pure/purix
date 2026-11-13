@@ -1,0 +1,55 @@
+name: Bug report
+description: Something Purix did that it should not have, or did not do that it should have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not use this form for security problems** (a guard bypass, a leaked secret, a sandbox escape). Use the private reporting link on the issue chooser instead.
+        Purix is a beta for TypeScript, JavaScript and Python. See BETA_SCOPE.md for what is in scope.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what Purix did instead. Quote the output if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows it. A tiny repository is better than a description.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Which kind of problem is it
+      options:
+        - Lost or changed a file it should not have
+        - A change got through that should have been stopped
+        - A result said "passed" when something was not checked
+        - Purix stopped a change that was fine
+        - Install or startup problem
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Purix version
+      description: Output of `purix --version`
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version and operating system
+      description: For example "Node 22.13, Ubuntu 24.04" or "Node 24, Windows 11 PowerShell"
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Coding agent and project language (if any)
+      description: For example "Claude Code, TypeScript with pnpm"

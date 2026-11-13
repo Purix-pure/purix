@@ -22,7 +22,7 @@ describe("discoverLanguages", () => {
     const discovered = discoverLanguages();
     const python = discovered.find((d) => d.manifest.id === "python");
     expect(python).toBeDefined();
-    expect(python!.manifest.tier).toBe("pro");
+    expect(python!.manifest.tier).toBe("free");
     expect(python!.manifest.scaffoldExtensions).toEqual([".py"]);
   });
 

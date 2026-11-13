@@ -20,6 +20,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createSecretsStore } from "./secrets_manager.js";
+import { purixDir } from "../platform/layout.js";
 
 const SESSION_KEY = "session";
 
@@ -28,10 +29,24 @@ export interface StoredSession {
   email: string;
   /** ISO timestamp of when this token was issued, for display in `purix login` status output. */
   issuedAt: string;
+  /**
+   * Present only for a login made by a refresh-capable client. The access token is short-lived (15 minutes);
+   * the refresh token is single-use and rotates on every refresh, so it must be saved each time it changes.
+   */
+  refreshToken?: string;
+  /** ISO time the access token expires, as reported by the server. */
+  expiresAt?: string;
+  /** ISO time the refresh token expires, as reported by the server. */
+  refreshExpiresAt?: string;
+  /** The server's id for this device session, shown in the dashboard's device list. */
+  sessionId?: string;
 }
 
+/** The extra fields a refresh-capable login or a refresh returns. */
+export type RefreshFields = Pick<StoredSession, "refreshToken" | "expiresAt" | "refreshExpiresAt" | "sessionId">;
+
 export interface SessionStore {
-  saveSession(this: void, token: string, email: string): void;
+  saveSession(this: void, token: string, email: string, refresh?: RefreshFields): void;
   loadSession(this: void): StoredSession | null;
   clearSession(this: void): void;
   isLoggedIn(this: void): boolean;
@@ -52,8 +67,14 @@ export function createSessionStore(baseDir: string): SessionStore {
   const store = createSecretsStore(baseDir, "session.enc");
 
   return {
-    saveSession(token, email) {
+    saveSession(token, email, refresh) {
       const record: StoredSession = { token, email, issuedAt: new Date().toISOString() };
+      if (refresh?.refreshToken) {
+        record.refreshToken = refresh.refreshToken;
+        if (refresh.expiresAt) record.expiresAt = refresh.expiresAt;
+        if (refresh.refreshExpiresAt) record.refreshExpiresAt = refresh.refreshExpiresAt;
+        if (refresh.sessionId) record.sessionId = refresh.sessionId;
+      }
       store.setSecret(SESSION_KEY, JSON.stringify(record));
     },
 
@@ -81,7 +102,7 @@ export function createSessionStore(baseDir: string): SessionStore {
 // Default instance — the real machine-global store at ~/.purix that
 // cli/commands/auth.ts and licensing/tier.ts use. Tests should call
 // createSessionStore(tmpDir) directly instead of importing these.
-const defaultStore = createSessionStore(join(homedir(), ".purix"));
+const defaultStore = createSessionStore(purixDir(homedir()));
 
 export const saveSession = defaultStore.saveSession;
 export const loadSession = defaultStore.loadSession;

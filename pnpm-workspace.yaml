@@ -12,7 +12,6 @@ packages:
 allowBuilds:
   esbuild: true
   protobufjs: true
-  "@google/genai": true
 
 # Moved from package.json's "pnpm" field — pnpm 11 stopped reading that
 # field entirely (confirmed by the "pnpm.overrides ignored" warning in
@@ -20,3 +19,7 @@ allowBuilds:
 overrides:
   qs: ">=6.16.0"
   fast-uri: ">=3.1.6"
+  proxy-addr: ">=2.0.8"
+  body-parser: ">=2.4.0"
+  zod: ">=4.6.6"
+  "brace-expansion@>=4.0.0 <5.0.11": ">=5.0.11"

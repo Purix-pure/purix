@@ -1,4 +1,5 @@
 // src/llm/budget.ts
+import { purixEnv } from "../platform/env.js";
 import { getDbCompat as getDb } from "../manifest/store.js";
 import { withSqliteRetry, SqliteRetryExhaustedError } from "./sqlite_retry.js";
 import { recordOverrideAudit } from "../security/override_audit.js";
@@ -86,7 +87,7 @@ function readBudgetRow(): BudgetSnapshotRow {
 }
 
 function getCeiling(): number {
-  const raw = process.env.PURIX_COST_CEILING_USD;
+  const raw = purixEnv("PURIX_COST_CEILING_USD");
   const parsed = raw ? Number(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 5.0;
 }
@@ -100,14 +101,6 @@ export function setBudgetOverride(reason?: string): void {
 export function assertBudgetAvailable(estimatedCost = 0.05): number {
   ensureBudgetTable();
   const ceiling = getCeiling();
-  if (invocationOverrideReason !== undefined) {
-    const reason = invocationOverrideReason;
-    invocationOverrideReason = undefined;
-    const state = readBudgetRow();
-    recordOverrideAudit("BudgetGate", reason, `Budget exceeded: $${state.total_spent_usd.toFixed(4)} / $${ceiling.toFixed(2)}`);
-    console.log(`  [override] BudgetGate overridden: ${reason.trim()}`);
-    return 0;
-  }
 
   let success: boolean;
   try {
@@ -139,15 +132,43 @@ export function assertBudgetAvailable(estimatedCost = 0.05): number {
   }
 
   if (!success) {
+    // F03-09 follow-up: an armed override is used only here, when the guard would really have refused this call. Before, it was
+    // spent (and an audit row saying "Budget exceeded" written) on the first call of a run even when the ceiling was far away.
+    if (invocationOverrideReason !== undefined) {
+      const reason = invocationOverrideReason;
+      invocationOverrideReason = undefined;
+      const state = readBudgetRow();
+      recordOverrideAudit("BudgetGate", reason, `Budget exceeded: $${state.total_spent_usd.toFixed(4)} / $${ceiling.toFixed(2)}`);
+      console.log(`  [override] BudgetGate overridden: ${reason.trim()} (covers this one model call only; later calls are checked again)`);
+      return 0;
+    }
     const state = readBudgetRow();
     throw new Error(
       `Cost guardrail tripped: estimated spend $${state.total_spent_usd.toFixed(4)} has reached the ` +
-        `hard ceiling of $${ceiling.toFixed(2)}. Set PURIX_COST_CEILING_USD to raise it. ` +
-        `Refusing further LLM calls until this is addressed.`
+        `hard ceiling of $${ceiling.toFixed(2)} for this repository. ` +
+        `To start a new budget, run: purix budget reset --reason "<why>". ` +
+        `To raise the ceiling instead, set PURIX_COST_CEILING_USD. ` +
+        `Refusing further LLM calls until one of these is done.`
     );
   }
 
   return estimatedCost;
+}
+
+/**
+ * Start this repository's budget again from zero (A10c-1; research 15 finding 9: the ceiling was a lifetime total, so after
+ * it every model call was refused for good). A reason is required and the reset is recorded with the old total, the same way an
+ * override is. The call counter is left alone. Returns the total that was cleared.
+ */
+export function resetBudget(reason: string): { previousTotalUsd: number } {
+  if (!reason || reason.trim() === "") throw new Error("Budget reset rejected: a reason is required.");
+  ensureBudgetTable();
+  const previous = readBudgetRow().total_spent_usd;
+  withSqliteRetry(() => {
+    getDb().run(`UPDATE budget_state SET total_spent_usd = 0, updated_at = ? WHERE repo_id = ?`, [new Date().toISOString(), getProjectId()]);
+  }, "budget_reset");
+  recordOverrideAudit("BudgetReset", reason, `Budget reset: cleared $${previous.toFixed(4)} spent of a $${getCeiling().toFixed(2)} ceiling`);
+  return { previousTotalUsd: previous };
 }
 
 const PRICE_PER_1M_USD: Record<"low" | "high", { input: number; output: number }> = {
@@ -301,5 +322,25 @@ export function getSavingsSummary(windowDays: number): SavingsSummary {
     return { totalSavingsUsd: row?.total ?? 0, callCount: row?.count ?? 0 };
   } catch {
     return { totalSavingsUsd: 0, callCount: 0 };
+  }
+}
+
+export interface SavingsEventRow {
+  localSeq: number;
+  callType: string;
+  deltaUsd: number;
+  occurredAt: string;
+}
+
+/** Local savings events with id above `afterId`, oldest first. Feeds the event-ID sync (savings_sync.ts). */
+export function listSavingsEventsAfter(afterId: number, limit: number): SavingsEventRow[] {
+  try {
+    ensureSavingsTable();
+    const rows = getDb()
+      .query(`SELECT id, call_type, delta_usd, created_at FROM savings_ledger WHERE id > ? ORDER BY id ASC LIMIT ?`)
+      .all(afterId, limit) as { id: number; call_type: string; delta_usd: number; created_at: string }[];
+    return rows.map((r) => ({ localSeq: r.id, callType: r.call_type, deltaUsd: r.delta_usd, occurredAt: r.created_at }));
+  } catch {
+    return [];
   }
 }

@@ -54,3 +54,23 @@ describe("findUnsafePaths", () => {
     expect(bad.every((b) => b.reason.length > 0)).toBe(true);
   });
 });
+
+describe("resolveSafePath: a dangling symlink that points outside the root", () => {
+  it("refuses a link inside the root whose target does not exist yet (the write would create the file outside)", () => {
+    symlinkSync(join(outside, "not-yet-there.txt"), join(root, "link.txt"));
+    const r = resolveSafePath(root, "link.txt");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("symlink");
+  });
+  it("refuses a file below a dangling directory link that points outside", () => {
+    symlinkSync(join(outside, "missing-dir"), join(root, "dir"));
+    expect(resolveSafePath(root, "dir/file.ts").ok).toBe(false);
+  });
+  it("still accepts a dangling link whose target is inside the root", () => {
+    symlinkSync(join(root, "later.txt"), join(root, "inner.txt"));
+    expect(resolveSafePath(root, "inner.txt").ok).toBe(true);
+  });
+  it("still accepts a plain new file", () => {
+    expect(resolveSafePath(root, "new/file.ts").ok).toBe(true);
+  });
+});

@@ -1,10 +1,11 @@
 // Pure output parsers and tsx-command lookup from verify/tests.ts — previously reachable only by running real Jest/Vitest/Mocha.
 import { describe, it } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseJestJson, parseVitestJson, parseMochaJson, parseTapOutput, tsxCommand } from "./tests";
+import { parseJestJson, parseVitestJson, parseMochaJson, locateRunner, runnerToolId } from "./tests";
+import { parseReporterOutput, ensureNodeTestReporter, REPORTER_LINE_PREFIX } from "./node_test_reporter";
 
 describe("parseJestJson / parseVitestJson", () => {
   const report = JSON.stringify({
@@ -40,68 +41,47 @@ describe("parseMochaJson", () => {
   });
 });
 
-describe("parseTapOutput", () => {
-  it("keeps only leaf tests (type: 'test'), skipping suite rollups, and reads pass/fail", () => {
-    const tap = [
-      "TAP version 13",
-      "    ok 1 - adds",
-      "      ---",
-      "      type: 'test'",
-      "      ...",
-      "    not ok 2 - subtracts",
-      "      ---",
-      "      type: 'test'",
-      "      ...",
-      "ok 3 - the suite",
-      "  ---",
-      "  type: 'suite'",
-      "  ...",
-    ].join("\n");
-    expect(parseTapOutput(tap)).toEqual([{ name: "adds", passed: true }, { name: "subtracts", passed: false }]);
+describe("parseReporterOutput (Purix's own reporter protocol, not Node's console text)", () => {
+  const line = (o: object) => REPORTER_LINE_PREFIX + JSON.stringify(o);
+  it("reads one result per PURIX_TEST line and ignores everything else on stdout", () => {
+    const out = ["some console noise", line({ name: "adds", passed: true, file: "a.test.ts" }), "ok 4 - has no type block at all", line({ name: "subtracts", passed: false, file: null })].join("\n");
+    expect(parseReporterOutput(out)).toEqual([{ name: "adds", passed: true, file: "a.test.ts" }, { name: "subtracts", passed: false, file: null }]);
   });
-  it("reads leaf tests that carry no `type:` line (Node 22.13.0), still skipping suites", () => {
-    // Verbatim shape captured from `tsx --test --test-reporter=tap` on Node v22.13.0:
-    // leaf tests have no type line; describe() rollups have `type: 'suite'`.
-    const tap = [
-      "TAP version 13",
-      "# Subtest: outer",
-      "    # Subtest: leaf pass",
-      "    ok 1 - leaf pass",
-      "      ---",
-      "      duration_ms: 0.66485",
-      "      ...",
-      "    # Subtest: leaf fail",
-      "    not ok 2 - leaf fail",
-      "      ---",
-      "      duration_ms: 1.244414",
-      "      failureType: 'testCodeFailure'",
-      "      error: 'boom'",
-      "      code: 'ERR_ASSERTION'",
-      "      ...",
-      "    1..2",
-      "not ok 1 - outer",
-      "  ---",
-      "  duration_ms: 3.146311",
-      "  type: 'suite'",
-      "  failureType: 'subtestsFailed'",
-      "  ...",
-      "1..1",
-    ].join("\n");
-    expect(parseTapOutput(tap)).toEqual([{ name: "leaf pass", passed: true }, { name: "leaf fail", passed: false }]);
+  it("a TAP-looking line without the prefix is never a test result (the old parser's ambiguity is gone by construction)", () => {
+    expect(parseReporterOutput("ok 4 - has no type block at all\nnot ok 5 - also not mine")).toEqual([]);
   });
-  it("returns [] for output with no TAP result lines", () => {
-    expect(parseTapOutput("hello\nworld")).toEqual([]);
+  it("skips malformed or truncated protocol lines instead of throwing", () => {
+    expect(parseReporterOutput(REPORTER_LINE_PREFIX + "{\"name\":\"half")).toEqual([]);
+    expect(parseReporterOutput(line({ name: 5, passed: true }))).toEqual([]);
+  });
+  it("writes the reporter under .purix/tmp and rewrites it if it was altered", () => {
+    const d = mkdtempSync(join(tmpdir(), "purix-reporter-"));
+    try {
+      const p = ensureNodeTestReporter(d);
+      expect(p).toBe(join(d, ".purix", "tmp", "purix-node-reporter.mjs"));
+      writeFileSync(p, "tampered");
+      expect(ensureNodeTestReporter(d)).toBe(p);
+      expect(readFileSync(p, "utf-8")).toContain("purixReporter");
+    } finally { rmSync(d, { recursive: true, force: true }); }
   });
 });
 
-describe("tsxCommand", () => {
-  it("prefers a local node_modules/.bin/tsx and otherwise falls back to npx", () => {
+describe("locateRunner / runnerToolId", () => {
+  it("maps each framework to its tools-broker id (node:test runs through tsx)", () => {
+    expect(runnerToolId("jest")).toBe("jest");
+    expect(runnerToolId("vitest")).toBe("vitest");
+    expect(runnerToolId("mocha")).toBe("mocha");
+    expect(runnerToolId("node:test")).toBe("tsx");
+  });
+  it("finds the project's own runner, and returns null (never a package-runner fallback) when there is none", () => {
     const dir = mkdtempSync(join(tmpdir(), "purix-tsx-"));
     try {
-      expect(tsxCommand(dir)).toEqual(["npx", "tsx"]);
+      expect(locateRunner(dir, "node:test")).toBeNull();
       mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
       writeFileSync(join(dir, "node_modules", ".bin", "tsx"), "");
-      expect(tsxCommand(dir)).toEqual([join(dir, "node_modules", ".bin", "tsx")]);
+      const loc = locateRunner(dir, "node:test");
+      expect(loc?.command).toEqual([join(dir, "node_modules", ".bin", "tsx")]);
+      expect(loc?.source).toBe("project");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

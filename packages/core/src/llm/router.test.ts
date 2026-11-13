@@ -2,6 +2,10 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { routeTier } from "./router";
+import { isolateCwdForFile } from "../test-support/isolated_cwd.js";
+
+// N-14: this file reaches the project state store, so it runs in a throwaway directory.
+isolateCwdForFile();
 
 describe("LLM Router", () => {
   it("routes change_classification to low tier by default", () => {

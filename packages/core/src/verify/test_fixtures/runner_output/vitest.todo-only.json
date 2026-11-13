@@ -1,0 +1,4 @@
+{
+ "exitCode": 0,
+ "stdout": "{\"numTotalTestSuites\":1,\"numPassedTestSuites\":1,\"numFailedTestSuites\":0,\"numPendingTestSuites\":0,\"numTotalTests\":1,\"numPassedTests\":0,\"numFailedTests\":0,\"numPendingTests\":0,\"numTodoTests\":1,\"snapshot\":{\"added\":0,\"failure\":false,\"filesAdded\":0,\"filesRemoved\":0,\"filesRemovedList\":[],\"filesUnmatched\":0,\"filesUpdated\":0,\"matched\":0,\"total\":0,\"unchecked\":0,\"uncheckedKeysByFile\":[],\"unmatched\":0,\"updated\":0,\"didUpdate\":false},\"startTime\":1793527300245,\"success\":true,\"testResults\":[{\"assertionResults\":[{\"ancestorTitles\":[],\"fullName\":\"t\",\"status\":\"todo\",\"title\":\"t\",\"failureMessages\":[],\"meta\":{},\"tags\":[]}],\"startTime\":1793527300245,\"endTime\":1793527300245,\"status\":\"passed\",\"message\":\"\",\"name\":\"/tmp/cap-3wMR07/src/a.test.js\"}]}\n"
+}

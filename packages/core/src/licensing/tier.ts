@@ -21,10 +21,15 @@
 // right after `purix login` succeeds, and immediately after any command
 // is rejected for insufficient tier (both per Part 4) — never from
 // inside a manifest-write transaction.
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { ambientEnv, purixEnv } from "../platform/env.js";
+import { existsSync, readFileSync } from "node:fs";
+import { writeJsonAtomic } from "../platform/atomic_write.js";
+import { languagesForTier } from "../language/tier_languages.js";
 import { join } from "node:path";
 import { apiClient, ApiUnreachableError } from "../security/api_client.js";
 import { isLoggedIn } from "../security/session.js";
+import { checkSignedEntitlements } from "./entitlement_signature.js";
+import { purixDir } from "../platform/layout.js";
 
 export type ProductTier = "free" | "pro" | "team" | "enterprise";
 
@@ -33,50 +38,39 @@ export interface Entitlements {
   componentLimit: number | null; // null = unlimited
   auditExport: boolean;
   webhooks: boolean;
-  orgBudgetAggregation: boolean; // typed now, unenforced until Team ships
-  rbac: boolean; // typed now, unenforced until Team ships
-  sharedRepoMemory: boolean; // typed now, unenforced until Team ships
-  mcpToolCalling: boolean; // stays false, same precedent as mcp_gateway.ts today
   mcpHardened: boolean;
   orgId: string | null;
   seatLimit: number | null;
   allowedLanguages: string[];
 }
 
+// Release 1 is local and open source with no way to pay, so the free tier has no component cap (2026-11-02).
+// A limit the server sends in `flags.componentLimit` is still honoured; see checkComponentLimit().
 const FREE: Entitlements = {
   tier: "free",
-  componentLimit: 25,
+  componentLimit: null,
   auditExport: false,
   webhooks: false,
-  orgBudgetAggregation: false,
-  rbac: false,
-  sharedRepoMemory: false,
-  mcpToolCalling: false,
   mcpHardened: false,
   orgId: null,
   seatLimit: null,
-  allowedLanguages: ["typescript"],
+  allowedLanguages: languagesForTier("free"),
 };
 
-// Fields Free/Pro actually enforce this pass. orgBudgetAggregation, rbac,
-// and sharedRepoMemory are typed above so the shape only needs to widen
-// once, but nothing in this codebase may read them in a gating
-// if/requireEntitlement call yet — see the enforcement guard test next to
-// this file, which asserts exactly that, the same discipline that's kept
-// mcp_gateway.ts safely disconnected.
+// Every field below is enforced somewhere. Fields for features that do not exist yet (team roles,
+// shared memory, org budgets, client-side MCP calling) were removed (D3/D4, 2026-10-14) rather than
+// carried as always-false switches; add one back together with the code that enforces it.
 const PRO: Entitlements = {
   tier: "pro",
   componentLimit: null,
   auditExport: true,
   webhooks: true,
-  orgBudgetAggregation: false,
-  rbac: false,
-  sharedRepoMemory: false,
-  mcpToolCalling: false,
   mcpHardened: false,
   orgId: null,
   seatLimit: null,
-  allowedLanguages: ["typescript", "python"], // Rust/Go/Ruby removed from beta scope — see BETA_SCOPE.md. Re-add here (and re-add their provider/pack files) if un-gated later.
+  // Derived from the language manifests (language/tier_languages.ts), never listed here by hand.
+  // To change what Pro includes, change that language's manifest `tier`.
+  allowedLanguages: languagesForTier("pro"),
 };
 
 const DEFAULT_CACHE_TTL_SECONDS = 15 * 60; // 15 min — overridden by whatever the server actually returns
@@ -86,10 +80,14 @@ interface EntitlementsCache {
   entitlements: Entitlements;
   cachedAt: string; // ISO
   cacheTtlSeconds: number;
+  /** Highest signed-document version seen; a lower one later is a rollback. */
+  signedVersion?: number;
+  /** The verified signed document, kept so the signature is re-checked on every cache read. */
+  signed?: string;
 }
 
 function cachePath(baseDir: string): string {
-  return join(baseDir, ".purix", "tier-config.json");
+  return join(purixDir(baseDir), "tier-config.json");
 }
 
 function readCache(baseDir: string): EntitlementsCache | null {
@@ -105,9 +103,7 @@ function readCache(baseDir: string): EntitlementsCache | null {
 }
 
 function writeCache(baseDir: string, cache: EntitlementsCache): void {
-  const dir = join(baseDir, ".purix");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(cachePath(baseDir), JSON.stringify(cache, null, 2));
+  writeJsonAtomic(cachePath(baseDir), cache);
 }
 
 /** `purix logout` calls this immediately — see the interaction note in refreshEntitlements()'s docstring. */
@@ -129,7 +125,8 @@ export function clearEntitlementsCache(baseDir: string = process.cwd()): void {
  *  - Logged in, cache stale AND past 72h (or no cache at all yet) =>
  *    fail closed to Free.
  */
-const TIERS: Record<string, Entitlements> = { free: FREE, pro: PRO };
+// "capped" exists only so tests can exercise the limit path; it is reachable only when NODE_ENV is "test".
+const TIERS: Record<string, Entitlements> = { free: FREE, pro: PRO, capped: { ...FREE, componentLimit: 25 } };
 
 export function getEntitlements(baseDir: string = process.cwd()): Entitlements {
   // SECURITY: this override exists ONLY so the test suite can simulate
@@ -144,8 +141,8 @@ export function getEntitlements(baseDir: string = process.cwd()): Entitlements {
   // support, component limits — is enforced entirely client-side in
   // this same package, so this env var alone used to unlock paid
   // functionality with zero payment and zero server contact).
-  if (process.env.NODE_ENV === "test") {
-    const override = process.env.PURIX_DEV_TIER;
+  if (ambientEnv("NODE_ENV") === "test") {
+    const override = purixEnv("PURIX_DEV_TIER");
     if (override) {
       const t = TIERS[override.toLowerCase()];
       if (t) return t;
@@ -157,6 +154,13 @@ export function getEntitlements(baseDir: string = process.cwd()): Entitlements {
 
   const cache = readCache(baseDir);
   if (!cache) return FREE; // logged in but never successfully synced yet
+
+  if (cache.signed) {
+    // A hand-edited cache or a copied file must not outlive the signature check.
+    const again = checkSignedEntitlements({ signed: cache.signed }, { ignoreExpiry: true });
+    if (again.status === "rejected") return FREE;
+    if (again.status === "verified" && again.claims.tier !== cache.entitlements.tier) return FREE;
+  }
 
   const ageMs = Date.now() - new Date(cache.cachedAt).getTime();
   const ttlMs = cache.cacheTtlSeconds * 1000;
@@ -182,6 +186,8 @@ export interface RefreshResult {
   entitlements: Entitlements;
   /** true if this call actually reached the server; false if it served/kept the existing cache because the API was unreachable. */
   refreshed: boolean;
+  /** Set when a signed document was rejected and the client fell back to Free. Print it. */
+  reason?: string;
 }
 
 /**
@@ -197,7 +203,15 @@ export async function refreshEntitlements(baseDir: string = process.cwd()): Prom
   }
 
   try {
-    const response = await apiClient.getEntitlements();
+    const raw = await apiClient.getEntitlements();
+    const signature = checkSignedEntitlements(raw, { highestVersionSeen: readCache(baseDir)?.signedVersion ?? 0 });
+    if (signature.status === "rejected") {
+      clearEntitlementsCache(baseDir); // fail closed: the old cached tier must not keep working
+      return { entitlements: FREE, refreshed: false, reason: `Entitlement document rejected (${signature.reason}); using the Free tier.` };
+    }
+    // A verified document, not the unsigned fields beside it, decides tier and flags.
+    const response =
+      signature.status === "verified" ? { ...raw, tier: signature.claims.tier, flags: signature.claims.flags as typeof raw.flags } : raw;
     const rbacFlag = Boolean(response.flags.rbac);
     const sharedRepoMemoryFlag = Boolean(response.flags.sharedRepoMemory);
     if (rbacFlag || sharedRepoMemoryFlag) {
@@ -206,13 +220,9 @@ export async function refreshEntitlements(baseDir: string = process.cwd()): Prom
 
     const entitlements: Entitlements = {
       tier: response.tier,
-      componentLimit: (response.flags.componentLimit as number | null) ?? (response.tier === "free" ? 25 : null),
+      componentLimit: (response.flags.componentLimit as number | null) ?? null,
       auditExport: Boolean(response.flags.auditExport),
       webhooks: Boolean(response.flags.webhooks),
-      orgBudgetAggregation: Boolean(response.flags.orgBudgetAggregation),
-      rbac: rbacFlag,
-      sharedRepoMemory: sharedRepoMemoryFlag,
-      mcpToolCalling: false, // stays false regardless of server response — see mcp_gateway.ts precedent
       mcpHardened: Boolean(response.flags.mcpHardened),
       orgId: (response.flags.orgId as string | null) ?? null,
       seatLimit: (response.flags.seatLimit as number | null) ?? null,
@@ -239,7 +249,7 @@ export async function refreshEntitlements(baseDir: string = process.cwd()): Prom
       allowedLanguages: await (async () => {
         const rawAllowedLanguages =
           (response.flags.allowedLanguages as unknown as string[]) ??
-          (response.tier === "free" ? ["typescript"] : ["typescript", "python"]);
+          languagesForTier(response.tier === "free" ? "free" : "pro");
         const { getLanguageProvider } = await import("../language/registry.js");
         return rawAllowedLanguages.filter((lang) => getLanguageProvider(lang) !== undefined);
       })(),
@@ -248,6 +258,7 @@ export async function refreshEntitlements(baseDir: string = process.cwd()): Prom
       entitlements,
       cachedAt: new Date().toISOString(),
       cacheTtlSeconds: response.cacheTtlSeconds || DEFAULT_CACHE_TTL_SECONDS,
+      ...(signature.status === "verified" && raw.signed ? { signedVersion: signature.claims.ver, signed: raw.signed } : {}),
     });
     return { entitlements, refreshed: true };
   } catch (err) {
@@ -275,9 +286,10 @@ export function requireEntitlement(feature: keyof Omit<Entitlements, "tier" | "c
 export function requireLanguage(langId: string): void {
   const ent = getEntitlements();
   if (!ent.allowedLanguages.includes(langId)) {
+    // Every shipped language is free (D-14), so a refusal here means the language is unknown or
+    // its manifest did not load, never that it needs a paid plan.
     throw new Error(
-      `"${langId}" support is a Pro feature. Current tier: ${ent.tier}. ` +
-      `Run "purix login" to check your entitlements, or upgrade.`
+      `"${langId}" is not available. Languages available here: ${ent.allowedLanguages.join(", ") || "none"}.`
     );
   }
 }
@@ -291,8 +303,8 @@ export function checkComponentLimit(currentCount: number): void {
   const ent = getEntitlements();
   if (ent.componentLimit !== null && currentCount >= ent.componentLimit) {
     throw new Error(
-      `Free tier tracks up to ${ent.componentLimit} components (currently ${currentCount}). ` +
-        `Run "purix login" to upgrade to Pro and remove this limit.`
+      `This account tracks up to ${ent.componentLimit} components (currently ${currentCount}). ` +
+        `Run "purix tier" to see the plan this limit comes from.`
     );
   }
 }

@@ -29,45 +29,51 @@ describe("ALL_KINDS extraction", () => {
   });
 });
 
-function extractFunctionSource(fileName: string, functionSignature: string): string {
-  const full = readFileSync(join(import.meta.dirname, fileName), "utf-8");
-  const start = full.indexOf(functionSignature);
-  if (start === -1) {
-    throw new Error(`could not find "${functionSignature}" in ${fileName} — has it been renamed?`);
-  }
-  // Each of these functions ends at its own closing brace + the `raw =
-  // await callLlm` line that follows; grabbing a generous fixed window
-  // after the signature is enough to cover the whole prompt template
-  // without needing a real parser.
-  return full.slice(start, start + 4000);
-}
+import { EDIT_KINDS_SPEC } from "./prompts/edit_kinds.js";
+import { classifyPrompt, repairPrompt, escalatePrompt } from "./prompts/build.js";
 
-describe("classifyRepair prompt documents every ChangeEdit kind", () => {
-  const source = extractFunctionSource("classify.ts", "export async function classifyRepair");
-
+// The edit-kind documentation now lives in ONE place (prompts/edit_kinds.ts). Two checks:
+// (1) that text names every kind the schema accepts, (2) every prompt that may return
+// edits embeds it verbatim — so a new kind added to the schema fails here until it is documented.
+describe("EDIT_KINDS_SPEC documents every ChangeEdit kind", () => {
   for (const kind of ALL_KINDS) {
     it(`mentions kind "${kind}"`, () => {
-      expect(source).toContain(`kind "${kind}"`);
+      expect(EDIT_KINDS_SPEC).toContain(`kind "${kind}"`);
     });
   }
 });
 
-describe("escalateJudgeAndRepair prompt documents every ChangeEdit kind", () => {
-  const source = extractFunctionSource("escalate.ts", "export async function escalateJudgeAndRepair");
-
-  for (const kind of ALL_KINDS) {
-    it(`mentions kind "${kind}"`, () => {
-      expect(source).toContain(`kind "${kind}"`);
+describe("every edit-producing prompt embeds EDIT_KINDS_SPEC", () => {
+  const pairs = {
+    classifyPrompt: classifyPrompt({ componentId: "c", files: "", projectBlock: "", instruction: "x" }),
+    repairPrompt: repairPrompt({ componentId: "c", operation: "o", files: "", failure: "f", attempt: 1 }),
+    escalatePrompt: escalatePrompt({ componentId: "c", operation: "o", instruction: "x", failureReason: "f", attempt: 1, failingFiles: "", neighborFiles: "" }),
+  };
+  for (const [name, p] of Object.entries(pairs)) {
+    it(`${name} includes the shared spec`, () => {
+      expect(p.system).toContain(EDIT_KINDS_SPEC);
     });
   }
 });
 
-describe("classifyModification prompt documents every ChangeEdit kind (the reference implementation)", () => {
-  const source = extractFunctionSource("classify.ts", "export async function classifyModification");
-
-  for (const kind of ALL_KINDS) {
-    it(`mentions kind "${kind}"`, () => {
-      expect(source).toContain(`kind "${kind}"`);
-    });
-  }
+// AI-15a: the "modify_code" operation is offered where a request becomes edits (classify, escalate) and stated with its
+// limits; the prompt for an already-landed external diff keeps its old taxonomy, so no label there changes meaning.
+import { MODIFY_CODE_SPEC, MODIFY_CODE_MAX_EDITS, MODIFY_CODE_MAX_LINES } from "./prompts/edit_kinds.js";
+import { diffPrompt } from "./prompts/build.js";
+describe("modify_code in the prompts", () => {
+  const classify = classifyPrompt({ componentId: "c", files: "", projectBlock: "", instruction: "x" }).system;
+  const escalate = escalatePrompt({ componentId: "c", operation: "o", instruction: "x", failureReason: "f", attempt: 1, failingFiles: "", neighborFiles: "" }).system;
+  it("classification names it, maps it to the text kinds and states its limits", () => {
+    expect(classify).toContain("modify_code -> \"prompt_text\", \"config_value\" or \"tool_binding\" edits");
+    expect(classify).toContain(MODIFY_CODE_SPEC);
+    expect(MODIFY_CODE_SPEC).toContain(`at most ${MODIFY_CODE_MAX_EDITS} edits`);
+    expect(MODIFY_CODE_SPEC).toContain(`more than ${MODIFY_CODE_MAX_LINES} lines`);
+  });
+  it("escalation lists it among the operations it knows", () => {
+    expect(escalate).toContain("modify_code");
+  });
+  it("the external-diff prompt does not offer it", () => {
+    const d = diffPrompt({ componentId: "c", sourceAgent: null, diff: "", }).system;
+    expect(d).not.toContain("modify_code");
+  });
 });

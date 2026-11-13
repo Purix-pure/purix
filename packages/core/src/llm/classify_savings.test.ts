@@ -59,7 +59,7 @@ describe("callLlm — savingsContext on the success path", () => {
         { status: 200 }
       ));
 
-    const result = await callLlm("prompt", "low", 1, {
+    const result = await callLlm("prompt", "change_classification", "low", 1, {
       call: "intent_refinement",
       decision: { tier: "low", reason: "test downgrade" },
     });
@@ -79,7 +79,7 @@ describe("callLlm — savingsContext on the success path", () => {
         { status: 200 }
       ));
 
-    const result = await callLlm("prompt", "low");
+    const result = await callLlm("prompt", "change_classification", "low");
     expect(result).toBe("plain answer");
     const summary = getSavingsSummary(30);
     expect(summary.totalSavingsUsd).toBe(0);
@@ -95,7 +95,7 @@ describe("callLlm — savingsContext on the success path", () => {
         { status: 200 }
       ));
 
-    await callLlm("prompt", "high", 1, {
+    await callLlm("prompt", "change_classification", "high", 1, {
       call: "intent_refinement",
       decision: { tier: "high", reason: "no downgrade happened" },
     });

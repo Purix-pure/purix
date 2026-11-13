@@ -28,8 +28,9 @@ type CommandSpec = {
 
 const publicCommandTree: CommandSpec[] = [
   { name: "create", syntax: "create <name>", options: ["--dry-run"] },
-  { name: "modify", syntax: "modify <componentId> <instruction>", options: ["--override", "--dry-run"] },
-  { name: "change", syntax: "change <intent>", options: ["--component", "--override", "--dry-run"] },
+  { name: "modify", syntax: "modify <componentId> <instruction>", options: ["--override-budget", "--override-security", "--override-trust", "--dry-run"] },
+  { name: "adopt", syntax: "adopt <fileOrSymbol>" },
+  { name: "change", syntax: "change <intent>", options: ["--component", "--override-budget", "--override-security", "--override-trust", "--dry-run"] },
   { name: "ingest", syntax: "ingest <componentId> <diffFile>", options: ["--agent"] },
   { name: "delete", syntax: "delete <componentId>", options: ["--force", "--files"] },
   // COMMAND-SURFACE FIX (2026-09-22 CLI/MCP command-standard pass): these
@@ -56,7 +57,7 @@ const publicCommandTree: CommandSpec[] = [
     name: "audit-log",
     subcommands: [
       { name: "trail", options: ["--component", "--since", "--format", "--out"] },
-      { name: "verify" },
+      { name: "verify", syntax: "verify [options]", options: ["--commit", "--expect-head", "--require-anchor"] },
     ],
   },
   { name: "diagnostics" },
@@ -87,7 +88,17 @@ const publicCommandTree: CommandSpec[] = [
   },
   { name: "reconcile" },
   { name: "remember", syntax: "remember [options] <note>", options: ["--component"] },
-  { name: "tools", syntax: "tools <purpose>" },
+  {
+    name: "tools",
+    subcommands: [
+      { name: "list", syntax: "list [options]", options: ["--group"] },
+      { name: "plan", syntax: "plan [options]", options: ["--for"] },
+      { name: "install", syntax: "install <id>" },
+      { name: "approve", syntax: "approve <requestId>" },
+      { name: "status" },
+      { name: "remove", syntax: "remove <id>" },
+    ],
+  },
   {
     name: "config",
     subcommands: [
@@ -242,20 +253,23 @@ describe("Purix CLI integration contract", () => {
   // the same zero-commands "minimalProgram" as `--version`, so the two
   // things a brand-new user is most likely to run first showed no commands
   // at all. Spawning a real process is required to exercise this path.
-  it("lists the full command set on --help and on a bare invocation", () => {
+  it("lists every command on --help and on a bare invocation, most used first, with no --all level", () => {
     const cwd = mkdtempSync(join(tmpdir(), "purix-cli-help-"));
     try {
       for (const args of [["--help"], []]) {
         const result = runCli(args, cwd);
-        expect(result.output).toContain("Commands:");
-        expect(result.output).toContain("create [options] <name>");
+        expect(result.output).toContain("Start here:");
         expect(result.output).toContain("change [options] <intent>");
+        expect(result.output).toContain("connect [options] [agent]");
+        expect(result.output).toContain("create [options] <name>");
         expect(result.output).toContain("mcp-serve");
+        expect(result.output).not.toContain("--all");
+        expect(result.output.indexOf("connect [options]")).toBeLessThan(result.output.indexOf("mcp-serve"));
       }
-      // --version must still take the fast path: no "Commands:" section,
+      // --version must still take the fast path: no command list,
       // and no reconcile/lock/scheduler side effects from full registration.
       const versionResult = runCli(["--version"], cwd);
-      expect(versionResult.output).not.toContain("Commands:");
+      expect(versionResult.output).not.toContain("Start here:");
       expect(versionResult.output.trim()).toBe(PURIX_VERSION);
     } finally {
       safeRmSync(cwd);

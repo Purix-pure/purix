@@ -24,13 +24,15 @@
 //      insert, and the limit check they both "passed" is worthless. An
 //      IMMEDIATE transaction closes that window.
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { moveFileAside } from "../platform/atomic_write.js";
 import { dirname, join } from "node:path";
 import type { ManifestEntry, VerificationStatus, Provenance } from "./schema.js";
 import { migrateManifestEntry } from "./schema_migrations.js";
 import { checkComponentLimit } from "../licensing/tier.js";
 import { CompatDb } from "../platform/sqlite_compat.js";
 import { resolveSharedStateDir } from "../state/git_common_dir.js";
+import { latestPartialLine } from "../verify/partial_line_record.js";
 
 // ADR-042 (formerly ADR-041): this path must resolve to the repository's common git
 // directory (shared across every worktree), not a path under the
@@ -39,6 +41,129 @@ import { resolveSharedStateDir } from "../state/git_common_dir.js";
 // tests already isolate themselves via process.chdir() per test.
 function resolveDbPath(): string {
   return join(resolveSharedStateDir(), "manifest.db");
+}
+
+/** The directory that holds the store file (H5: the filesystem whose free space says whether a read failure is a full disk). */
+export function storeDirectory(): string {
+  return dirname(resolveDbPath());
+}
+
+/** True when this working directory already has a Purix store. Never creates anything. */
+export function storeExists(): boolean {
+  return existsSync(resolveDbPath());
+}
+
+/** Shown by read-only commands when there is no store yet. */
+export const NO_STATE_MESSAGE = "No Purix state here yet — nothing is tracked. Run \"purix create <name>\" or \"purix adopt\" to start.";
+
+export type StoreInspection =
+  | { state: "absent" }
+  | { state: "ok" }
+  | { state: "damaged"; detail: string };
+
+/**
+ * Looks at the store without creating, repairing, renaming or deleting
+ * anything (opened read-only). Tamper-evidence checks use this so a damaged
+ * store is reported, never silently rebuilt into an empty "valid" one.
+ */
+export function inspectStore(): StoreInspection {
+  const dbPath = resolveDbPath();
+  if (!existsSync(dbPath)) return { state: "absent" };
+  const probe = probeIntegrity(dbPath);
+  return probe.kind === "ok" ? { state: "ok" } : { state: "damaged", detail: probe.detail };
+}
+
+/**
+ * Everything `purix check` needs, read in one pass from a READ-ONLY connection. Unlike getDb()/listManifest(),
+ * this never creates the store, never repairs or moves a damaged one aside, never creates a missing table and
+ * never writes a migrated manifest entry back. The store file itself stays byte-identical; the only trace is
+ * SQLite's own empty -wal/-shm sidecars, which any open of a WAL-mode database creates. Entries from older
+ * schemas are migrated in memory only.
+ */
+export interface StoreSnapshot {
+  manifest: ManifestEntry[];
+  pending: { id: string; component_id: string; operation: string; created_at: string }[];
+  /** verification_pass events, oldest first (component_id + parsed detail), for the "not tested" gap. */
+  verificationPasses: { component_id: string | null; detail: Record<string, unknown> }[];
+  /** F04-04: componentId -> files whose latest passing verification followed an edit that kept the rest of a line. Absent or empty when none. */
+  partialLine?: Record<string, string[]>;
+  /** C5: files an agent hook allowed a write to that no component governed at the time, oldest first (agent, files). Absent or empty when none. */
+  unadoptedWrites?: { agent: string; files: string[] }[];
+  auditRows: { id: number; payload: string; timestamp: string; prev_hash: string; hash: string }[];
+  auditCheckpoint: { last_pruned_id: number; checkpoint_hash: string } | null;
+  /** F05-10: the operation library's rows in table order, for the chain check. Absent or empty when the store has no library table. */
+  libraryRows?: { task_signature: string; edits: string; prev_hash: string; hash: string; language: string }[];
+}
+
+export type StoreSnapshotResult =
+  | { state: "absent" }
+  | { state: "damaged"; detail: string }
+  | { state: "ok"; snapshot: StoreSnapshot };
+
+export function readStoreSnapshot(): StoreSnapshotResult {
+  const dbPath = resolveDbPath();
+  if (!existsSync(dbPath)) return { state: "absent" };
+  const probe = probeIntegrity(dbPath);
+  if (probe.kind !== "ok") return { state: "damaged", detail: probe.detail };
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const all = (sql: string): any[] => {
+      try {
+        return db!.prepare(sql).all() as any[];
+      } catch (err) {
+        // A table that was never created (an older store, an empty chain) is an empty table, not a failure.
+        if (err instanceof Error && /no such table/i.test(err.message)) return [];
+        throw err;
+      }
+    };
+    const manifest = all("SELECT data FROM manifest").map((r) => migrateManifestEntry(JSON.parse(r.data) as ManifestEntry).entry);
+    const pending = all("SELECT id, component_id, operation, created_at FROM pending_operations");
+    const stream = all("SELECT kind, component_id, detail FROM events WHERE kind IN ('verification_pass', 'anchor_match', 'unadopted_write') ORDER BY timestamp ASC, rowid ASC").map((r) => {
+      let detail: Record<string, unknown> = {};
+      try { detail = JSON.parse(r.detail) as Record<string, unknown>; } catch { /* unreadable detail counts as no detail */ }
+      return { kind: r.kind as string, component_id: r.component_id as string | null, detail };
+    });
+    const verificationPasses = stream.filter((e) => e.kind === "verification_pass").map((e) => ({ component_id: e.component_id, detail: e.detail }));
+    const partialLine = Object.fromEntries(latestPartialLine(stream));
+    const unadoptedWrites = stream.filter((e) => e.kind === "unadopted_write").map((e) => ({
+      agent: typeof e.detail["agent"] === "string" ? (e.detail["agent"]) : "an agent",
+      files: Array.isArray(e.detail["files"]) ? (e.detail["files"] as unknown[]).filter((x): x is string => typeof x === "string") : [],
+    }));
+    const auditRows = all("SELECT id, payload, timestamp, prev_hash, hash FROM audit_chain ORDER BY id ASC");
+    const cp = all("SELECT last_pruned_id, checkpoint_hash FROM audit_checkpoints ORDER BY id DESC LIMIT 1");
+    const libraryRows = all("SELECT task_signature, edits, prev_hash, hash, language FROM operation_library ORDER BY rowid ASC");
+    return { state: "ok", snapshot: { manifest, pending, verificationPasses, partialLine, unadoptedWrites, auditRows, auditCheckpoint: cp[0] ?? null, libraryRows } };
+  } catch (err) {
+    return { state: "damaged", detail: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { db?.close(); } catch { /* best-effort */ }
+  }
+}
+
+/** Read-only integrity probe. Never writes: safe to run before anything touches the file. */
+function probeIntegrity(dbPath: string): { kind: "ok" } | { kind: "bad_pages" | "unreadable"; detail: string } {
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db.prepare("PRAGMA integrity_check").get() as { integrity_check: string } | undefined;
+    if (!row || row.integrity_check !== "ok") return { kind: "bad_pages", detail: row?.integrity_check ?? "unknown" };
+    return { kind: "ok" };
+  } catch (err) {
+    return { kind: "unreadable", detail: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { db?.close(); } catch { /* best-effort */ }
+  }
+}
+
+function moveDamagedStoreAside(dbPath: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const aside = `${dbPath}.corrupt-${stamp}`;
+  moveFileAside(dbPath, aside);
+  for (const suffix of ["-wal", "-shm"]) {
+    try { moveFileAside(dbPath + suffix, aside + suffix); } catch { /* sidecar may not exist */ }
+  }
+  return aside;
 }
 
 let _db: DatabaseSync | null = null;
@@ -50,6 +175,18 @@ export function getDb(): DatabaseSync {
   if (_db) return _db;
   const dbPath = resolveDbPath();
   mkdirSync(dirname(dbPath), { recursive: true });
+
+  // Check BEFORE any write: opening in WAL mode rewrites the file header, which
+  // would alter the very file we are about to preserve as evidence.
+  if (existsSync(dbPath)) {
+    const probe = probeIntegrity(dbPath);
+    if (probe.kind === "bad_pages") {
+      const asidePath = moveDamagedStoreAside(dbPath);
+      console.error(`\n🛑 CRITICAL: SQLite storage corruption detected (${probe.detail}).`);
+      console.error(`   The damaged file was kept at: ${asidePath}`);
+      console.error(`   A new empty store was created. Local-only state (Operation Library, burn-guard ledger, un-synced audit records) starts empty.`);
+    }
+  }
 
   // BUG FIX (getDb() half-initialized-connection defect): the module-level
   // _db/_dbPath used to be assigned *before* the PRAGMA/integrity-check/
@@ -80,12 +217,16 @@ export function getDb(): DatabaseSync {
 
     const integrity = db.prepare(`PRAGMA integrity_check`).get() as { integrity_check: string } | undefined;
     if (!integrity || integrity.integrity_check !== "ok") {
-      console.error(`\n🛑 CRITICAL: SQLite storage corruption detected (${integrity?.integrity_check ?? "unknown"}). Rebuilding database...`);
-      console.warn(`   Warning: Local-only state including Operation Library, burn-guard ledger, and un-synced audit records have been reset.`);
       db.close();
-      try {
-        unlinkSync(dbPath);
-      } catch { /* best-effort — we're about to recreate the file regardless */ }
+      // Industry practice (Firefox places.sqlite -> places.sqlite.corrupt;
+      // the same "rename aside, never delete" rule applies to every
+      // user-data store): the damaged file is preserved so it can still be
+      // inspected or recovered with `sqlite3 .recover`. Deleting it
+      // destroyed the audit chain, library and burn-guard ledger silently.
+      const asidePath = moveDamagedStoreAside(dbPath);
+      console.error(`\n🛑 CRITICAL: SQLite storage corruption detected (${integrity?.integrity_check ?? "unknown"}).`);
+      console.error(`   The damaged file was kept at: ${asidePath}`);
+      console.error(`   A new empty store was created. Local-only state (Operation Library, burn-guard ledger, un-synced audit records) starts empty.`);
       db = new DatabaseSync(dbPath);
       db.exec(`PRAGMA journal_mode = WAL;`);
       db.exec(`PRAGMA busy_timeout = 5000;`);
@@ -156,6 +297,11 @@ export function getDb(): DatabaseSync {
   _db = db;
   _dbPath = dbPath;
   return _db;
+}
+
+/** Where the open store's database file is, or null when it is not open. Side files that must live next to it (the pending-events spool) use this. */
+export function getDbFilePath(): string | null {
+  return _dbPath;
 }
 
 export function closeDb(): void {
@@ -247,6 +393,9 @@ export function writeManifestWithLimitCheck(entry: ManifestEntry): void {
 }
 
 export function readManifest(componentId: string): ManifestEntry | null {
+  // A lookup in a folder with no store has one answer. Opening the store to find that out created it (and the
+  // state folder around it) as a side effect of a typo in `purix delete` or `purix adopt`.
+  if (!_db && !storeExists()) return null;
   const db = getDb();
   const row = db.prepare("SELECT data FROM manifest WHERE component_id = ?").get(componentId) as
     | { data: string }
@@ -263,6 +412,7 @@ export function readManifest(componentId: string): ManifestEntry | null {
 }
 
 export function listManifest(): ManifestEntry[] {
+  if (!_db && !storeExists()) return [];
   const db = getDb();
   const rows = db.prepare("SELECT data FROM manifest").all() as { data: string }[];
   return rows.map((r) => {
@@ -366,6 +516,8 @@ export function linkComponents(componentId: string, dependsOnIds: string[]): Lin
 export interface FileSnapshot {
   path: string;
   content: string;
+  /** Only in an after snapshot: the change deletes this file, so "landed" means it is absent from disk. `content` is "" and is not hashed. Absent means false. */
+  deleted?: boolean;
 }
 
 export interface PendingOperation {

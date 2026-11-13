@@ -18,10 +18,11 @@ afterEach(() => {
 });
 
 describe("requireLanguage", () => {
-  it("allows typescript on the free tier and names the tier when refusing python", () => {
+  it("allows typescript and python on the free tier and refuses an unknown language without mentioning a paid plan", () => {
     process.env.PURIX_DEV_TIER = "free";
     expect(() => requireLanguage("typescript")).not.toThrow();
-    expect(() => requireLanguage("python")).toThrow(/"python" support is a Pro feature\. Current tier: free/);
+    expect(() => requireLanguage("python")).not.toThrow();
+    expect(() => requireLanguage("cobol")).toThrow(/"cobol" is not available\. Languages available here: typescript, python/);
   });
   it("allows python on the pro tier", () => {
     process.env.PURIX_DEV_TIER = "pro";

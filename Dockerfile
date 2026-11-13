@@ -14,7 +14,7 @@
 # Run a real `docker build .` once before relying on this in CI/release.
 
 ARG NODE_VERSION=24
-ARG PNPM_VERSION=9.15.0
+ARG PNPM_VERSION=12.4.1
 
 # ---------------------------------------------------------------------------
 # Stage 1: deps — install the full workspace (including devDependencies),
@@ -31,9 +31,8 @@ COPY packages/core/package.json packages/core/package.json
 COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/cli/package.json packages/cli/package.json
 
-# onlyBuiltDependencies in pnpm-workspace.yaml (esbuild, protobufjs,
-# @google/genai) need their postinstall scripts to run, which pnpm allows
-# by default for packages explicitly listed there.
+# allowBuilds in pnpm-workspace.yaml (esbuild, protobufjs) lets those two
+# packages run their postinstall scripts.
 RUN pnpm install --frozen-lockfile
 
 # ---------------------------------------------------------------------------
@@ -76,6 +75,17 @@ RUN pnpm install --prod --frozen-lockfile
 # whatever directory it's run against. Mount your project at /workspace:
 #   docker run --rm -v "$PWD":/workspace -w /workspace purix status
 WORKDIR /workspace
+
+# A1 (problem catalogue 2026-11-07): do not run as root. Purix executes project code, so root inside the container is more
+# access than it needs. The `node` user (uid 1000) ships with the node base image. If a bind-mounted /workspace is owned by a
+# different uid on your host, run with `--user "$(id -u):$(id -g)"` or fix the mount's ownership; do not go back to root.
+# NOT build-tested here (no Docker daemon): run one real `docker build .` and `docker run` before relying on it.
+USER node
+
+# The image runs one command per container, so the check is only that the CLI still starts. For a long-running
+# `purix mcp` container, replace it with a check of your own.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=10s --retries=3 \
+  CMD ["node", "/app/packages/cli/dist/cli.js", "--version"]
 
 ENTRYPOINT ["node", "/app/packages/cli/dist/cli.js"]
 CMD ["--help"]
