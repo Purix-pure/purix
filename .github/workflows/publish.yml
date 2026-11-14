@@ -131,6 +131,10 @@ jobs:
       # tagged the wrong commit, and either way this should stop, not guess.
       - name: Verify tag matches package versions
         run: |
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "::error::This workflow must run from a version tag (e.g. v0.4.0-beta.0), but it ran from ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}'. Push the tag, or pick the tag under 'Use workflow from' when running it manually."
+            exit 1
+          fi
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           for pkg in packages/core packages/mcp-server packages/cli; do
             PKG_VERSION=$(node -p "require('./$pkg/package.json').version")
