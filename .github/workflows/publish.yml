@@ -43,20 +43,16 @@ jobs:
         with:
           node-version: '24'
           cache: 'pnpm'
-          registry-url: 'https://registry.npmjs.org'
 
-      # REAL FIX (2026-09-19): actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4's registry-url option
-      # always writes "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}"
-      # into .npmrc, regardless of whether NODE_AUTH_TOKEN is set. This
-      # workflow deliberately never sets that secret (trusted publishing
-      # replaces it), so it expands to an empty string — and npm reads the
-      # mere presence of that line as "auth is already configured" and
-      # skips the OIDC exchange entirely, failing with ENEEDAUTH or a 404
-      # even though everything else here is correctly set up. Stripping
-      # the line is the documented fix; see
-      # PURIX-CODE-VERIFIED-GAP-REPORT-2026-09-19.md §3 for the trace.
-      - name: Remove empty auth token line left by setup-node
-        run: sed -i '/_authToken=$/d' .npmrc || true
+      # setup-node's registry-url option writes a user-level .npmrc (in $RUNNER_TEMP, not
+      # the repo) containing "_authToken=${NODE_AUTH_TOKEN}" and "always-auth=true", and
+      # exports a placeholder NODE_AUTH_TOKEN. With trusted publishing there is no token,
+      # so that config only gets in the way. npm already defaults to registry.npmjs.org,
+      # so registry-url is omitted above and this step fails the job if a token sneaks in.
+      - name: Assert no static npm token is configured
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then echo "::error::NODE_AUTH_TOKEN is set; trusted publishing must not use a token"; exit 1; fi
+          if npm config list 2>/dev/null | grep -qi '_authToken'; then echo "::error::an _authToken is configured in npm config"; exit 1; fi
 
       # Trusted publishing needs npm CLI 11.5.1+. Pin explicitly rather
       # than trust whatever version ships with the Node version installed above
@@ -189,5 +185,5 @@ jobs:
           cd "$RUNNER_TEMP/tarballs"
           sha256sum -c SHA256SUMS
           for pkg in core mcp-server cli; do
-            npm publish "./purix-$pkg-$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version").tgz" --access public --provenance --tag "${{ steps.dist_tag.outputs.tag }}"
+            npm publish "./purix-$pkg-$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version").tgz" --access public --provenance --loglevel verbose --tag "${{ steps.dist_tag.outputs.tag }}"
           done
