@@ -33,6 +33,10 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, 
 import { cpus, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hideSandboxTools } from "./hide-sandbox-tools.mjs";
+
+// Tests assume no sandbox tool on PATH (see hide-sandbox-tools.mjs); every stage below inherits this PATH.
+hideSandboxTools();
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);

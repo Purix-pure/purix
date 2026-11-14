@@ -78,7 +78,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run Gate-Parity Conformance Suite
-        run: pnpm exec tsx packages/core/src/language/conformance/run.ts
+        run: node scripts/hide-sandbox-tools.mjs pnpm exec tsx packages/core/src/language/conformance/run.ts
       - name: Upload Parity Report Artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

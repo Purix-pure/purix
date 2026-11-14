@@ -18,6 +18,9 @@ import { glob } from "node:fs/promises";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hideSandboxTools } from "../../../scripts/hide-sandbox-tools.mjs";
+
+hideSandboxTools(); // the tests assume no sandbox tool on PATH; see scripts/hide-sandbox-tools.mjs
 
 const EXCLUDED_PATH_SEGMENT = "language/conformance/fixtures/";
 
