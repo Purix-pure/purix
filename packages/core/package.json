@@ -1,6 +1,6 @@
 {
   "name": "@purix/core",
-  "version": "0.4.0-beta.0",
+  "version": "0.4.0-beta.1",
   "description": "Purix core: the classify, sandbox-verify and record-evidence pipeline behind the @purix/cli and @purix/mcp-server packages. Most people want @purix/cli.",
   "keywords": [
     "ai",

@@ -2,7 +2,7 @@
 
 The command-line tool for **Purix**, a governance layer for AI-driven code changes. Purix classifies a change, verifies it in a sandbox against your test suite, asks a human to confirm anything risky, and records what it did. It also runs as an MCP server (`purix mcp-serve`) so other coding agents can use the same pipeline.
 
-> **This is a beta (`0.4.0-beta.0`) for TypeScript, JavaScript and Python, run on your own machine.**
+> **This is a beta (`0.4.0-beta.1`) for TypeScript, JavaScript and Python, run on your own machine.**
 > Requires **Node.js 22.13 or later** (or 24+). Results are reported, not settled. Windows, macOS and Cursor are experimental. Read [BETA_SCOPE.md](https://github.com/purix-pure/purix/blob/main/BETA_SCOPE.md) for what Purix checks and what it does not.
 
 ## Install

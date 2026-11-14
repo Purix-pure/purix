@@ -11,7 +11,7 @@ npx @purix/cli mcp-serve      # or start the server directly, for an agent's man
 
 This package has no executable of its own. It is published so `@purix/cli` can depend on it.
 
-> **Beta (`0.4.0-beta.0`).** TypeScript, JavaScript and Python only. Requires Node.js 22.13 or later (or 24+). The MCP server alone is advisory: an agent that edits files directly, without calling Purix, is not stopped by it. See [BETA_SCOPE.md](https://github.com/purix-pure/purix/blob/main/BETA_SCOPE.md).
+> **Beta (`0.4.0-beta.1`).** TypeScript, JavaScript and Python only. Requires Node.js 22.13 or later (or 24+). The MCP server alone is advisory: an agent that edits files directly, without calling Purix, is not stopped by it. See [BETA_SCOPE.md](https://github.com/purix-pure/purix/blob/main/BETA_SCOPE.md).
 
 - What leaves your machine, and what is stored: [PRIVACY.md](https://github.com/purix-pure/purix/blob/main/PRIVACY.md)
 - Reporting a security issue: [SECURITY.md](https://github.com/purix-pure/purix/blob/main/SECURITY.md)

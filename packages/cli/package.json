@@ -1,6 +1,6 @@
 {
   "name": "@purix/cli",
-  "version": "0.4.0-beta.0",
+  "version": "0.4.0-beta.1",
   "description": "Governance-first AI coding agent CLI: classifies and verifies AI-driven code changes in a sandbox, against your test suite, before they land. Also runs as an MCP server for other coding agents.",
   "keywords": [
     "ai",
@@ -48,8 +48,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
-    "@purix/core": "workspace:^0.4.0-beta.0",
-    "@purix/mcp-server": "workspace:^0.4.0-beta.0",
+    "@purix/core": "workspace:^0.4.0-beta.1",
+    "@purix/mcp-server": "workspace:^0.4.0-beta.1",
     "add-mcp": "^2.4.0",
     "commander": "^15.0.0",
     "cross-spawn": "^7.0.6",

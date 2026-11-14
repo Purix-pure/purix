@@ -217,7 +217,7 @@ be enforced by the server.
 
 ## Release status
 
-The version in this repository is **0.4.0-beta.0**. It goes to npm under the `beta` tag, and you install it with `@purix/cli@beta`. The three packages (`@purix/core`, `@purix/mcp-server`, `@purix/cli`) move together at one version number. What changed is in the [changelog](./docs/compliance/CHANGELOG.md), what is and is not covered is in [BETA_SCOPE.md](./BETA_SCOPE.md), and the node-version policy is in [docs/NODE_SUPPORT_POLICY.md](./docs/NODE_SUPPORT_POLICY.md).
+The version in this repository is **0.4.0-beta.1**. It goes to npm under the `beta` tag, and you install it with `@purix/cli@beta`. The three packages (`@purix/core`, `@purix/mcp-server`, `@purix/cli`) move together at one version number. What changed is in the [changelog](./docs/compliance/CHANGELOG.md), what is and is not covered is in [BETA_SCOPE.md](./BETA_SCOPE.md), and the node-version policy is in [docs/NODE_SUPPORT_POLICY.md](./docs/NODE_SUPPORT_POLICY.md).
 
 Support: bugs through [GitHub Issues](https://github.com/purix-pure/purix/issues), questions through [GitHub Discussions](https://github.com/purix-pure/purix/discussions), security reports through the private reporting link in [SECURITY.md](./SECURITY.md).
 

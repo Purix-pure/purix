@@ -10,7 +10,11 @@ same version number.
 
 Nothing yet.
 
-## [0.4.0-beta.0] — not yet published
+## [0.4.0-beta.1] — release pipeline
+
+Same code as 0.4.0-beta.0; the version number changed so the release can go out through GitHub Actions with npm trusted publishing (and npm provenance).
+
+## [0.4.0-beta.0] — published 2026-11-14 (by hand, without provenance)
 
 (Labelled 0.3.0-beta.1 in earlier drafts. Nothing was ever published under that number; the version was aligned to 0.4.0-beta.0 on 2026-11-08.)
 
