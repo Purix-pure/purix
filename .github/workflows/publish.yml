@@ -106,7 +106,7 @@ jobs:
       - name: Coverage gate
         run: pnpm run coverage
       - name: Language conformance suite
-        run: pnpm exec tsx packages/core/src/language/conformance/run.ts
+        run: node scripts/hide-sandbox-tools.mjs pnpm exec tsx packages/core/src/language/conformance/run.ts
 
       # A prerelease (0.2.0-beta.0) must never take npm's default "latest" tag: pnpm/npm
       # publish to "latest" unless told otherwise, so `npm install @purix/cli` would hand

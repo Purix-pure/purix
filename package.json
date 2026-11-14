@@ -10,7 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "purix": "turbo run build --filter=@purix/cli... && pnpm --filter @purix/cli exec tsx src/cli.ts",
-    "test": "turbo run test",
+    "test": "node scripts/hide-sandbox-tools.mjs turbo run test",
     "typecheck": "turbo run typecheck",
     "boundary-check": "node --import tsx scripts/check-core-boundary.ts",
     "cycle-check": "node scripts/check-import-cycles.mjs",
@@ -34,7 +34,7 @@
     "artifact-check": "node --import tsx scripts/check-no-toolchain-artifacts.ts",
     "lint": "turbo run build --filter=@purix/core && eslint .",
     "lint:fix": "turbo run build --filter=@purix/core && eslint . --fix",
-    "coverage": "node --import ./scripts/test-home-preload.mjs --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-coverage-include=\"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.ts\" --test-coverage-exclude=\"**/*.test.ts\" \"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.test.ts\""
+    "coverage": "node scripts/hide-sandbox-tools.mjs node --import ./scripts/test-home-preload.mjs --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-coverage-include=\"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.ts\" --test-coverage-exclude=\"**/*.test.ts\" \"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "22.13.0",
