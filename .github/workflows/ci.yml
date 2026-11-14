@@ -35,7 +35,7 @@ jobs:
       # repo's pinned version. version is explicit here (not omitted) even
       # though pnpm/setup can read it from packageManager, so CI can never
       # silently drift from what package.json declares.
-      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           version: 12.4.1
           # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           version: 12.4.1
           # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
@@ -106,7 +106,7 @@ jobs:
         os: [windows-2022, windows-latest, macos-15, macos-latest]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           version: 12.4.1
           # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
@@ -133,7 +133,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1
+      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           version: 12.4.1
           # pnpm/setup would otherwise run its own `pnpm install` here, before setup-node, on the runner's default Node. The next steps install explicitly.
