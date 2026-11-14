@@ -18,6 +18,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.0). Must match all three packages. Run from main.'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -129,20 +134,28 @@ jobs:
       # whose package.json version doesn't match the git tag that triggered
       # this — that mismatch means someone forgot to bump a version file, or
       # tagged the wrong commit, and either way this should stop, not guess.
-      - name: Verify tag matches package versions
+      - name: Verify release version matches package versions
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
-            echo "::error::This workflow must run from a version tag (e.g. v0.4.0-beta.0), but it ran from ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}'. Push the tag, or pick the tag under 'Use workflow from' when running it manually."
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            EXPECTED="${GITHUB_REF_NAME#v}"
+            SOURCE="tag $GITHUB_REF_NAME"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            EXPECTED="${INPUT_VERSION#v}"
+            SOURCE="manual input '$INPUT_VERSION' on main"
+          else
+            echo "::error::Publish only runs from a v* tag, or manually from main with the version typed in. Got ${GITHUB_EVENT_NAME} on ${GITHUB_REF}."
             exit 1
           fi
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
           for pkg in packages/core packages/mcp-server packages/cli; do
             PKG_VERSION=$(node -p "require('./$pkg/package.json').version")
-            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-              echo "::error::Tag $GITHUB_REF_NAME (version $TAG_VERSION) does not match $pkg/package.json version $PKG_VERSION"
+            if [ "$PKG_VERSION" != "$EXPECTED" ]; then
+              echo "::error::Release version from $SOURCE does not match $pkg/package.json version $PKG_VERSION"
               exit 1
             fi
           done
+          echo "Publishing $EXPECTED (from $SOURCE)"
 
       # Build once, pack once, and publish exactly what was packed. Publishing
       # with `pnpm publish` re-runs prepublishOnly (a second build), so the
