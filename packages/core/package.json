@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/purix-pure/purix.git",
+    "url": "git+https://github.com/Purix-pure/purix.git",
     "directory": "packages/core"
   },
   "homepage": "https://github.com/purix-pure/purix#readme",

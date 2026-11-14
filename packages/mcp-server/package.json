@@ -10,7 +10,7 @@
   "description": "Purix MCP server: governance pipeline (classify, verify in a sandbox, record evidence) for AI coding agents, over stdio.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/purix-pure/purix.git",
+    "url": "git+https://github.com/Purix-pure/purix.git",
     "directory": "packages/mcp-server"
   },
   "homepage": "https://github.com/purix-pure/purix#readme",
