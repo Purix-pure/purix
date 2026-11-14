@@ -20,9 +20,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.0). Must match all three packages. Run from main.'
-        required: true
+        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.1). Must match all three packages. Run from main. Leave empty for the OIDC debug run.'
+        required: false
         type: string
+      debug_oidc_only:
+        description: 'Debug only: print the GitHub identity claims and test npm token exchange for the 3 packages. Publishes nothing.'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,6 +35,7 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ !inputs.debug_oidc_only }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -204,3 +210,32 @@ jobs:
           for pkg in core mcp-server cli; do
             npm publish "./purix-$pkg-$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version").tgz" --access public --provenance --loglevel verbose --tag "${{ steps.dist_tag.outputs.tag }}"
           done
+
+  oidc-debug:
+    if: ${{ inputs.debug_oidc_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Publishes nothing. Prints the identity claims GitHub sends to npm (repository, workflow, ref... none are secret)
+      # and asks npm's token-exchange endpoint about each package. The token and any returned credential are masked/not printed.
+      - name: Show OIDC claims and test npm token exchange
+        run: |
+          cat > "$RUNNER_TEMP/oidc-debug.mjs" <<'EOF'
+          const url = process.env.ACTIONS_ID_TOKEN_REQUEST_URL + "&audience=" + encodeURIComponent("npm:registry.npmjs.org");
+          const r = await fetch(url, { headers: { Authorization: "bearer " + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN } });
+          const { value: token } = await r.json();
+          console.log("::add-mask::" + token);
+          const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+          for (const k of ["iss","aud","sub","repository","repository_owner","repository_id","repository_owner_id","repository_visibility","workflow","workflow_ref","job_workflow_ref","ref","ref_type","event_name","environment","runner_environment"]) {
+            console.log(k + ": " + JSON.stringify(claims[k]));
+          }
+          for (const pkg of ["@purix/core", "@purix/mcp-server", "@purix/cli"]) {
+            const u = "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/" + pkg.replace("/", "%2f");
+            const res = await fetch(u, { method: "POST", headers: { Authorization: "Bearer " + token } });
+            const body = await res.text();
+            console.log(pkg + " -> HTTP " + res.status + (res.ok ? " (accepted; response not printed)" : " " + body));
+          }
+          EOF
+          node "$RUNNER_TEMP/oidc-debug.mjs"
