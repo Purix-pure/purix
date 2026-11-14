@@ -37,7 +37,7 @@
     "coverage": "node scripts/hide-sandbox-tools.mjs node --import ./scripts/test-home-preload.mjs --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-coverage-include=\"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.ts\" --test-coverage-exclude=\"**/*.test.ts\" \"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.test.ts\""
   },
   "devDependencies": {
-    "@types/node": "22.13.0",
+    "@types/node": "26.6.6",
     "eslint": "^9.39.0",
     "expect": "^29.7.0",
     "tsx": "^4.19.2",
