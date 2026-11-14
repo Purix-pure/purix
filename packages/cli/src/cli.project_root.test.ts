@@ -7,7 +7,7 @@ import { expect } from "expect";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
@@ -25,7 +25,8 @@ function run(args: string[], cwd: string, home: string, input?: string) {
 }
 
 function fixture(): { base: string; home: string; proj: string; deep: string } {
-  const base = mkdtempSync(join(tmpdir(), "purix-root-"));
+  // The real path: the command prints the folder the operating system reports (macOS: /private/var/..., not /var/...).
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "purix-root-")));
   // home sits beside the project, not inside it: a project above the home folder never counts (rule 4).
   const home = mkdtempSync(join(tmpdir(), "purix-root-home-"));
   const proj = join(base, "proj");

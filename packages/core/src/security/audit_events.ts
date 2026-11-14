@@ -6,8 +6,19 @@
 // The audit chain lives in the store of the current working directory. A caller that names a different project folder
 // (tests, tools that act on another checkout) must not write into this folder's chain, so an event for another store is skipped
 // and reported as not recorded.
+import { realpathSync } from "node:fs";
 import { appendAuditRecord } from "./audit_tamper_evidence.js";
 import { resolveSharedStateDir } from "../state/git_common_dir.js";
+
+/** Two spellings of one folder (macOS /var vs /private/var, Windows short names) are the same folder; process.cwd() gives the real one. */
+function sameFolder(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return realpathSync.native(a) === realpathSync.native(b);
+  } catch {
+    return false; // a store that is not on disk yet keeps the plain comparison
+  }
+}
 
 export interface RecordEventOptions {
   /** The project folder the event is about. Default: the current directory. */
@@ -21,7 +32,7 @@ export interface RecordEventOptions {
 /** Appends `{ event, ...fields }`. True when recorded. Never throws. */
 export function recordGovernanceEvent(event: string, fields: Record<string, unknown>, opts: RecordEventOptions = {}): boolean {
   try {
-    if (opts.baseDir !== undefined && resolveSharedStateDir(opts.baseDir) !== resolveSharedStateDir()) return false;
+    if (opts.baseDir !== undefined && !sameFolder(resolveSharedStateDir(opts.baseDir), resolveSharedStateDir())) return false;
     (opts.append ?? appendAuditRecord)({ event, ...fields });
     return true;
   } catch (err) {

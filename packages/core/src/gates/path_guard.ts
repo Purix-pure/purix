@@ -43,12 +43,32 @@ export interface PathCheckResult {
  * exist yet, e.g. in tests or a not-yet-scaffolded repo, which must
  * stay a safe/no-op case, not a false escape).
  */
+/**
+ * The root's own real location, when it differs from how the caller spelled it. macOS temp folders live under /var, which is a
+ * symlink to /private/var; Windows temp folders can use 8.3 short names (RUNNER~1). realpathSync() on a component inside the
+ * root then returns the canonical spelling, which never matches the lexical root, so every in-root path read as an escape.
+ * A path that resolves inside the root's canonical location is inside the root.
+ */
+function canonicalRoots(root: string): string[] {
+  const out = new Set<string>([root]);
+  for (const fn of [realpathSync, realpathSync.native]) {
+    try {
+      out.add(fn(root));
+    } catch {
+      // the root may not exist yet (tests, a not-yet-scaffolded repo): the lexical root alone is the safe no-op case
+    }
+  }
+  return [...out];
+}
+
 function findSymlinkEscape(root: string, resolved: string, depth: number = 0): string | null {
   const rootWithSep = root.endsWith(sep) ? root : root + sep;
-  const inside = (p: string) => p === root || p.startsWith(rootWithSep);
+  const lexicalInside = (p: string) => p === root || p.startsWith(rootWithSep);
+  const roots = canonicalRoots(root);
+  const inside = (p: string) => roots.some((r) => p === r || p.startsWith(r.endsWith(sep) ? r : r + sep));
   if (depth > 8) return resolved; // a chain of links this long is not a project layout; refuse rather than follow it forever
   let current = resolved;
-  while (inside(current)) {
+  while (lexicalInside(current)) {
     // lstat, not existsSync: existsSync follows links, so a DANGLING link (its target does not exist yet) read as "nothing here",
     // the walk went on up to a safe parent, and a write through the link then created the file outside the root.
     let st;
@@ -77,7 +97,7 @@ function findSymlinkEscape(root: string, resolved: string, depth: number = 0): s
         // filesystem will surface its own error if this path turns out to be unusable.
         return null;
       }
-      if (real !== root && !real.startsWith(rootWithSep)) {
+      if (!inside(real)) {
         return real;
       }
       // The nearest existing component resolves safely inside root, and anything below it (deeper, not-yet-created path

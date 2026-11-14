@@ -162,9 +162,11 @@ function makeRecord(
 // language is reintroduced, add its extraction branch here AND register
 // its provider in core/src/language/registry.ts so the two stay in sync
 // (see audit finding 3.1, where the two had drifted).
-function extractSymbols(filePath: string, content: string, lang: string): ComponentRecord[] {
+function extractSymbols(filePath: string, content: string, lang: string, baseDir: string = process.cwd()): ComponentRecord[] {
   const records: ComponentRecord[] = [];
-  const relPath = toPosixPath(relative(process.cwd(), filePath));
+  // Relative to the folder being indexed, the same base every other path in this run uses. It was the current directory, which is the
+  // same folder only until a caller names another, or spells it differently (macOS: cwd is /private/var/..., the caller's is /var/...).
+  const relPath = toPosixPath(relative(baseDir, filePath));
   // A UTF-8 byte-order mark sits in front of the first line and would hide a first-line `def`/`class` from the line-anchored regex below.
   if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
 
@@ -235,7 +237,7 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
     const content = readFileSync(absPath, "utf-8");
     indexedFiles.push({ path: relPath, content });
 
-    const symbols = extractSymbols(absPath, content, lang);
+    const symbols = extractSymbols(absPath, content, lang, baseDir);
     for (const sym of symbols) allComponents.push(sym);
   }
 
