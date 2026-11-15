@@ -30,6 +30,22 @@ describe("classifyPrompt", () => {
 });
 
 describe("classifyAndCompile passes neighbours", () => {
+  // classifyAndCompile opens the store; without its own folder the database lands in the package folder and stays cached for the next group.
+  let tmpDir: string, userDir: string, oldCwd: string;
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "purix-nb-pass-"));
+    userDir = mkdtempSync(join(tmpdir(), "purix-nb-pass-user-"));
+    process.env.PURIX_USER_DIR = userDir;
+    oldCwd = process.cwd();
+    process.chdir(tmpDir);
+  });
+  afterEach(() => {
+    closeDb();
+    process.chdir(oldCwd);
+    safeRmSync(tmpDir);
+    safeRmSync(userDir);
+    delete process.env.PURIX_USER_DIR;
+  });
   const neighbour = { component_id: "tax", path: "tax.ts", content: 'export const RATE = 0.2; const key = "AKIAIOSFODNN7EXAMPLE";' };
   const verdict = { reasoning: "r", operation: "unclassified", contract_changing: false, confidence: 0.9, edits: [], suspicious_injected_instruction: false, is_new_capability: false } as never;
 

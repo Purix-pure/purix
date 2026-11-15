@@ -80,7 +80,7 @@ export function writeFileAtomic(path: string, content: string, opts: AtomicWrite
   const tmp = writeTempFile(dir, content, opts.mode, opts.mkdir ?? true, opts.exactMode ?? false);
   const doRename = opts.rename ?? renameSync;
   const wait = opts.sleep ?? sleepMs;
-  const max = opts.retries ?? 5;
+  const max = opts.retries ?? (process.platform === "win32" ? 20 : 5);
   for (let attempt = 0; ; attempt++) {
     try {
       doRename(tmp, path);

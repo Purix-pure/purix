@@ -48,7 +48,7 @@ const ONE_MIB = 1024 * 1024;
 export const TIER_BUDGETS: Readonly<Record<SpawnTier, TierBudget>> = Object.freeze({
   T0: Object.freeze({ targetMs: 100, deadlineMs: 1_000, maxOutputBytes: ONE_MIB }),
   T1: Object.freeze({ targetMs: 2_000, deadlineMs: 10_000, maxOutputBytes: ONE_MIB }),
-  T2: Object.freeze({ targetMs: 10_000, deadlineMs: 60_000, maxOutputBytes: ONE_MIB }),
+  T2: Object.freeze({ targetMs: 10_000, deadlineMs: 120_000, maxOutputBytes: ONE_MIB }),
   T3: Object.freeze({ targetMs: null, deadlineMs: 600_000, maxOutputBytes: ONE_MIB }),
   T4: Object.freeze({ targetMs: null, deadlineMs: 3_600_000, maxOutputBytes: ONE_MIB }),
 });
