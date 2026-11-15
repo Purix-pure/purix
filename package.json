@@ -1,6 +1,6 @@
 {
   "name": "purix-monorepo",
-  "version": "0.4.0-beta.1",
+  "version": "0.4.0-beta.2",
   "private": true,
   "type": "module",
   "engines": {
@@ -32,22 +32,25 @@
     "tool-boundary-check": "node --import tsx scripts/check-tool-boundary.ts",
     "tool-boundary-check:test": "node --import tsx --test scripts/check-tool-boundary.test.ts",
     "artifact-check": "node --import tsx scripts/check-no-toolchain-artifacts.ts",
+    "version-check": "node scripts/sync-versions.mjs --check",
+    "version-set": "node scripts/sync-versions.mjs",
+    "registry-check:test": "node --test scripts/check-registry.test.mjs",
     "lint": "turbo run build --filter=@purix/core && eslint .",
     "lint:fix": "turbo run build --filter=@purix/core && eslint . --fix",
     "coverage": "node scripts/hide-sandbox-tools.mjs node --import ./scripts/test-home-preload.mjs --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-coverage-include=\"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.ts\" --test-coverage-exclude=\"**/*.test.ts\" \"packages/core/src/{llm,licensing,gates,sandbox,verify}/**/*.test.ts\""
   },
   "devDependencies": {
-    "@types/node": "22.13.0",
+    "@types/node": "catalog:",
     "eslint": "^9.39.0",
-    "expect": "^29.7.0",
-    "tsx": "^4.19.2",
+    "expect": "catalog:",
+    "tsx": "catalog:",
     "turbo": "^2.3.3",
-    "typescript": "5.7.2",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.46.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.31.0",
-    "cross-spawn": "^7.0.6"
+    "@modelcontextprotocol/sdk": "catalog:",
+    "cross-spawn": "catalog:"
   },
   "description": "Governance-first AI coding agent platform. Purix classifies and verifies AI-driven code modifications *before* they run — in a sandbox, against your test suite, with a human confirmation checkpoint for anything risky — rather than applying a change and hoping it was safe.",
   "main": "index.js",

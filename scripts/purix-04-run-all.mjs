@@ -104,6 +104,8 @@ const STAGES = [
   { group: "gates", name: "import-cycle-check", kind: "no circular imports in the source (D-o), plus the checker's own tests", cmd: "pnpm run cycle-check && pnpm run cycle-check:test", min: 5 },
   { group: "gates", name: "tool-boundary-check", kind: "tools install only through the broker (ADR-060), plus the checker's own tests", cmd: "pnpm run tool-boundary-check && pnpm run tool-boundary-check:test", min: 5 },
   { group: "gates", name: "artifact-check", kind: "no build junk committed", cmd: "pnpm run artifact-check", min: 5 },
+  { group: "gates", name: "version-check", kind: "release version and tool pins agree everywhere they are written (scripts/sync-versions.mjs)", cmd: "pnpm run version-check", min: 1 },
+  { group: "gates", name: "registry-check-tests", kind: "the npm registry pre/post-publish check logic (scripts/check-registry.mjs), offline", cmd: "pnpm run registry-check:test", min: 1 },
   { group: "gates", name: "claim-ledger", kind: "every ledgered public sentence still exists with its evidence; no banned phrase; unmapped claim-shaped README sentences do not grow", cmd: "node scripts/check-claims.mjs", min: 5 },
   { group: "gates", name: "checks-page", kind: "docs/WHAT_PURIX_CHECKS.md is exactly what the claims register and run log say now, plus the generator's own tests", cmd: "node scripts/generate-checks-page.mjs --check && node --test scripts/generate-checks-page.test.mjs", min: 3 },
   { group: "gates", name: "typecheck", kind: "types, all packages", cmd: "pnpm run typecheck", min: 15 },

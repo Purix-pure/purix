@@ -29,6 +29,47 @@ export function isAutoConfirmActive(): boolean {
   return ambientEnv("NODE_ENV") === "test" && ambientEnv("AUTO_CONFIRM") === "1";
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Prompt lock.
+//
+// A process whose stdin and stdout carry a protocol must never prompt. The MCP stdio server is one: its stdin is the agent's
+// JSON-RPC requests and its stdout is the replies. A prompt there does two kinds of damage at once:
+//   1. the question is written to stdout, in the middle of the reply stream, so the client cannot parse the next line;
+//   2. the line reader attaches to the same stdin the protocol reads, so the agent's NEXT request is consumed as the "answer".
+// Seen in the field: the first `purix_create` on a fresh project reached the "register you as the sole approver?" prompt, the
+// agent's call timed out (-32001), and every later call (`purix_index`, then `purix_status`) timed out too.
+//
+// The lock is set once, by the host, before it starts talking. From then on no function in this file reads stdin or writes to
+// stdout; a prompt is refused (confirm() answers "no", promptLine() answers null) and says so on stderr, where a host may log.
+// Refusing is the safe answer: every caller already treats "no input" as "no". It is never treated as an approval.
+// ---------------------------------------------------------------------------------------------------------------------
+let promptLockReason: string | null = null;
+
+/** Called once by a host that owns stdin/stdout (the MCP server). Idempotent; the first reason given is kept. */
+export function lockPrompts(reason: string): void {
+  if (promptLockReason === null) promptLockReason = reason;
+}
+
+/** True once lockPrompts() has run in this process. Callers that can skip an optional question use this to skip it quietly. */
+export function promptsLocked(): boolean {
+  return promptLockReason !== null;
+}
+
+/** Why prompts are locked, or null. For messages that tell the person what to do instead. */
+export function promptLockedBecause(): string | null {
+  return promptLockReason;
+}
+
+/** For tests only: put the process back to "may prompt". */
+export function unlockPromptsForTests(): void {
+  promptLockReason = null;
+}
+
+function refuseToPrompt(question: string): void {
+  // stderr, never stdout: stdout may be a protocol stream.
+  process.stderr.write(`[purix] Not asking "${question.trim().slice(0, 200)}": ${promptLockReason}. Treated as "no".\n`);
+}
+
 // One process-wide line reader shared by every prompt (confirm() and the
 // login prompts). Two failure modes drove this (TEST-REPORT F6/F7):
 //   F6 — readline/promises' question() never settles when stdin reaches EOF
@@ -67,6 +108,8 @@ function ensureReader(): readline.Interface {
  * queued line remains — never hangs on EOF.
  */
 export function readInputLine(): Promise<string | null> {
+  // Locked: stdin belongs to a protocol. Never attach a reader to it.
+  if (promptLockReason !== null) return Promise.resolve(null);
   const queued = lineQueue.shift();
   if (queued !== undefined) return Promise.resolve(queued);
   if (inputEnded || stdin.readableEnded) return Promise.resolve(null);
@@ -79,6 +122,10 @@ export function readInputLine(): Promise<string | null> {
 
 /** Writes `question` and reads one answer; `null` means no input was available. */
 export async function promptLine(question: string): Promise<string | null> {
+  if (promptLockReason !== null) {
+    refuseToPrompt(question);
+    return null;
+  }
   stdout.write(question);
   const line = await readInputLine();
   if (line === null) stdout.write("\n");
@@ -93,6 +140,10 @@ export async function promptLine(question: string): Promise<string | null> {
  */
 export async function confirm(message: string): Promise<boolean> {
   if (isAutoConfirmActive()) return true;
+  if (promptLockReason !== null) {
+    refuseToPrompt(message);
+    return false;
+  }
   const answer = await promptLine(`${message} [y/N] `);
   if (answer === null) {
     stdout.write("(no input available — treating as 'no')\n");

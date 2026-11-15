@@ -58,7 +58,7 @@ describe("orientation for a new user", () => {
   it("`purix init` is not a command, and the error says where to start instead", () => {
     inFreshFolder((dir) => {
       const r = run(["init"], dir);
-      expect(r.status).toBe(1);
+      expect(r.status).toBe(2);
       expect(r.output).toContain("unknown command 'init'");
       expect(r.output).toContain('purix create "what you want to build"');
       expect(r.output).toContain("purix connect");
@@ -69,7 +69,7 @@ describe("orientation for a new user", () => {
   it("any other unknown command points at the help page", () => {
     inFreshFolder((dir) => {
       const r = run(["frobnicate"], dir);
-      expect(r.status).toBe(1);
+      expect(r.status).toBe(2);
       expect(r.output).toContain('Run "purix --help" to see every command.');
     });
   });

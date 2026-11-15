@@ -2,11 +2,53 @@
 import { chmodSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { confirm } from "../cli-io/confirm.js";
+import { confirm, promptsLocked } from "../cli-io/confirm.js";
 import { quarantineCorruptFile, readJsonFile, writeJsonAtomic } from "../platform/atomic_write.js";
 import { PURIX_DIRNAME } from "../platform/layout.js";
 
 const AUTH_PATH = join(PURIX_DIRNAME, "authorized_operators.json");
+
+/** The command a person runs, in a terminal in the project folder, to register themselves as an approver. */
+export const REGISTER_APPROVER_COMMAND = "purix approve --register";
+
+/**
+ * What is said when no approver is on record and nobody can be asked. Registering is a question for a person, and a process whose
+ * stdin/stdout carry a protocol (the MCP server) has no way to ask it, so it says what to do instead of asking.
+ */
+export function noApproverMessage(): string {
+  return (
+    `No approver is registered for this project yet (${AUTH_PATH}). Registering one is a one-time question for a person, ` +
+    `and it cannot be asked inside an MCP session. In a terminal, in this project folder, run: ${REGISTER_APPROVER_COMMAND}   ` +
+    `Then call this tool again.`
+  );
+}
+
+export type ApproverStatus =
+  | { ok: true }
+  | { ok: false; reason: "none" | "not_listed" | "unreadable"; message: string };
+
+/**
+ * Is the person running this process an approver? Never prompts, never writes, never throws. For status and pre-flight
+ * checks that must tell a person what is missing without asking them anything.
+ */
+export function approverStatus(): ApproverStatus {
+  let state: AuthState;
+  try {
+    state = load();
+  } catch (err) {
+    return { ok: false, reason: "unreadable", message: err instanceof Error ? err.message : String(err) };
+  }
+  if (state.authorized.length === 0) return { ok: false, reason: "none", message: noApproverMessage() };
+  const currentUser = userInfo().username;
+  if (!state.authorized.includes(currentUser)) {
+    return {
+      ok: false,
+      reason: "not_listed",
+      message: `User "${currentUser}" is not in the authorized-approvers list (${AUTH_PATH}). Add them manually to that file to grant approval rights.`,
+    };
+  }
+  return { ok: true };
+}
 
 interface AuthState {
   authorized: string[];
@@ -63,6 +105,8 @@ export async function assertAuthorizedToApprove(): Promise<void> {
   const state = load();
 
   if (state.authorized.length === 0) {
+    // Nobody can be asked (the MCP server): say what to do instead of writing a prompt into a protocol stream. Writes nothing.
+    if (promptsLocked()) throw new Error(noApproverMessage());
     const proceed = await confirm(
       `No authorized approvers configured yet (${AUTH_PATH}). Register "${currentUser}" as the sole approver now?`
     );

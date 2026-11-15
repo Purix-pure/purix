@@ -162,6 +162,30 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@modelcontextprotocol/sdk':
+      specifier: ^1.31.0
+      version: 1.32.1
+    '@types/node':
+      specifier: 22.13.0
+      version: 22.13.0
+    cross-spawn:
+      specifier: ^7.0.6
+      version: 7.0.6
+    expect:
+      specifier: ^29.7.0
+      version: 29.7.0
+    ts-morph:
+      specifier: ^28.0.0
+      version: 28.0.0
+    tsx:
+      specifier: ^4.19.2
+      version: 4.23.13
+    typescript:
+      specifier: 5.7.2
+      version: 5.7.2
+
 overrides:
   qs: '>=6.16.0'
   fast-uri: '>=3.1.6'
@@ -175,29 +199,29 @@ importers:
   .:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 'catalog:'
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
       cross-spawn:
-        specifier: ^7.0.6
+        specifier: 'catalog:'
         version: 7.0.6
     devDependencies:
       '@types/node':
-        specifier: 22.13.0
+        specifier: 'catalog:'
         version: 22.13.0
       eslint:
         specifier: ^9.39.0
         version: 9.39.5(supports-color@7.2.0)
       expect:
-        specifier: ^29.7.0
+        specifier: 'catalog:'
         version: 29.7.0
       tsx:
-        specifier: ^4.19.2
+        specifier: 'catalog:'
         version: 4.23.13
       turbo:
         specifier: ^2.3.3
         version: 2.10.12
       typescript:
-        specifier: 5.7.2
+        specifier: 'catalog:'
         version: 5.7.2
       typescript-eslint:
         specifier: ^8.46.0
@@ -206,13 +230,13 @@ importers:
   packages/cli:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 'catalog:'
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
       '@purix/core':
-        specifier: workspace:^0.4.0-beta.1
+        specifier: workspace:^0.4.0-beta.2
         version: link:../core
       '@purix/mcp-server':
-        specifier: workspace:^0.4.0-beta.1
+        specifier: workspace:^0.4.0-beta.2
         version: link:../mcp-server
       add-mcp:
         specifier: ^2.4.0
@@ -221,38 +245,38 @@ importers:
         specifier: ^15.0.0
         version: 15.0.0
       cross-spawn:
-        specifier: ^7.0.6
+        specifier: 'catalog:'
         version: 7.0.6
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
       ts-morph:
-        specifier: ^28.0.0
+        specifier: 'catalog:'
         version: 28.0.0
       zod:
         specifier: '>=4.6.6'
         version: 4.6.7
     devDependencies:
       '@types/node':
-        specifier: 22.13.0
+        specifier: 'catalog:'
         version: 22.13.0
       expect:
-        specifier: ^29.7.0
+        specifier: 'catalog:'
         version: 29.7.0
       tsx:
-        specifier: ^4.19.2
+        specifier: 'catalog:'
         version: 4.23.13
       typescript:
-        specifier: 5.7.2
+        specifier: 'catalog:'
         version: 5.7.2
 
   packages/core:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 'catalog:'
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
       ts-morph:
-        specifier: ^28.0.0
+        specifier: 'catalog:'
         version: 28.0.0
       zod:
         specifier: '>=4.6.6'
@@ -262,38 +286,38 @@ importers:
         specifier: ^6.0.6
         version: 6.0.6
       '@types/node':
-        specifier: 22.13.0
+        specifier: 'catalog:'
         version: 22.13.0
       expect:
-        specifier: ^29.7.0
+        specifier: 'catalog:'
         version: 29.7.0
       tsx:
-        specifier: ^4.19.2
+        specifier: 'catalog:'
         version: 4.23.13
       typescript:
-        specifier: 5.7.2
+        specifier: 'catalog:'
         version: 5.7.2
 
   packages/mcp-server:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 'catalog:'
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
       '@purix/core':
-        specifier: workspace:^0.4.0-beta.1
+        specifier: workspace:^0.4.0-beta.2
         version: link:../core
     devDependencies:
       '@types/node':
-        specifier: 22.13.0
+        specifier: 'catalog:'
         version: 22.13.0
       expect:
-        specifier: ^29.7.0
+        specifier: 'catalog:'
         version: 29.7.0
       tsx:
-        specifier: ^4.19.2
+        specifier: 'catalog:'
         version: 4.23.13
       typescript:
-        specifier: 5.7.2
+        specifier: 'catalog:'
         version: 5.7.2
 
 packages:

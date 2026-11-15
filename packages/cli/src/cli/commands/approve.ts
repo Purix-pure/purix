@@ -111,6 +111,28 @@ export async function runShow(id: string, deps: Pick<DecisionDeps, "baseDir" | "
   return { code: intact ? 0 : 1, outcome: intact ? "cancelled" : "error" };
 }
 
+/**
+ * `purix approve --register`: the one-time step that records who may approve. Until someone is on record, an agent's
+ * first gated call (for example `purix_create`) cannot proceed, and it cannot ask for this itself because an MCP session has
+ * no way to put a question to a person. Same rule as approve and deny: it needs a person at a terminal, no flag skips the
+ * question, and nothing is written unless they answer yes.
+ */
+export async function runRegister(deps: Pick<DecisionDeps, "interactive" | "print">, assertApprover: () => Promise<void>): Promise<DecisionResult> {
+  if (!deps.interactive) {
+    deps.print("Registering an approver needs a person at a terminal. Nothing was changed.");
+    deps.print("Run this yourself in a terminal window; it cannot be done from a script, a pipe or an agent's tool call.");
+    return { code: 1, outcome: "refused" };
+  }
+  try {
+    await assertApprover();
+  } catch (err) {
+    deps.print(err instanceof Error ? err.message : String(err));
+    return { code: 1, outcome: "error" };
+  }
+  deps.print("You are an authorized approver for this project. Agents can now call tools that need approval.");
+  return { code: 0, outcome: "approved" };
+}
+
 export async function runList(baseDir: string, print: (line: string) => void, all: boolean): Promise<void> {
   const { listApprovals } = await import("@purix/core/approvals/pending");
   const rows = listApprovals(baseDir).filter((r) => all || r.state === "pending");
@@ -137,7 +159,14 @@ export function registerApproveCommands(program: Command) {
     .option("--list", "List requests waiting for an answer")
     .option("--all", "With --list: include answered and expired requests")
     .option("--show", "Print the request and its complete diff without answering it")
-    .action(async (id: string | undefined, opts: { list?: boolean; all?: boolean; show?: boolean }) => {
+    .option("--register", "One-time: record yourself as an authorized approver for this project (needs a terminal)")
+    .action(async (id: string | undefined, opts: { list?: boolean; all?: boolean; show?: boolean; register?: boolean }) => {
+      if (opts.register) {
+        const { assertAuthorizedToApprove } = await import("@purix/core/security/auth");
+        const res = await runRegister({ interactive: interactive(), print: (l) => console.log(l) }, assertAuthorizedToApprove);
+        process.exitCode = res.code;
+        return;
+      }
       if (opts.show && id) {
         const res = await runShow(id, { baseDir: process.cwd(), print: (l) => console.log(l) });
         process.exitCode = res.code;

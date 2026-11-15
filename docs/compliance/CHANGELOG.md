@@ -10,6 +10,21 @@ same version number.
 
 Nothing yet.
 
+## [0.4.0-beta.2]
+
+### Fixed
+
+- The MCP server no longer asks a question on its own stdin/stdout. Before, the first gated call on a fresh project (for example `purix_create`) reached the "register you as the sole approver?" prompt, wrote it into the reply stream and read the agent's next request as the answer, so that call and every later one timed out (-32001). The server now refuses to prompt, treats the question as "no", and tells the person to run **`purix approve --register`** in a terminal. Library promotion during escalation is skipped (and recorded as skipped) where nobody can be asked, instead of failing a fix that already passed verification.
+
+### Added
+
+- `purix approve --register`: the one-time step that records who may approve. It needs a person at a terminal.
+
+### Changed
+
+- A command line Purix cannot use (unknown command, unknown option, missing or extra argument, a command group run with no subcommand) now exits **2**, the code the exit map reserves for invalid usage. It exited 1 before, the same as a failed check. `--help` and `--version` still exit 0.
+- Release tooling (no change to what the packages do): `scripts/sync-versions.mjs` (`pnpm run version-check` / `version-set`) fails when a release version, pnpm pin, Node range or repository URL disagrees between the files that write it; the eight dependencies shared by more than one package now live once in the pnpm `catalog:` in `pnpm-workspace.yaml`; `scripts/check-registry.mjs` asks npm before publishing (version not already taken, tag fits) and after (all three packages, dist-tag, provenance, fresh install).
+
 ## [0.4.0-beta.1] — release pipeline
 
 Same code as 0.4.0-beta.0; the version number changed so the release can go out through GitHub Actions with npm trusted publishing (and npm provenance).

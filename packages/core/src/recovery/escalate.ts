@@ -10,7 +10,7 @@ import { scanForInjectionAttempts } from "../llm/injection.js";
 import { computeTaskSignature, findLibraryMatch, promoteOperation, markLibraryUsed } from "../manifest/library.js";
 import { recordMemory } from "../manifest/memory.js";
 import { assertAuthorizedToApprove } from "../security/auth.js";
-import { confirm } from "../cli-io/confirm.js";
+import { confirm, promptsLocked } from "../cli-io/confirm.js";
 import { applyEdits, mergeFileChanges, type CompiledFileChange } from "../verify/compile.js";
 import { resolveLanguage, getLanguageProvider } from "../language/registry.js";
 import { recordEvent } from "../manifest/events.js";
@@ -195,7 +195,13 @@ export async function runEscalation(
       });
       if (!proceed) {
         recordEvent("escalation_outcome", { component_id: componentId, operation, detail: { outcome: "aborted_injection_risk" } });
-        return { ok: false, fromLibrary: false, reason: "Aborted after suspicious content was flagged in dependency context." };
+        return {
+          ok: false,
+          fromLibrary: false,
+          reason: promptsLocked()
+            ? "Suspicious instruction-like text was flagged in dependency context, and nobody can be asked about it in this session, so nothing was sent to the escalation model. Review it, then run the same change with `purix modify` in a terminal."
+            : "Aborted after suspicious content was flagged in dependency context.",
+        };
       }
     }
   }
@@ -317,15 +323,28 @@ export async function runEscalation(
         return { ok: true, files: candidateFiles, fromLibrary: false, verification, ...(partialPaths.size > 0 ? { partialLinePaths: [...partialPaths] } : {}) };
       }
 
-      await assertAuthorizedToApprove();
-      const promote = await confirm(
-        `\nFix verified. Promote into the local operation library so this exact task type is handled locally at zero LLM cost next time (§5.2, §7.5 checkpoint)?`
-      );
-      recordEvent("confirm_response", {
-        component_id: componentId,
-        operation,
-        detail: { checkpoint_kind: "library_promotion", approved: promote },
-      });
+      // Promotion is an optional saving and needs a person's yes. Where nobody can be asked (the MCP server: its stdin and
+      // stdout carry the protocol), it is skipped, not attempted: asking there would corrupt the protocol stream, and failing
+      // here would throw away a fix that already passed verification. It can be done later from a terminal.
+      const nobodyToAsk = promptsLocked();
+      let promote = false;
+      if (nobodyToAsk) {
+        recordEvent("confirm_response", {
+          component_id: componentId,
+          operation,
+          detail: { checkpoint_kind: "library_promotion", approved: false, reason: "no_prompt_channel" },
+        });
+      } else {
+        await assertAuthorizedToApprove();
+        promote = await confirm(
+          `\nFix verified. Promote into the local operation library so this exact task type is handled locally at zero LLM cost next time (§5.2, §7.5 checkpoint)?`
+        );
+        recordEvent("confirm_response", {
+          component_id: componentId,
+          operation,
+          detail: { checkpoint_kind: "library_promotion", approved: promote },
+        });
+      }
       if (promote) {
         promoteOperation({
           component_id: componentId,
@@ -345,7 +364,9 @@ export async function runEscalation(
         recordMemory({
           component_id: componentId,
           kind: "escalation_fix_not_promoted",
-          summary: `Escalation fixed "${instruction}" but promotion was declined.`,
+          summary: nobodyToAsk
+            ? `Escalation fixed "${instruction}"; promotion was not offered because nobody could be asked in this session.`
+            : `Escalation fixed "${instruction}" but promotion was declined.`,
         });
       }
 

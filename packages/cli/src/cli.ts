@@ -344,6 +344,27 @@ export function exitCodeForFailure(err: unknown): number {
   return 1;
 }
 
+// Commander's own exit codes for a command line it cannot use. Commander exits 1 for all of them; the Purix exit map
+// (core cli-io/exit_codes.ts) reserves 2 for invalid usage, so a script can tell "you called it wrong" from "it ran and failed".
+const COMMANDER_USAGE_ERRORS: ReadonlySet<string> = new Set([
+  "commander.unknownCommand",
+  "commander.unknownOption",
+  "commander.missingArgument",
+  "commander.optionMissingArgument",
+  "commander.missingMandatoryOptionValue",
+  "commander.conflictingOption",
+  "commander.invalidArgument",
+  "commander.excessArguments",
+  // A command group run with no subcommand (`purix lang`): help is printed and Commander exits 1.
+  "commander.help",
+]);
+
+/** The exit code Purix uses for an exit Commander is about to make. Exit 0 (--help, --version) is never changed. */
+export function exitCodeForCommanderExit(err: { code: string; exitCode: number }): number {
+  if (err.exitCode === 0) return 0;
+  return COMMANDER_USAGE_ERRORS.has(err.code) ? 2 : err.exitCode;
+}
+
 // Records one `command_run` row in the local usage ledger (closed schema; never throws).
 async function recordCommandRun(actionCommand: Command | null, exitCode: number): Promise<void> {
   try {
@@ -422,6 +443,10 @@ function helpRank(name: string): { group: string; index: number } {
 
 function createBaseProgram(): Command {
   const program = new Command();
+  // Set before any command is added: Commander copies this to every subcommand when it is created.
+  program.exitOverride((err) => {
+    process.exit(exitCodeForCommanderExit(err));
+  });
   program
     .name("purix")
     .description(`Verification & Governance Layer for AI-Generated Code (Purix v${PURIX_VERSION})`)

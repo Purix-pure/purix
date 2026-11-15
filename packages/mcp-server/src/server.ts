@@ -13,6 +13,7 @@ import {
   linkComponents,
 } from "@purix/core/manifest/store";
 import { recordEvent } from "@purix/core/manifest/events";
+import { lockPrompts } from "@purix/core/cli-io/confirm";
 import { strictIsolation } from "@purix/core/sandbox/sandbox_env";
 import { approvalStatus, peekApproved, peekRequest, requestOrConsume } from "@purix/core/approvals/pending";
 import { appliedNotTestedLine, buildModifyResult, parseModifyResultPayload, payloadBytes, staleReason, verificationFailureText, MAX_MODIFY_PAYLOAD_BYTES } from "./modify_result.js";
@@ -1972,6 +1973,10 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
 }
 
 export async function runMcpServer(): Promise<void> {
+  // stdin/stdout are the protocol from here on. Nothing in this process may prompt: a prompt would be written into the reply
+  // stream and would read the agent's next request as its answer, so every later call would time out (-32001).
+  // Questions that need a person are refused with a message that names the terminal command to run instead.
+  lockPrompts("this is an MCP session: stdin and stdout carry the protocol, so a person cannot be asked here");
   const server = createPurixMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -72,6 +72,7 @@ The full list is in [BETA_SCOPE.md](./BETA_SCOPE.md).
 - **Secret redaction recognises only some formats.** A secret in an unknown, split or encoded form can reach the model provider.
 - **`PURIX_MCP_AUTO_APPROVE=1` approves every gated action** in an MCP session without asking anyone. It is meant for CI. Do not set it where an agent runs unattended on a machine you care about.
 - **`purix audit` can miss advisories** for pnpm projects; "none found" on one is not a clean bill.
+- **`npm audit` on an installed Purix reports a moderate `minimatch` advisory** ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), denial of service through glob patterns). It comes in through `ts-morph` (`@ts-morph/common` pins `minimatch` 10, the fix is in 11). Purix uses `ts-morph` only on in-memory file systems (`useInMemoryFileSystem: true` in `verify/test_integrity.ts` and `verify/ast_transforms.ts`), so no glob pattern from your project reaches it. Waiting for an upstream `ts-morph` release that moves to a fixed `minimatch`.
 
 ## Verifying a release
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requestOrConsume, approvalStatus } from "@purix/core/approvals/pending";
 import { isolateCwdForFile } from "@purix/core/test-support/isolated_cwd";
-import { runDecision, runList, runShow } from "./approve.js";
+import { runDecision, runList, runShow, runRegister } from "./approve.js";
 
 // Answering a request records an audit event in the project store, which lives under the current directory.
 isolateCwdForFile();
@@ -144,5 +144,29 @@ describe("purix approve --show (AI-09)", () => {
     const none: string[] = [];
     expect((await runShow("apr-000000000000", { baseDir: base, print: (l) => none.push(l) })).code).toBe(1);
     expect(none.join("\n")).toContain("No request");
+  });
+});
+
+describe("purix approve --register", () => {
+  test("refuses without a terminal and never reaches the approver check", async () => {
+    const lines: string[] = [];
+    let called = false;
+    const res = await runRegister({ interactive: false, print: (l) => lines.push(l) }, async () => { called = true; });
+    expect(res).toEqual({ code: 1, outcome: "refused" });
+    expect(called).toBe(false);
+    expect(lines.join("\n")).toContain("needs a person at a terminal");
+  });
+
+  test("at a terminal, succeeds when the check passes", async () => {
+    const lines: string[] = [];
+    const res = await runRegister({ interactive: true, print: (l) => lines.push(l) }, async () => {});
+    expect(res.code).toBe(0);
+  });
+
+  test("at a terminal, reports a declined registration as an error", async () => {
+    const lines: string[] = [];
+    const res = await runRegister({ interactive: true, print: (l) => lines.push(l) }, async () => { throw new Error("Bootstrap declined"); });
+    expect(res).toEqual({ code: 1, outcome: "error" });
+    expect(lines.join("\n")).toContain("Bootstrap declined");
   });
 });

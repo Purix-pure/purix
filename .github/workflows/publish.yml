@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.1). Must match all three packages. Run from main. Leave empty for the OIDC debug run.'
+        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.2). Must match all three packages. Run from main. Leave empty for the OIDC debug run.'
         required: false
         type: string
       debug_oidc_only:
@@ -81,6 +81,10 @@ jobs:
       # on every PR. A tag push skips normal PR review, so this is the one
       # thing standing between "someone pushed a bad tag" and a broken
       # release reaching real users.
+      # A release must never go out with the version written differently in two places (package.json, server.json, the lockfile, docker-compose, READMEs)
+      # or with a tool pin that disagrees with another copy of itself. `pnpm run version-set <x.y.z>` changes them all together.
+      - name: Version consistency
+        run: pnpm run version-check
       - name: Boundary check
         run: pnpm run boundary-check
       - name: Single-point check
@@ -163,6 +167,11 @@ jobs:
           done
           echo "Publishing $EXPECTED (from $SOURCE)"
 
+      # Ask npm before building anything: fail now if one of these versions is already published (npm never allows reuse)
+      # or the tag does not fit the version. Reads the public registry only; no credentials.
+      - name: Registry check before publishing
+        run: node scripts/check-registry.mjs pre --version "$(node -p "require('./packages/cli/package.json').version")" --tag "${{ steps.dist_tag.outputs.tag }}"
+
       # Build once, pack once, and publish exactly what was packed. Publishing
       # with `pnpm publish` re-runs prepublishOnly (a second build), so the
       # bytes that shipped were never the bytes that were tested. Here the
@@ -210,6 +219,11 @@ jobs:
           for pkg in core mcp-server cli; do
             npm publish "./purix-$pkg-$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version").tgz" --access public --provenance --loglevel verbose --tag "${{ steps.dist_tag.outputs.tag }}"
           done
+
+      # After publishing, ask npm what is really there: all three versions, the dist-tag, the provenance attestation, and a
+      # fresh install of @purix/cli from the registry that runs. Retries for up to ~2.5 minutes while the registry catches up.
+      - name: Registry check after publishing (and install from npm)
+        run: node scripts/check-registry.mjs post --version "$(node -p "require('./packages/cli/package.json').version")" --tag "${{ steps.dist_tag.outputs.tag }}" --install
 
   oidc-debug:
     if: ${{ inputs.debug_oidc_only }}
