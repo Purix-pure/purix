@@ -19,7 +19,8 @@ function log(label, ok, detail) {
   lines.push("```");
   lines.push(ok ? "**Result: PASS**" : "**Result: FAIL**");
   lines.push("");
-  ok ? pass++ : fail++;
+  if (ok) pass++;
+  else fail++;
 }
 
 // Find the repo root by walking up from this script's own location until
