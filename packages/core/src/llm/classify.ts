@@ -6,7 +6,7 @@ import { recordProviderUsage, recordSavings } from "./budget.js";
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from "./circuit.js";
 import { ModelCallTimeoutError, TIMEOUT_MAX_RETRIES, TRANSIENT_MAX_RETRIES, isTimeoutError, retryDelayMs, retrySleep } from "./call_failure.js";
 import { llmTimeoutMs } from "../platform/net.js";
-import { scanForInjectionAttempts } from "./injection.js";
+import { scanForInjectionAttempts, neutralizeInjectionAttempts } from "./injection.js";
 import { getProvider, priceFor, type ModelTier } from "./providers.js";
 import { recordLlmCall, markLastCallFormatError, markLastCallOperation } from "./call_log.js";
 import type { RoutingCall, RoutingDecision } from "./router.js";
@@ -226,7 +226,11 @@ export async function callJson<S extends z.ZodType>(
   return parseModelJson(second, schema, what);
 }
 
-export async function classifyGreenfield(componentName: string, intent?: string, opts: { language?: string } = {}): Promise<TopologyPlan> {
+export async function classifyGreenfield(
+  componentName: string,
+  intent?: string,
+  opts: { language?: string; conventions?: string[]; knownComponents?: string[]; dependsOnNotice?: string } = {},
+): Promise<TopologyPlan> {
   // Decision 3 (resolved 2026-09-24, additive): widened from a name-only
   // signature so `purix change`'s create-proposal branch (IDEA-078) can
   // pass the user's full intent text as planning context, instead of
@@ -247,6 +251,11 @@ export async function classifyGreenfield(componentName: string, intent?: string,
     projectBlock: project.projectBlock,
     testGuidance: lang ? lang.testGuidance : testRunnerGuidance(detectTestRunner()),
     ...(lang ? { language: lang.label } : {}),
+    // P4: recorded conventions were written in earlier sessions from model and tool text, so they pass the same scan as refine's memory.
+    // A clean line comes back unchanged, so with nothing recorded the prompt is byte-identical.
+    ...(opts.conventions?.length ? { conventions: opts.conventions.map((m) => sanitizeAndRecord(m, { componentId: componentName, operation: "create", stage: "greenfield", source: "memory" })) } : {}),
+    ...(opts.knownComponents?.length ? { knownComponents: opts.knownComponents } : {}),
+    ...(opts.dependsOnNotice ? { dependsOnNotice: opts.dependsOnNotice } : {}),
   });
 
   return callJson(prompt, TopologyPlanSchema, "planning", "greenfield_plan");
@@ -357,12 +366,17 @@ export async function classifyModification(
   instruction: string,
   currentFiles: { path: string; content: string }[],
   /** AI-11: set only on the one re-ask after the first edits failed to apply. The first call never passes it. */
-  retry?: { reason: string }
+  retry?: { reason: string },
+  /** P6: neighbouring components' files, already scrubbed of secrets by the caller. Screened for injection here, like escalation does. */
+  neighbors: { component_id: string; path: string; content: string }[] = [],
 ): Promise<ChangeVerdict> {
   // ADR-059 / ADR-058: see refineIntent. Empty project block => identical prompt to before.
   const pack = buildContextPack({ instruction, files: currentFiles });
   for (const n of pack.notes) console.log(`  ${n}`);
-  const base = classifyPrompt({ componentId, files: pack.filesBlock, projectBlock: pack.projectBlock, instruction });
+  const neighborFiles = neighbors.length === 0
+    ? ""
+    : neutralizeInjectionAttempts(neighbors.map((f) => `--- [dependency context: ${f.component_id}] ${f.path} ---\n${f.content}`).join("\n\n")).cleaned.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  const base = classifyPrompt({ componentId, files: pack.filesBlock, projectBlock: pack.projectBlock, instruction, ...(neighborFiles ? { neighborFiles } : {}) });
   const prompt = retry ? { system: base.system, user: `${base.user}\n\n${compileRetryNotice({ reason: retry.reason })}` } : base;
 
   // AI-05: classification now goes through the router like refinement and escalation, so its tier choice is recorded.

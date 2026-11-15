@@ -129,6 +129,11 @@ Examples:
             ? "Nothing is tracked here yet — starting a new component from this request."
             : "No existing component matches this — proposing a new one instead.",
         );
+        // P7: say what this resembles before a duplicate is made. It only suggests; the person decides (re-run with --component <id> to change one).
+        const { briefingSimilar } = await import("@purix/core/entrypoints/briefing");
+        const { similarComponentsNote } = await import("@purix/core/manifest/similar");
+        const similarNote = similarComponentsNote(briefingSimilar(intent, manifest));
+        if (similarNote) console.log(`  ${similarNote}`);
         await runCreate(deriveComponentName(intent), { intent, dryRun: opts.dryRun });
       } catch (err) {
         console.error(`\n🛑 ${err instanceof Error ? err.message : String(err)}`);

@@ -8,7 +8,25 @@ same version number.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `purix_create` checks that an approver is registered **before** it calls the model. It used to check afterwards, so a fresh project paid for a model call and was then told to run `purix approve --register`.
+- `purix_change` offers to adopt an indexed file that no component owns (as `purix change` does) instead of proposing a duplicate component with a name made up from the sentence. It points to `purix_adopt`; adopting still needs a person.
+- `@purix/mcp-server` failed to build: the stdio entry file added for the no-prompt end-to-end test sat in `src/` and was compiled into the published package. `tsconfig.build.json` now excludes `src/**/*_server.ts`; the test still runs it from source.
+- `purix_modify` now does what `purix modify` does first: it reads the recorded conventions and notes for the component and has the model restate the instruction before classifying. The restated instruction and its assumptions are recorded in the classification event. This is **one more model call** per modify over MCP.
+
+### Added
+
+- `purix_remember` (MCP): an agent can record a convention or decision. One plain statement, at most 500 characters, refused if it reads as an instruction to a model or contains hidden characters, saved as an `agent-note`, at most 20 per session, audited as `memory_recorded`. It reverses the 2026-10-14 decision (MCP-5) that moved `remember` to the CLI only; `purix remember` and the tool share one function.
+- Creating a component shows the planner the recorded conventions and the ids of existing components, tells it `depends_on` may only use those ids, retries once on an invented id, and drops what is still invented. After a create lands, one `create` memory line records what the component is for and what it depends on.
+- A change shows the model the neighbouring components' files (read-only, inside the existing neighbour token budget, secrets redacted, injection-screened) on the **first** classification, not only in escalation after a failure. Expect more input tokens per modify on components that have neighbours.
+- When a request names no component and a new one is about to be proposed, `purix change` and `purix_change` name the existing components it resembles (suggestion only, no model call). Ranking is BM25 over each component's id, file names and recorded purpose notes, so the purpose line a create writes makes the component findable by what it is for; one shared module (`entrypoints/briefing.ts`) supplies conventions, existing ids and similar components to create, change and both doors. On 12 hand-written cases the top three held the right component 10 times, against 9 for the word overlap it replaces (small synthetic set, not a real-project recall figure).
+- The approval text for an MCP modify shows how the model read the instruction (`Interpreted as: ...`, plus assumptions) when that differs from what the agent sent. Model text is cut to one line, control and hidden direction characters removed.
+
+### Changed
+
+- `purix remember` no longer writes an identical note twice, and trims the note.
+- `.gitattributes`: `*.zip` and web fonts are binary; `*.cmd` and `*.bat` use CRLF.
 
 ## [0.4.0-beta.2]
 

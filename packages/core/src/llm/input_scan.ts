@@ -35,7 +35,7 @@ export function sanitizeRepairText(text: string): SanitizedInput {
 }
 
 export type RepairInputSource = "failure" | "memory" | "ledger";
-export type RepairInputStage = "self_heal" | "escalation" | "refine";
+export type RepairInputStage = "self_heal" | "escalation" | "refine" | "greenfield";
 
 /** Longest slice of a matched phrase written to the event log. */
 const HIT_LOG_CHARS = 80;

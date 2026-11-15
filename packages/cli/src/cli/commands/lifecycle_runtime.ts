@@ -82,6 +82,7 @@ export async function loadLifecycleRuntime() {
     commitCascadeModule,
     diffFormatModule,
     observabilityModule,
+    modifyIntentModule,
   ] = await Promise.all([
     import("@purix/core/cli-io/gated-confirm"),
     import("@purix/core/manifest/store"),
@@ -109,6 +110,7 @@ export async function loadLifecycleRuntime() {
     // IDEA-078 / handoff finding #5: diff-before-approval fix.
     import("@purix/core/cli-io/diff_format"),
     import("@purix/core/manifest/observability"),
+    import("@purix/core/entrypoints/modify_intent"),
   ]);
 
   return {
@@ -123,6 +125,7 @@ export async function loadLifecycleRuntime() {
     writeScaffold: scaffoldModule.writeScaffold,
     classifyGreenfield: classifyModule.classifyGreenfield,
     refineIntent: classifyModule.refineIntent,
+    prepareModifyIntent: modifyIntentModule.prepareModifyIntent,
     classifyModification: classifyModule.classifyModification,
     classifyDiff: classifyModule.classifyDiff,
     scanFilesForInjectionAttempts: classifyModule.scanFilesForInjectionAttempts,
@@ -211,6 +214,7 @@ export async function loadCreateRuntime() {
     budgetModule,
     securityGateModule,
     diffFormatModule,
+    createPlanModule,
   ] = await Promise.all([
     import("@purix/core/cli-io/gated-confirm"),
     import("@purix/core/manifest/store"),
@@ -222,10 +226,13 @@ export async function loadCreateRuntime() {
     import("@purix/core/llm/budget"),
     import("@purix/core/gates/security_gate"),
     import("@purix/core/cli-io/diff_format"),
+    import("@purix/core/entrypoints/create_plan"),
   ]);
 
   return {
     formatChangeSetDiff: diffFormatModule.formatChangeSetDiff,
+    planNewComponent: createPlanModule.planNewComponent,
+    recordCreateMemory: createPlanModule.recordCreateMemory,
     confirmGated: gatedConfirmModule.confirmGated,
     readManifest: manifestStoreModule.readManifest,
     writeManifestWithLimitCheck: manifestStoreModule.writeManifestWithLimitCheck,

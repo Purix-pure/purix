@@ -36,6 +36,7 @@ export type EventKind =
   | "repair_early_stop" // AI-12: the repair loop stopped because the same error class came back at the same place (detail: stage, attempt, error_class, location)
   | "hook_denied" // an agent hook blocked a call that would have bypassed Purix (detail: agent, rule, targets)
   | "injection_flag" // F03-08: the phrase tripwire fired and a person was required to approve the change (detail: stage, action, sightings)
+  | "memory_recorded" // a note was saved to Repository Memory through rememberNote (detail: scope, source, agent_id, chars, duplicate)
   | "unadopted_write"; // C5: an agent hook allowed a write to a project file Purix does not govern, and named it (detail: agent, files)
 
 export interface EventRecord {

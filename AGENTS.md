@@ -54,8 +54,8 @@ the lockfile silently.
 | `node scripts/smoke-test.mjs` | Real stdio MCP server smoke test (tool listing, a live call round-trip). |
 | `pnpm --filter @purix/cli test` / `pnpm --filter @purix/mcp-server test` | Run one package's suite alone when iterating on it. |
 
-There is no lint script in this repo currently — don't assume one and don't invent output as if one
-ran.
+Lint is `pnpm run lint` (builds core, then runs ESLint with the root `eslint.config.mjs`). It reports 0 errors and a
+large number of warnings, mostly `no-explicit-any`; don't invent output as if it ran.
 
 **Before saying any of the above "passes," actually run it in this session.** This repo's own recent
 history includes a case where test-pass numbers were reported without being run (no network access

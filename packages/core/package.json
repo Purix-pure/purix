@@ -184,6 +184,22 @@
       "types": "./dist/manifest/library.d.ts",
       "default": "./dist/manifest/library.js"
     },
+    "./manifest/similar": {
+      "types": "./dist/manifest/similar.d.ts",
+      "default": "./dist/manifest/similar.js"
+    },
+    "./entrypoints/briefing": {
+      "types": "./dist/entrypoints/briefing.d.ts",
+      "default": "./dist/entrypoints/briefing.js"
+    },
+    "./entrypoints/create_plan": {
+      "types": "./dist/entrypoints/create_plan.d.ts",
+      "default": "./dist/entrypoints/create_plan.js"
+    },
+    "./entrypoints/modify_intent": {
+      "types": "./dist/entrypoints/modify_intent.d.ts",
+      "default": "./dist/entrypoints/modify_intent.js"
+    },
     "./manifest/memory": {
       "types": "./dist/manifest/memory.d.ts",
       "default": "./dist/manifest/memory.js"

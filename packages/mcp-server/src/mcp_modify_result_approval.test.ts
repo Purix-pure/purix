@@ -65,6 +65,10 @@ describe("purix_modify: approve the result, apply the stored result (AI-09)", ()
       const body = typeof init?.body === "string" ? init.body : "";
       if (!body) return new Response(JSON.stringify({ objects: [] }), { status: 200 });
       modelCalls++;
+      // purix_modify now starts with the intent-refinement call the CLI makes (P5), then classifies. Answer each in its own shape.
+      if (body.includes("first step of a code-modification tool")) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ explicit_instruction: "fixture interpretation", assumptions: [] }) } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+      }
       const verdict = {
         operation: "update_config_value", contract_changing: false, confidence: 0.95, reasoning: "fixture",
         edits: [{ path: "billing.ts", kind: "config_value", key: "limit", old_value: "3", new_value: "5" }],
@@ -92,7 +96,7 @@ describe("purix_modify: approve the result, apply the stored result (AI-09)", ()
   test("(1) the first call does the work once, writes nothing, and returns a request id with the summary", async () => {
     const call = noElicit();
     const text = (await call("purix_modify", ARGS)).content[0]!.text;
-    expect(modelCalls).toBe(1);
+    expect(modelCalls).toBe(2); // the refine call, then the classify call
     expect(disk()).toBe(ORIGINAL);
     expect(readManifest("billing")?.current_version).toBe(1);
     const id = idOf(text);

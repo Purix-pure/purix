@@ -7,24 +7,17 @@ export function registerMemoryCommands(program: Command) {
     .description("Record a convention or decision into Repository Memory")
     .option("-c, --component <componentId>", "scope this note to one component instead of the whole repo")
     .action(async (note: string, opts: { component?: string }) => {
-      const { recordMemory, GLOBAL_SCOPE } = await import("@purix/core/manifest/memory");
+      const { rememberNote } = await import("@purix/core/manifest/memory");
       // TEST-REPORT F12: an empty note and a nonexistent component id both used to be recorded with a success message.
-      if (note.trim() === "") {
-        console.error("The note is empty — nothing was recorded.");
+      // The checks live in rememberNote now, so a person and an agent are refused for the same reasons.
+      const res = rememberNote({ note, ...(opts.component ? { componentId: opts.component } : {}), source: "person" });
+      if (!res.ok) {
+        console.error(res.message);
         process.exitCode = 1;
         return;
       }
-      if (opts.component) {
-        const { readManifest } = await import("@purix/core/manifest/store");
-        if (!readManifest(opts.component)) {
-          console.error(`No manifest entry for "${opts.component}". Run "purix status" to see what's tracked.`);
-          process.exitCode = 1;
-          return;
-        }
-      }
-      const { scrubbedCount } = recordMemory({ component_id: opts.component ?? GLOBAL_SCOPE, kind: "decision", summary: note });
-      if (scrubbedCount > 0) {
-        console.warn(`🔒 Redacted ${scrubbedCount} secret-shaped value(s) from the note before saving it. Repository Memory is meant for conventions and decisions, not credentials.`);
+      if (res.scrubbedCount > 0) {
+        console.warn(`🔒 Redacted ${res.scrubbedCount} secret-shaped value(s) from the note before saving it. Repository Memory is meant for conventions and decisions, not credentials.`);
       }
       console.log(opts.component ? `✅ Recorded under "${opts.component}".` : `✅ Recorded as a repo-wide convention.`);
     });

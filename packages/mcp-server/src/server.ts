@@ -315,6 +315,10 @@ import { sanitizeErrorText } from "@purix/core/security/error_text";
 import { checkDrift } from "@purix/core/state/drift";
 import { buildMigrationPlan, stageMigration } from "@purix/core/state/migration";
 import { classifyAndCompile } from "@purix/core/recovery/classify_and_compile";
+import { prepareModifyIntent } from "@purix/core/entrypoints/modify_intent";
+import { planNewComponent, recordCreateMemory } from "@purix/core/entrypoints/create_plan";
+import { similarComponentsNote } from "@purix/core/manifest/similar";
+import { briefingSimilar } from "@purix/core/entrypoints/briefing";
 import { runEscalation } from "@purix/core/recovery/escalate";
 import { resolveVerification } from "@purix/core/recovery/resolve_verification";
 import { notCheckedMessage, notTestedMessage, pendingNotTestedMessage } from "@purix/core/verify/outcome";
@@ -332,7 +336,7 @@ import { buildAuditTrail, formatAuditTrailJson, formatAuditTrailMarkdown } from 
 import { runFullAudit, formatFullAuditLines } from "@purix/core/security/full_audit";
 import { readAuditChain } from "@purix/core/security/audit_tamper_evidence";
 import { findAnchorInGit, judgeChain, describeVerdict } from "@purix/core/evidence/anchor";
-import { recordMemory, readGlobalMemory, formatMemoryLines, GLOBAL_SCOPE } from "@purix/core/manifest/memory";
+import { recordMemory, readGlobalMemory, formatMemoryLines, GLOBAL_SCOPE, rememberNote, AGENT_NOTE_MAX_CHARS } from "@purix/core/manifest/memory";
 // ADR-060 D6: the MCP adapter may import ONLY the read-only and "ask" parts of the tools broker.
 // installTool / approveRequest / removeTool / createHumanGate must never be imported here: an agent
 // can request an install, only a human at the CLI can approve one. server.test.ts enforces this.
@@ -497,6 +501,7 @@ export const TOOL_METADATA: Record<string, ToolMeta> = {
   purix_index: { title: "Index codebase", readOnly: false, destructive: false, idempotent: true, openWorld: false },
   purix_ingest: { title: "Ingest external diff", readOnly: false, destructive: true, idempotent: false, openWorld: true },
   purix_adopt: { title: "Adopt indexed file as component", readOnly: false, destructive: false, idempotent: true, openWorld: false },
+  purix_remember: { title: "Record a convention or decision", readOnly: false, destructive: false, idempotent: true, openWorld: false },
   purix_audit_trail: { title: "Export audit trail", readOnly: true, destructive: false, idempotent: true, openWorld: false },
   purix_audit_verify: { title: "Verify audit chain", readOnly: true, destructive: false, idempotent: true, openWorld: false },
   purix_tools: { title: "Find catalog tools for a purpose", readOnly: true, destructive: false, idempotent: true, openWorld: false },
@@ -736,10 +741,20 @@ async function applyStoredModifyResult(
   );
 }
 
+/** Notes an agent may save in one MCP session. Notes are short and cheap, so this is a flood guard, not an approval budget. */
+const MAX_AGENT_NOTES_PER_SESSION = 20;
+
 function createGatedActionBudget(elicit: Elicitor | null = null) {
   let used = 0;
+  let notes = 0;
   const max = maxGatedActionsPerSession();
   return {
+    /** Counts one saved note against the session's note limit. False once the limit is reached. */
+    tryNote(): boolean {
+      if (notes >= MAX_AGENT_NOTES_PER_SESSION) return false;
+      notes++;
+      return true;
+    },
     /** The channel for asking a person to approve. Null when there is no connected server (direct test calls). */
     elicit,
     tryConsume(checkpointKind: string, componentId: string | null): boolean {
@@ -879,6 +894,18 @@ export function createPurixMcpServer(): Server {
               target: { type: "string", description: "Repo-relative file path, or an exact indexed symbol name" },
             },
             required: ["target"],
+          },
+        },
+        {
+          name: "purix_remember",
+          description: `Save one convention or decision to Repository Memory, so later create and modify calls (by any agent or person) are shown it. Use it for a rule a future change must follow ("API handlers return { ok, error }", "tests live next to the file"). One plain statement, at most ${AGENT_NOTE_MAX_CHARS} characters, no instructions to a model, no secrets. Optional componentId scopes the note to one component; without it the note applies to the whole repo. Saved under the kind "agent-note" so readers can tell it came from an agent. Needs no approval.`,
+          inputSchema: {
+            type: "object",
+            properties: {
+              note: { type: "string", description: `The convention or decision, as one plain statement (max ${AGENT_NOTE_MAX_CHARS} characters)` },
+              componentId: { type: "string", description: "Scope the note to this component. Omit for a repo-wide convention." },
+            },
+            required: ["note"],
           },
         },
         {
@@ -1064,9 +1091,18 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
           ? null
           : peekApproved(process.cwd(), { tool: "purix_create", checkpointKind: "mcp_create", componentId: componentName, args: createCallArgs });
         if (!approvedCreate && noLanguageMessage) return textContent(noLanguageMessage);
+        // No approver on record means this call cannot land, however good the plan is. Say so before paying for a model call.
+        // (Moved ahead of classifyGreenfield: it used to run after the plan, so a fresh project spent a call to be told no.)
+        if (!dryRun) {
+          try {
+            await assertAuthorizedToApprove();
+          } catch (err) {
+            return textContent(`Rejected: ${toolErrorResult(err).content[0]!.text}`);
+          }
+        }
         const plan = approvedCreate
           ? (approvedCreate.payload as Awaited<ReturnType<typeof classifyGreenfield>>)
-          : await classifyGreenfield(componentName, changeIntent, planLanguage.ok ? { language: planLanguage.language } : {});
+          : (await planNewComponent(componentName, changeIntent, planLanguage.ok ? { language: planLanguage.language } : {})).plan;
 
         // The model chooses plan.component_id, which can differ from the
         // requested name; re-check the id that would actually be written.
@@ -1093,12 +1129,6 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
 
         if (dryRun) {
           return textContent(`Dry run — nothing written, no approval requested.\n${noteLines.join("\n")}`);
-        }
-
-        try {
-          await assertAuthorizedToApprove();
-        } catch (err) {
-          return textContent(`Rejected: ${toolErrorResult(err).content[0]!.text}`);
         }
 
         const gate = await requireGatedApproval(
@@ -1132,6 +1162,8 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
             warnings.push(`depends_on referenced unknown component(s), not linked: ${link.skippedNotFound.join(", ")}`);
           }
         }
+        // Close the loop: the next create or modify is shown what this component is for and what it depends on.
+        recordCreateMemory(readManifest(entry.component_id) ?? entry, changeIntent);
 
         return textContent(
           `"${entry.component_id}" created (v${entry.current_version}). ` +
@@ -1257,8 +1289,15 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
         const preflight = formatPreflight(preflightVerification(entry.files ?? [], process.cwd()));
         if (preflight) return textContent(`Refused: ${preflight}`);
 
+        // P5: the same first step `purix modify` takes. The model restates the instruction against the component's files, with the
+        // repository's recorded conventions in view, and the restated instruction is what gets classified. Nobody is asked about the
+        // interpretation here (the person approves the finished result below), so it goes into the audit trail instead.
+        const modelFiles = originalFiles.map((f) => ({ path: f.path, content: f.content }));
+        const { refined } = await prepareModifyIntent(componentId, instruction, modelFiles);
+        const modelInstruction = refined.explicit_instruction;
+
         // AI-11: classify and compile together; a first edit that does not apply gets one cheap re-ask before escalation.
-        const { verdict, compiled } = await classifyAndCompile(componentId, instruction, originalFiles.map((f) => ({ path: f.path, content: f.content })));
+        const { verdict, compiled } = await classifyAndCompile(componentId, modelInstruction, modelFiles);
         const contractChanged = verdict.contract_changing;
 
         // Same parity fix: lifecycle.ts records "classification" with the
@@ -1268,7 +1307,7 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
         recordEvent("classification", {
           component_id: componentId,
           operation: verdict.operation,
-          detail: { confidence: verdict.confidence, contract_changing: contractChanged, source: "mcp", agent_id: agentId },
+          detail: { confidence: verdict.confidence, contract_changing: contractChanged, source: "mcp", agent_id: agentId, interpreted_as: modelInstruction, assumptions: refined.assumptions },
         });
 
         // Node 4: Patch Compiler — the step the old handler skipped
@@ -1289,7 +1328,7 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
 
         if (!compiled.ok) {
           const compileReason = (compiled).reason;
-          const esc = await runEscalation(componentId, verdict.operation, instruction, originalFiles, compileReason, process.cwd());
+          const esc = await runEscalation(componentId, verdict.operation, modelInstruction, originalFiles, compileReason, process.cwd());
           if (!esc.ok) {
             recordEvent("verification_failure", {
               component_id: componentId,
@@ -1440,6 +1479,8 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
           // F04-04: a deterministic compile carries the flag; C3: so do anchors written by repair or escalation during the run.
           partialLinePaths: partialLinePathsFor(compiled, fromEscalation, runPartialLinePaths),
           hasCoverage,
+          interpretedAs: modelInstruction,
+          assumptions: refined.assumptions,
           decision: { action: decision.action, reason: decision.reason },
           originalFiles,
           finalFiles,
@@ -1492,20 +1533,45 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
         if (intent.length > MAX_CHANGE_INTENT_LENGTH) throw new Error(`intent is too long (max ${MAX_CHANGE_INTENT_LENGTH} characters). Call purix_change again with a shorter intent, or split the work into several calls.`);
         if (componentId !== undefined && typeof componentId !== "string") throw new Error("componentId must be a string: call purix_change again with componentId set to an exact id from purix_find, or leave it out.");
 
-        const result = await resolveChangeTarget({
-          intent,
-          manifest: listManifest(),
-          componentId,
-          // The model-assisted tier runs only when exact matching found
-          // nothing; it sends the intent text only, and each use counts
-          // against the session budget.
-          extractWithLlm: (text) => {
-            if (!gatedActionBudget.tryConsume("mcp_change_llm_match", null)) {
-              throw new Error("session limit for model-assisted matching reached. Call purix_change again with componentId set (find it with purix_find), or ask the operator to raise the limit.");
-            }
-            return extractMentionCandidates(text);
-          },
-        });
+        // Same order as `purix change`: exact matching first (no model cost), then "is this an indexed file nobody owns yet?",
+        // and only then the model-assisted match. Without the middle step a request about an indexed but unowned file went
+        // straight to the new-component path and proposed a duplicate with a made-up name (P5).
+        const manifestNow = listManifest();
+        let result = await resolveChangeTarget({ intent, manifest: manifestNow, componentId });
+        if (result.outcome === "none") {
+          const adoptable = extractMentions(intent)
+            .map((m) => lookupAdoptable(m, manifestNow, process.cwd()))
+            .find((r) => r.outcome === "adoptable");
+          if (adoptable && adoptable.outcome === "adoptable") {
+            return textContent(
+              JSON.stringify(
+                {
+                  outcome: "adoptable",
+                  file: adoptable.file,
+                  message: `"${adoptable.file}" is indexed but not yet a component, so it can't be changed directly. Nothing was changed and no new component was proposed.`,
+                  next: `Call purix_adopt with target "${adoptable.file}" (a person approves it), then call purix_change again with the same intent.`,
+                },
+                null,
+                2
+              )
+            );
+          }
+          if (manifestNow.length > 0) {
+            result = await resolveChangeTarget({
+              intent,
+              manifest: manifestNow,
+              // The model-assisted tier runs only when exact matching found
+              // nothing; it sends the intent text only, and each use counts
+              // against the session budget.
+              extractWithLlm: (text) => {
+                if (!gatedActionBudget.tryConsume("mcp_change_llm_match", null)) {
+                  throw new Error("session limit for model-assisted matching reached. Call purix_change again with componentId set (find it with purix_find), or ask the operator to raise the limit.");
+                }
+                return extractMentionCandidates(text);
+              },
+            });
+          }
+        }
 
         if (result.outcome === "multiple") {
           return textContent(
@@ -1535,7 +1601,9 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
           { params: { name: "purix_create", arguments: { name: derived, dryRun, [CHANGE_INTENT]: intent } } },
           gatedActionBudget
         );
-        return textContent(`No tracked component matches this intent — proposing a new one.\n${inner.content[0]?.text ?? ""}`);
+        // P7: say what this resembles before a duplicate is made. It only suggests; the agent or person decides.
+        const similarNote = similarComponentsNote(briefingSimilar(intent, manifestNow));
+        return textContent(`No tracked component matches this intent — proposing a new one.${similarNote ? `\n${similarNote} Call purix_change again with componentId set to change one.` : ""}\n${inner.content[0]?.text ?? ""}`);
       }
 
       if (name === "purix_index") {
@@ -1966,6 +2034,25 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
         const result = requestInstall({ baseDir: process.cwd() }, toolId, reason, "agent");
         if (!result.ok) return textContent(`Not requested (${result.reason}): ${result.message}${result.hint ? ` ${result.hint}` : ""}`);
         return textContent(`Install of "${toolId}" requested as ${result.request.id}. Nothing was installed. Ask the user to run: purix tools approve ${result.request.id}`);
+      }
+
+      if (name === "purix_remember") {
+        const note = (args)?.note;
+        if (typeof note !== "string" || note.trim() === "") {
+          throw new Error("note is required: call purix_remember again with note set to one plain statement of the convention or decision.");
+        }
+        const componentId = (args)?.componentId;
+        if (componentId !== undefined && (typeof componentId !== "string" || componentId.trim() === "")) {
+          throw new Error("componentId must be a component id string, or left out for a repo-wide note.");
+        }
+        if (!gatedActionBudget.tryNote()) {
+          return textContent(`Note limit for this session reached (${MAX_AGENT_NOTES_PER_SESSION}). Nothing was recorded. Ask the person to run: purix remember "<note>"`);
+        }
+        const res = rememberNote({ note, ...(componentId ? { componentId } : {}), source: "agent", agentId: getAgentId() });
+        if (!res.ok) return textContent(`Not recorded (${res.reason}): ${res.message}`);
+        const where = res.scope === GLOBAL_SCOPE ? "as a repo-wide convention" : `under "${res.scope}"`;
+        const extras = [res.duplicate ? "That note was already on record." : "", res.scrubbedCount > 0 ? `${res.scrubbedCount} secret-shaped value(s) were redacted first.` : ""].filter(Boolean).join(" ");
+        return textContent(`Recorded ${where}.${extras ? " " + extras : ""}`);
       }
 
       throw new Error(`Unknown tool: ${name}`);

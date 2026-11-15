@@ -6,3 +6,10 @@
 *.gif binary
 *.ico binary
 *.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+
+# Windows batch files need CRLF line endings to run reliably; everything else stays LF (the rule above).
+*.cmd text eol=crlf
+*.bat text eol=crlf

@@ -62,6 +62,8 @@ describe("MCP: a tripwire hit asks a person instead of refusing (F03-08)", () =>
       const body = typeof init?.body === "string" ? init.body : "";
       if (!body) return new Response(JSON.stringify({ objects: [] }), { status: 200 });
       modelCalls++;
+      // purix_modify now starts with the intent-refinement call the CLI makes (P5), then classifies. Answer each in its own shape.
+      if (body.includes("first step of a code-modification tool")) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ explicit_instruction: "fixture interpretation", assumptions: [] }) } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
       // A confident classifier that did NOT flag anything itself: only the local tripwire saw the phrase.
       const verdict = {
         operation: "update_config_value", contract_changing: false, confidence: 0.99, reasoning: "fixture",
@@ -90,7 +92,7 @@ describe("MCP: a tripwire hit asks a person instead of refusing (F03-08)", () =>
   test("a phrase inside an existing file does not refuse: the change is built and a person is asked, with the phrase named", async () => {
     const text = (await noElicit()("purix_modify", { componentId: "billing", instruction: "raise the limit to 5" })).content[0]!.text;
     expect(text).not.toContain("Refused");
-    expect(modelCalls).toBe(1);
+    expect(modelCalls).toBe(2); // the refine call, then the classify call
     const id = idOf(text);
     expect(id).not.toBe("");
     expect(text).toContain("needs a person's approval");

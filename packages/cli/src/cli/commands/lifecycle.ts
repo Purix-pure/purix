@@ -43,6 +43,8 @@ export async function runCreate(name: string, opts: CreateOptions = {}): Promise
     buildManifestEntry,
     writeScaffold,
     classifyGreenfield,
+    planNewComponent,
+    recordCreateMemory,
     readGlobalMemory,
     formatMemoryLines,
     formatChangeSetDiff,
@@ -65,7 +67,13 @@ export async function runCreate(name: string, opts: CreateOptions = {}): Promise
   }
 
   console.log(`Planning "${name}"...`);
-  const plan = await classifyGreenfield(name, opts.intent, { language: preflight.language });
+  // One shared planner (core/entrypoints/create_plan.ts), also used by purix_create: it shows the model the recorded conventions and the
+  // ids of existing components, and corrects an invented depends_on once.
+  const planned = await planNewComponent(name, opts.intent, { language: preflight.language });
+  const plan = planned.plan;
+  if (planned.droppedDependsOn.length > 0) {
+    console.log(`  ⚠ the plan named component(s) that do not exist, left out of depends_on: ${planned.droppedDependsOn.join(", ")}`);
+  }
 
   // The LLM chooses plan.component_id, which can differ from `name`. The
   // existence check above only covers `name`, so re-check the id that
@@ -148,6 +156,8 @@ export async function runCreate(name: string, opts: CreateOptions = {}): Promise
       );
     }
   }
+  // Close the loop: the next create or modify is shown what this component is for and what it depends on.
+  recordCreateMemory(readManifest(entry.component_id) ?? entry, opts.intent);
 
   console.log(`\n✅ "${entry.component_id}" created (v${entry.current_version}).`);
   // create compiles the starter files (and rolls back if that fails) but runs no tests; stored status is "pending".
@@ -176,6 +186,7 @@ export async function runModify(componentId: string, instruction: string, option
     confirmGated,
     readManifest,
     refineIntent,
+    prepareModifyIntent,
     classifyAndCompile,
     scanFilesForInjectionAttempts,
     scanForInjectionAttempts,
@@ -344,8 +355,8 @@ export async function runModify(componentId: string, instruction: string, option
 
   // Node 1: Intake / Intent Refinement
   console.log(`Refining intent...`);
-  const memory = readRelevantMemory(componentId);
-  const refined = await refineIntent(componentId, instruction, originalFiles, formatMemoryLines(memory));
+  // One shared step (core/entrypoints/modify_intent.ts): the MCP tool runs the same function, so both doors read the same memory.
+  const { refined } = await prepareModifyIntent(componentId, instruction, originalFiles);
   console.log(`\nInterpreted as: "${refined.explicit_instruction}"`);
   if (refined.assumptions.length > 0) {
     console.log(`Assumptions made:`);

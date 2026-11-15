@@ -101,6 +101,9 @@ export interface BuildInput {
   /** F04-04: see ModifyResultPayload.partialLinePaths. */
   partialLinePaths?: string[] | undefined;
   hasCoverage: boolean;
+  /** What the model restated the instruction as (modify_intent.ts), and what it assumed. Shown to the approver; not stored in the payload. */
+  interpretedAs?: string | undefined;
+  assumptions?: string[] | undefined;
   decision: { action: "human_confirm" | "auto_commit"; reason: string };
   originalFiles: FileContent[];
   finalFiles: { path: string; new_content: string }[];
@@ -113,6 +116,27 @@ export interface BuiltResult {
   /** The short form: paths with counts, gate decision, coverage, hash. Returned to the agent. */
   summary: string;
   changedPaths: string[];
+}
+
+const INTERPRETATION_MAX_CHARS = 300;
+const MAX_ASSUMPTIONS_SHOWN = 3;
+/** One line, no control or invisible direction characters (model text shown to a person), cut at a length. */
+function displayLine(text: string, max: number): string {
+  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+  return clean.length > max ? clean.slice(0, max - 1) + "…" : clean;
+}
+
+/**
+ * The line that tells the approver how the model read the agent's instruction, or undefined when it read it the same way
+ * (a restatement that only differs in spacing or case is not worth the approver's attention).
+ */
+export function interpretationLine(instruction: string, interpretedAs: string | undefined, assumptions: string[] | undefined): string | undefined {
+  if (interpretedAs === undefined) return undefined;
+  const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
+  const shownAssumptions = (assumptions ?? []).map((a) => displayLine(a, 160)).filter((a) => a !== "").slice(0, MAX_ASSUMPTIONS_SHOWN);
+  if (same(instruction, interpretedAs) && shownAssumptions.length === 0) return undefined;
+  const text = displayLine(interpretedAs, INTERPRETATION_MAX_CHARS);
+  return `Interpreted as: "${text}"${shownAssumptions.length ? ` (assumed: ${shownAssumptions.join("; ")})` : ""}`;
 }
 
 export function buildModifyResult(input: BuildInput): BuiltResult {
@@ -143,8 +167,10 @@ export function buildModifyResult(input: BuildInput): BuiltResult {
   const securityLines = securityNotesMessages(input.securityNotes?.advisories, input.securityNotes?.notRead);
   const coverage = input.hasCoverage ? "Tests cover the changed files." : "No test coverage was found for the changed files.";
 
+  const interpretation = interpretationLine(input.instruction, input.interpretedAs, input.assumptions);
   const summaryLines = [
     `Result for "${input.componentId}" (${input.operation}${input.contractChanged ? ", contract-changing" : ""}${input.fromEscalation ? ", escalation-authored" : ""}), built and checked; nothing is written yet:`,
+    ...(interpretation === undefined ? [] : [interpretation]),
     ...fileLines,
     `TrustGate: ${input.decision.action} — ${input.decision.reason}`,
     verification,

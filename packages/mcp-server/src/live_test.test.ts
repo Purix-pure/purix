@@ -42,7 +42,9 @@ describe("MCP Server Live Protocol Test across Languages", () => {
     process.env.PURIX_LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "test_openai_key";
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      // purix_modify starts with the intent-refinement call the CLI makes (P5), then classifies. Answer each in its own shape.
+      if (typeof init?.body === "string" && init.body.includes("first step of a code-modification tool")) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ explicit_instruction: "fixture interpretation", assumptions: [] }) } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
       return new Response(
         JSON.stringify({
           choices: [
@@ -144,7 +146,9 @@ describe("MCP Server Live Protocol Test across Languages", () => {
     // 24 -> 19 (2026-10-12, D-21): delete, accept_drift, both migration tools, backup and reconcile moved to the CLI only;
     // purix_approval_status (read-only poll for a pending approval) added.
     // 19 -> 14 (2026-10-14, MCP-5): library, stats, migrations_list, audit and remember moved to the CLI only.
-    expect(toolNames).toHaveLength(14);
+    // 14 -> 15 (2026-11-15, P3): purix_remember returned, narrowed: one short plain-statement note per call, refused if it reads
+    // as an instruction, a session limit, saved as an "agent-note". Agents were writing conventions to CONVENTIONS.md, which Purix never reads.
+    expect(toolNames).toHaveLength(15);
     expect(toolNames).toEqual(
       [
         "purix_adopt",
@@ -157,6 +161,7 @@ describe("MCP Server Live Protocol Test across Languages", () => {
         "purix_ingest",
         "purix_index",
         "purix_modify",
+        "purix_remember",
         "purix_status",
         "purix_tools",
         "purix_tools_plan",
