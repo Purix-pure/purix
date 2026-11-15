@@ -1,7 +1,7 @@
 // packages/core/src/cli-io/confirm.ts (moved from src/cli/confirm.ts — security/auth.ts and recovery/escalate.ts import this directly, so it must live in core, not in the cli package, or the core→cli boundary check would fail)
 import { ambientEnv } from "../platform/env.js";
 import * as readline from "node:readline";
-import { stdin, stdout } from "node:process";
+import { stdin, stdout, stderr } from "node:process";
 
 /**
  * SECURITY (GAPS-REPORT-2 §1): AUTO_CONFIRM used to be honored whenever
@@ -67,7 +67,7 @@ export function unlockPromptsForTests(): void {
 
 function refuseToPrompt(question: string): void {
   // stderr, never stdout: stdout may be a protocol stream.
-  process.stderr.write(`[purix] Not asking "${question.trim().slice(0, 200)}": ${promptLockReason}. Treated as "no".\n`);
+  stderr.write(`[purix] Not asking "${question.trim().slice(0, 200)}": ${promptLockReason}. Treated as "no".\n`);
 }
 
 // One process-wide line reader shared by every prompt (confirm() and the
