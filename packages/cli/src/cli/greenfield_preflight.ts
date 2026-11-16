@@ -232,7 +232,7 @@ export async function defaultPreflightDeps(): Promise<PreflightDeps> {
         if (status.source === "missing") {
           return {
             ok: false,
-            message: `No API key found for your provider (looked for ${status.envVar}). Set it in your environment, or store it: purix secret set ${status.envVar} <key>`,
+            message: `No API key found for your provider (looked for ${status.envVar}). Set it in your environment, or store it: purix secret set ${status.envVar}`,
           };
         }
         return { ok: true };

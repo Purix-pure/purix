@@ -1,8 +1,8 @@
 // packages/core/src/eval/report.ts
 //
 // AI-10 (PURIX-33): turns records into the table the decision is read from. Plain Markdown, no I/O.
-import { ARM_IDS, type ArmId } from "./arms.js";
-import { RULE, evaluateDecisionRule, pairedComparison, summarize, type Tier, type TrialRecord } from "./scoring.js";
+import { ARM_IDS } from "./arms.js";
+import { RULE, evaluateDecisionRule, pairedComparison, summarize, type TrialRecord } from "./scoring.js";
 
 export interface ReportMeta {
   dry: boolean;

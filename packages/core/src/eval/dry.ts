@@ -9,7 +9,6 @@
 import { createHash } from "node:crypto";
 import type { CallContext, CallModel, ModelReply } from "./runner.js";
 import type { PromptPair } from "../llm/prompts/frames.js";
-import type { EvalCase } from "./mutations.js";
 import { splitFile } from "./line_ops.js";
 
 /** Stable value in [0, 1) for a string. */

@@ -35,7 +35,7 @@ export interface BrandConfig {
   supportEmail: string;
   /** "From" address used by transactional email (Resend). */
   emailFrom: string;
-  /** Public GitHub org/repo slug, e.g. "purix-pure/purix" — used to build links in CLI output. */
+  /** Public GitHub org/repo slug, e.g. "Purix-pure/purix" (GitHub's own spelling) — used to build links in CLI output. */
   githubRepo: string;
   /** X/Twitter or other primary social handle shown in CLI "star us" nudges, if any. */
   socialHandle: string | null;
@@ -48,7 +48,7 @@ const DEFAULTS: BrandConfig = {
   appUrl: "https://app.purix.example",
   supportEmail: "support@purix.example",
   emailFrom: "Purix <noreply@purix.example>",
-  githubRepo: "purix-pure/purix",
+  githubRepo: "Purix-pure/purix",
   socialHandle: null,
 };
 

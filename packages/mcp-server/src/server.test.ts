@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPurixMcpServer, createToolCaller, getAgentId } from "./server";
-import { closeDb, writeManifest, readManifest } from "@purix/core/manifest/store";
+import { closeDb, writeManifest } from "@purix/core/manifest/store";
 import { listEvents } from "@purix/core/manifest/events";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
 

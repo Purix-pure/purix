@@ -11,8 +11,9 @@
 // A project .env is for API keys, so those still load. Names that steer the runtime, the platform, the network or
 // Purix's own switches are ignored here and must come from the shell or the user's own configuration. A variable that
 // is already set in the environment is never replaced (the same rule dotenv follows).
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parse } from "dotenv";
 
 const BLOCKED_NAMES = new Set([
@@ -45,7 +46,8 @@ export function applyProjectEnv(parsed: Record<string, string>, env: Record<stri
   const result: ProjectEnvResult = { applied: [], ignored: [] };
   for (const [name, value] of Object.entries(parsed)) {
     if (!isProjectEnvNameAllowed(name)) {
-      result.ignored.push(name);
+      // An empty value (`PURIX_QUIET=`, as a copied template has) could not change anything, so it is not worth a notice.
+      if (value.trim() !== "") result.ignored.push(name);
       continue;
     }
     if (env[name] !== undefined) continue;
@@ -63,5 +65,31 @@ export function loadProjectEnv(dir: string, env: Record<string, string | undefin
     return applyProjectEnv(parse(readFileSync(path)), env);
   } catch {
     return { applied: [], ignored: [] };
+  }
+}
+
+/**
+ * True the first time this folder shows this exact set of ignored names, false after that.
+ *
+ * The notice is a courtesy, not the protection: the names are ignored on every run whether or not anyone is told. So telling a
+ * person once per folder is enough, and a changed set of names (a repository that later adds AUTO_CONFIRM, say) is a new
+ * fingerprint and is announced again. If the state file cannot be read or written we announce, because a missing notice is
+ * worse than a repeated one.
+ */
+export function shouldAnnounceIgnored(dir: string, ignored: string[], stateDir: string): boolean {
+  const fingerprint = createHash("sha256").update(`${resolve(dir)}\0${[...ignored].sort().join(",")}`).digest("hex").slice(0, 16);
+  const file = join(stateDir, "env-notice.json");
+  try {
+    let seen: string[] = [];
+    if (existsSync(file)) {
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (Array.isArray(parsed)) seen = parsed.filter((x): x is string => typeof x === "string");
+    }
+    if (seen.includes(fingerprint)) return false;
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(file, JSON.stringify([...seen, fingerprint].slice(-200)));
+    return true;
+  } catch {
+    return true;
   }
 }

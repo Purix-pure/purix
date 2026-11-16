@@ -18,7 +18,6 @@
 // rotationDue for the "session" entry rather than showing a confusing
 // warning about something that isn't rotated that way.
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { createSecretsStore } from "./secrets_manager.js";
 import { purixDir } from "../platform/layout.js";
 

@@ -42,7 +42,7 @@ Nothing below is uploaded by Purix.
 
 | Where | What |
 |---|---|
-| `<project>/.purix/` | Configuration, the provider choice, an encrypted store of secrets you save with `purix secret-set`, a notes log (`memory/log.jsonl`), locks, and the component list. Disposable files (language toolchains, caches) are under `.purix/tmp/`. |
+| `<project>/.purix/` | Configuration, the provider choice, an encrypted store of secrets you save with `purix secret set`, a notes log (`memory/log.jsonl`), locks, and the component list. Disposable files (language toolchains, caches) are under `.purix/tmp/`. |
 | `<project>/.git/purix-state/` | The manifest database (components, classifications, confirmations, verification results, the audit trail), the model-call log, and the budget ledger. Because it sits inside `.git`, `clone` and `push` do not carry it. |
 | `~/.purix/` | Your session (if you signed in), the machine id, usage counts, the telemetry choice, diagnostic logs, and installed tools (`~/.purix/tools/`). |
 | Your system's temporary folder | A short-lived copy of your project that a change is verified in, deleted after each run. It leaves out `.git`, `.env*`, `node_modules` and the secrets and state files under `.purix`. |

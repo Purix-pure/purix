@@ -1,7 +1,7 @@
 // AI-07: the parse check runs before any copy, and only blames an edit for what the edit broke.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { precheckEdits } from "./precheck.js";

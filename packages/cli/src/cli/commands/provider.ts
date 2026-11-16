@@ -50,7 +50,7 @@ export function registerProviderCommands(program: Command) {
           modelHigh: opts.modelHigh,
           label: opts.label,
         });
-        console.log(`✅ Custom provider configured (${opts.baseUrl}). Store the key: purix secret set ${opts.keyEnv} <your-key>`);
+        console.log(`✅ Custom provider configured (${opts.baseUrl}). Store the key: purix secret set ${opts.keyEnv}`);
         return;
       }
       const known = listProviders().find((p) => p.id === id);
@@ -60,7 +60,7 @@ export function registerProviderCommands(program: Command) {
         return;
       }
       persistProviderChoice(id);
-      console.log(`✅ Active provider set to "${id}" (${known.label}). Make sure a key is stored: purix secret set ${known.keyEnvVar} <your-key>`);
+      console.log(`✅ Active provider set to "${id}" (${known.label}). Make sure a key is stored: purix secret set ${known.keyEnvVar}`);
     });
 
   providerCmd
@@ -110,7 +110,7 @@ export function registerProviderCommands(program: Command) {
         const key = providerKeyStatus(id);
         if (key?.source === "stored") console.log(`API key (${key.envVar}): stored in Purix`);
         else if (key?.source === "environment") console.log(`API key (${key.envVar}): found in the environment`);
-        else if (key) console.log(`API key (${key.envVar}): NOT FOUND. Run: purix secret set ${key.envVar} <your-key>`);
+        else if (key) console.log(`API key (${key.envVar}): NOT FOUND. Run: purix secret set ${key.envVar}`);
         console.log(`(Whether the provider accepts the key is only known on the first real call.)`);
       } catch (err) {
         console.log(`🛑 ${err instanceof Error ? err.message : String(err)}`);

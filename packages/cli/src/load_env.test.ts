@@ -3,12 +3,12 @@
 // Tested on Linux against simulated payloads.
 import { describe, it } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { applyProjectEnv, isProjectEnvNameAllowed, loadProjectEnv } from "./load_env.js";
+import { applyProjectEnv, isProjectEnvNameAllowed, loadProjectEnv, shouldAnnounceIgnored } from "./load_env.js";
 
 describe("project .env filtering", () => {
   it("still loads an API key", () => {
@@ -88,6 +88,7 @@ describe("project .env filtering", () => {
       delete clean.NODE_ENV;
       delete clean.AUTO_CONFIRM;
       delete clean.GROQ_API_KEY;
+      clean.PURIX_USER_DIR = join(dir, "state");
       const run = spawnSync(process.execPath, ["--import", tsx, script], { cwd: dir, env: clean, encoding: "utf8" });
       expect(run.stdout.trim()).toBe("||gk"); // join() prints an unset variable as an empty string
       expect(run.stderr).toContain("ignored NODE_ENV, AUTO_CONFIRM");
@@ -104,10 +105,66 @@ describe("project .env filtering", () => {
       const tsx = import.meta.resolve("tsx");
       const script = join(dir, "run.mjs");
       writeFileSync(script, `await import(${JSON.stringify(pathToFileURL(boot).href)});`);
-      const run = spawnSync(process.execPath, ["--import", tsx, script, "hook"], { cwd: dir, encoding: "utf8" });
+      const run = spawnSync(process.execPath, ["--import", tsx, script, "hook"], { cwd: dir, env: { ...process.env, PURIX_USER_DIR: join(dir, "state") }, encoding: "utf8" });
       expect(run.stderr).toBe("");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("tells a folder about its ignored names once, and again only when the set of names changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-env-notice-"));
+    try {
+      const state = join(dir, "state");
+      expect(shouldAnnounceIgnored(dir, ["AUTO_CONFIRM", "NODE_ENV"], state)).toBe(true);
+      expect(shouldAnnounceIgnored(dir, ["NODE_ENV", "AUTO_CONFIRM"], state)).toBe(false); // same names, any order
+      expect(shouldAnnounceIgnored(dir, ["AUTO_CONFIRM", "NODE_ENV", "PURIX_DEV_TIER"], state)).toBe(true); // a new name is news
+      expect(shouldAnnounceIgnored(join(dir, "other"), ["AUTO_CONFIRM", "NODE_ENV"], state)).toBe(true); // another folder is its own
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("announces again when the state file is unreadable (a missing notice is worse than a repeated one)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-env-notice-"));
+    try {
+      const state = join(dir, "state");
+      mkdirSync(state, { recursive: true });
+      writeFileSync(join(state, "env-notice.json"), "{not json");
+      expect(shouldAnnounceIgnored(dir, ["NODE_ENV"], state)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the real start-up prints the notice on the first run in a folder and stays quiet on the second", () => {
+    const dir = mkdtempSync(join(tmpdir(), "purix-env-boot-"));
+    try {
+      writeFileSync(join(dir, ".env"), "NODE_ENV=test\nAUTO_CONFIRM=1\n");
+      const boot = fileURLToPath(new URL("./load_env_boot.ts", import.meta.url));
+      const tsx = import.meta.resolve("tsx");
+      const script = join(dir, "run.mjs");
+      writeFileSync(script, `await import(${JSON.stringify(pathToFileURL(boot).href)});`);
+      const env: NodeJS.ProcessEnv = { ...process.env, PURIX_USER_DIR: join(dir, "state") };
+      delete env.NODE_ENV;
+      delete env.AUTO_CONFIRM;
+      const first = spawnSync(process.execPath, ["--import", tsx, script], { cwd: dir, env, encoding: "utf8" });
+      const second = spawnSync(process.execPath, ["--import", tsx, script], { cwd: dir, env, encoding: "utf8" });
+      expect(first.stderr).toContain("ignored NODE_ENV, AUTO_CONFIRM");
+      expect(second.stderr).toBe("");
+      writeFileSync(join(dir, ".env"), "NODE_ENV=test\nAUTO_CONFIRM=1\nPURIX_DEV_TIER=pro\n");
+      const third = spawnSync(process.execPath, ["--import", tsx, script], { cwd: dir, env, encoding: "utf8" });
+      expect(third.stderr).toContain("PURIX_DEV_TIER");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not list a blocked name that has an empty value (a copied template is full of them)", () => {
+    const env: Record<string, string | undefined> = {};
+    const r = applyProjectEnv({ PURIX_QUIET: "", AUTO_CONFIRM: "  ", PURIX_DEV_TIER: "pro" }, env);
+    expect(r.ignored).toEqual(["PURIX_DEV_TIER"]);
+    expect(env.PURIX_QUIET).toBeUndefined();
+    expect(env.AUTO_CONFIRM).toBeUndefined();
   });
 });

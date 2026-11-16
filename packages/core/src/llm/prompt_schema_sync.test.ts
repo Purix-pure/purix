@@ -13,8 +13,6 @@
 // until someone notices repair or escalation never proposes that kind.
 import { describe, it } from "node:test";
 import { expect } from "expect";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { ChangeEditSchema } from "./classify";
 
 const ALL_KINDS: string[] = ChangeEditSchema.options.map((o) => o.shape.kind.value);

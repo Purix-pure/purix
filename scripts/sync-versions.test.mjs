@@ -163,6 +163,24 @@ test("a leftover mention of the old version is listed for review (history and sc
   assert.doesNotMatch(r.out, /scripts\/sync-versions\.mjs:\d+:/);
 });
 
+test("--check fails when server.json spells the repository in another letter case", () => {
+  const d = fixture();
+  const f = join(d, "server.json");
+  writeFileSync(f, readFileSync(f, "utf8").replace(/github\.com\/[^"]+/, (m) => m.toLowerCase()));
+  const r = run(d, "--check");
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /letter case included/);
+});
+
+test("--check fails when mcpName differs from the repository owner and name, even only in case", () => {
+  const d = fixture();
+  const f = join(d, "packages/cli/package.json");
+  writeFileSync(f, readFileSync(f, "utf8").replace(/"mcpName": "[^"]+"/, (m) => m.toLowerCase()));
+  const r = run(d, "--check");
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /mcpName and the server\.json name are exactly/);
+});
+
 test("--stale does not match a longer version that starts the same way", () => {
   const d = fixture();
   mkdirSync(join(d, "docs"), { recursive: true });

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getLanguageProvider } from "../registry.js";
 import { installTool, locateTool } from "../../tools/broker.js";
 import type { ConsentGate } from "../../tools/consent.js";
-import { purixDir, PURIX_DIRNAME } from "../../platform/layout.js";
+import { purixDir } from "../../platform/layout.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,8 +32,8 @@ function findRepoRoot(startDir: string): string {
 
 /**
  * Copies committed fixture source (packages/core/src/language/conformance/
- * fixtures/<lang>/) into a disposable runtime workspace at the repo root:
- * .purix/tmp/conformance/<lang>/. This is the ONLY place a fixture's own
+ * fixtures/<lang>/) into a disposable runtime workspace under the given
+ * root (the folder the run was started in): .purix/tmp/conformance/<lang>/. This is the ONLY place a fixture's own
  * node_modules / venv / package.json / lockfile / any installed or
  * generated file is allowed to live — packages/ must only ever contain
  * the authored .ts/.py fixture source itself, nothing installed or
@@ -41,8 +41,8 @@ function findRepoRoot(startDir: string): string {
  * committed source; the toolchain install below is cached (skipped if
  * already present), so this stays fast on repeat runs.
  */
-function prepareRuntimeWorkspace(repoRoot: string, langId: string, sourceFixtureDir: string): string {
-  const runtimeDir = resolve(purixDir(repoRoot), "tmp", "conformance", langId);
+export function prepareRuntimeWorkspace(workRoot: string, langId: string, sourceFixtureDir: string): string {
+  const runtimeDir = resolve(purixDir(workRoot), "tmp", "conformance", langId);
   mkdirSync(runtimeDir, { recursive: true });
   if (existsSync(sourceFixtureDir)) {
     cpSync(sourceFixtureDir, runtimeDir, { recursive: true });
@@ -69,7 +69,7 @@ const CONFORMANCE_TOOLS: Record<string, readonly string[]> = {
 async function ensureToolsInstalled(runtimeDir: string, langId: string, consent: ConsentGate | undefined): Promise<void> {
   for (const id of CONFORMANCE_TOOLS[langId] ?? []) {
     if (locateTool({ baseDir: runtimeDir }, id)) continue;
-    console.log(`  Installing ${id} into ${runtimeDir}/${PURIX_DIRNAME}/tools/ (pinned, hash-checked; not global, not inside packages/)...`);
+    console.log(`  Installing ${id} (pinned, hash-checked; you are asked before anything is written)...`);
     const res = await installTool({ baseDir: runtimeDir, ...(consent ? { consent } : {}) }, id);
     if (!res.ok) console.warn(`  ⚠ Could not install ${id}: ${res.message}${res.hint ? ` ${res.hint}` : ""}`);
   }
@@ -171,7 +171,10 @@ export async function runConformanceSuite(
   const report: Record<string, LanguageParityStatus> = {};
   let allCertified = true;
 
-  const repoRoot = findRepoRoot(__dirname);
+  // The scratch workspace goes under the folder the caller names (the current folder by default), never under
+  // wherever this module happens to be installed. Walking up from __dirname used to find the Purix source tree, or,
+  // for an installed copy, whatever project contains node_modules, and wrote scratch files there.
+  const workRoot = baseDir;
 
   for (const langId of languages) {
     const provider = getLanguageProvider(langId);
@@ -185,7 +188,7 @@ export async function runConformanceSuite(
     };
 
     const sourceFixtureDir = resolve(__dirname, "fixtures", langId);
-    const fixtureDir = prepareRuntimeWorkspace(repoRoot, langId, sourceFixtureDir);
+    const fixtureDir = prepareRuntimeWorkspace(workRoot, langId, sourceFixtureDir);
 
     await ensureToolsInstalled(fixtureDir, langId, options.consent);
     if (langId === "typescript") {

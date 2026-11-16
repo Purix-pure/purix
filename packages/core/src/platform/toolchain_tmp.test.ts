@@ -1,7 +1,7 @@
 // src/platform/toolchain_tmp.test.ts
 import { describe, it } from "node:test";
 import { expect } from "expect";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeRmSync } from "./fs_retry.js";

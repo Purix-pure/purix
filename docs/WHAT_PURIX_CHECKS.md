@@ -56,7 +56,7 @@ Each sentence below has a named test or gate that asserts it.
   - Note: Tests cover the approve and auto-approve paths; a denial and an expiry are not asserted in the audit trail by a named test yet.
 - “`PURIX_MCP_AUTO_APPROVE=1` approves every gated action for the whole” (README-009; README). Evidence: `packages/mcp-server/src/mcp_approval_and_paths.test.ts`.
 - “Maintenance commands (`purix delete`, `backup`, `reconcile`, `migration`,” (README-010; README). Evidence: `packages/mcp-server/src/live_test.test.ts`.
-  - Note: The exact tool list is asserted; the 14 names do not include these.
+  - Note: The exact tool list is asserted; the 15 names do not include these.
 - “Every MCP result carries a structured `covers` field” (README-011; README). Evidence: `packages/mcp-server/src/mcp_result_contract.test.ts`.
 - “…results that can include repository text end” (README-012; README). Evidence: `packages/mcp-server/src/mcp_result_contract.test.ts`.
 - “…so running it again changes nothing and your own text is never touched” (README-013; README). Evidence: `packages/cli/src/cli/commands/connect_extras.test.ts`.

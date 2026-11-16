@@ -2,12 +2,12 @@
 // Real SQLite store in a real temp directory: the bundle must come from the real chain, and the read must change nothing.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "../manifest/schema";
 import { closeDb, getDbCompat as getDb, writeManifest } from "../manifest/store";
-import { appendAuditRecord, pruneAuditChain, verifyAuditRows } from "../security/audit_tamper_evidence";
+import { appendAuditRecord, pruneAuditChain } from "../security/audit_tamper_evidence";
 import { recordEvent } from "../manifest/events";
 import { computeSyncHash } from "../state/hash";
 import { buildEvidenceBundle, bundleFromSnapshot, overallOutcome, trailerLines, applyTrailers, renderPrReport, verifyBundleChain, GENESIS_HASH } from "./evidence";

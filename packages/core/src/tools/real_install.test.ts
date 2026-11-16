@@ -5,7 +5,6 @@
 // run in the default suite: CI must not depend on registry availability.
 import { describe, it } from "node:test";
 import { expect } from "expect";
-import { join } from "node:path";
 import { getToolBinary, installTool } from "./broker.js";
 import { spawnSync } from "../platform/spawn_sync.js";
 import { toolsDir } from "./state.js";

@@ -39,7 +39,7 @@ in its `package.json` is the source of truth.
 
 ## Scope
 
-This repository stores credentials at rest (`secret-set`/`secret-rotate`
+This repository stores credentials at rest (`purix secret set` and `purix secret rotate`
 commands) and runs verification of target codebases in a subprocess
 (isolated with bubblewrap on Linux where it is available; the README says what
 isolation covers and where it is not checked). Reports involving either of those — credential handling,

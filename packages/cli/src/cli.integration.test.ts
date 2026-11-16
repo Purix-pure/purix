@@ -64,8 +64,8 @@ const publicCommandTree: CommandSpec[] = [
   {
     name: "secret",
     subcommands: [
-      { name: "set", syntax: "set <name> <value>" },
-      { name: "rotate", syntax: "rotate <name> <newValue>" },
+      { name: "set", syntax: "set <name> [value]" },
+      { name: "rotate", syntax: "rotate <name> [newValue]" },
       { name: "remove", syntax: "remove <name>" },
       { name: "status" },
     ],

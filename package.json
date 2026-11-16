@@ -1,6 +1,6 @@
 {
   "name": "purix-monorepo",
-  "version": "0.4.0-beta.2",
+  "version": "0.4.0-beta.3",
   "private": true,
   "type": "module",
   "engines": {
@@ -34,6 +34,7 @@
     "artifact-check": "node --import tsx scripts/check-no-toolchain-artifacts.ts",
     "version-check": "node scripts/sync-versions.mjs --check",
     "version-set": "node scripts/sync-versions.mjs",
+    "version-check:test": "node --test scripts/sync-versions.test.mjs",
     "registry-check:test": "node --test scripts/check-registry.test.mjs",
     "lint": "turbo run build --filter=@purix/core && eslint .",
     "lint:fix": "turbo run build --filter=@purix/core && eslint . --fix",

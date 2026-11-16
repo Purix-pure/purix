@@ -313,7 +313,7 @@ import { preflightVerification, formatPreflight } from "@purix/core/verify/prefl
 import { assertAuthorizedToApprove } from "@purix/core/security/auth";
 import { sanitizeErrorText } from "@purix/core/security/error_text";
 import { checkDrift } from "@purix/core/state/drift";
-import { buildMigrationPlan, stageMigration } from "@purix/core/state/migration";
+import { stageMigration } from "@purix/core/state/migration";
 import { classifyAndCompile } from "@purix/core/recovery/classify_and_compile";
 import { prepareModifyIntent } from "@purix/core/entrypoints/modify_intent";
 import { planNewComponent, recordCreateMemory } from "@purix/core/entrypoints/create_plan";
@@ -329,14 +329,10 @@ import { resolveLanguage, getLanguageProvider, languageForPlanning, listLanguage
 import { recordAnchorOutcome } from "@purix/core/verify/anchor_events";
 import { partialLinePathsFor } from "@purix/core/verify/partial_line_record";
 import { commitVersionedChange, reVerifyCascadeDependents } from "@purix/core/manifest/commit_and_cascade";
-import { listMigrations } from "@purix/core/manifest/migrations";
-import { listLibrary } from "@purix/core/manifest/library";
-import { buildObservabilityReport, formatObservabilityReport } from "@purix/core/manifest/observability";
 import { buildAuditTrail, formatAuditTrailJson, formatAuditTrailMarkdown } from "@purix/core/manifest/audit_export";
-import { runFullAudit, formatFullAuditLines } from "@purix/core/security/full_audit";
 import { readAuditChain } from "@purix/core/security/audit_tamper_evidence";
 import { findAnchorInGit, judgeChain, describeVerdict } from "@purix/core/evidence/anchor";
-import { recordMemory, readGlobalMemory, formatMemoryLines, GLOBAL_SCOPE, rememberNote, AGENT_NOTE_MAX_CHARS } from "@purix/core/manifest/memory";
+import { readGlobalMemory, formatMemoryLines, GLOBAL_SCOPE, rememberNote, AGENT_NOTE_MAX_CHARS } from "@purix/core/manifest/memory";
 // ADR-060 D6: the MCP adapter may import ONLY the read-only and "ask" parts of the tools broker.
 // installTool / approveRequest / removeTool / createHumanGate must never be imported here: an agent
 // can request an install, only a human at the CLI can approve one. server.test.ts enforces this.

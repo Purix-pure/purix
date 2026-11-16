@@ -285,7 +285,7 @@ function resolveKey(envVarName: string, providerLabel: string): string {
   if (!key) {
     throw new Error(
       `${envVarName} isn't available. Purix does not ship or bill against a shared key — ` +
-        `bring your own for ${providerLabel}. Run "purix secret set ${envVarName} <value>" (stored ` +
+        `bring your own for ${providerLabel}. Run "purix secret set ${envVarName}" (it asks for the value, so it stays out of your shell history; stored ` +
         `encrypted locally, never leaves the machine except in the request to ${providerLabel} itself), ` +
         `or set it in a local .env for quick dev (never commit it).`
     );

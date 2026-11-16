@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.2). Must match all three packages. Run from main. Leave empty for the OIDC debug run.'
+        description: 'Version to publish, typed exactly as in package.json (e.g. 0.4.0-beta.3). Must match all three packages. Run from main. Leave empty for the OIDC debug run.'
         required: false
         type: string
       debug_oidc_only:

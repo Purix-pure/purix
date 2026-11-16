@@ -151,10 +151,10 @@
       "evidence": [
         {
           "file": "packages/mcp-server/src/live_test.test.ts",
-          "contains": "expect(toolNames).toHaveLength(14)"
+          "contains": "expect(toolNames).toHaveLength(15)"
         }
       ],
-      "note": "The exact tool list is asserted; the 14 names do not include these."
+      "note": "The exact tool list is asserted; the 15 names do not include these."
     },
     {
       "id": "README-011",

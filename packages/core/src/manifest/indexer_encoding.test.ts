@@ -5,7 +5,7 @@
 // the first line, so the first symbol of such a file was not recorded. Found by reading `extractSymbols`; this test reproduces it.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "expect";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runIndex } from "./indexer";

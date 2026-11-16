@@ -8,7 +8,21 @@ same version number.
 
 ## [Unreleased]
 
+### Changed
+- `purix secret set <name>` and `purix secret rotate <name>` now ask for the value (hidden prompt on a terminal) or read it from stdin, so the key never has to be typed on the command line, where it is saved in shell history and visible in `ps`. The old form with the value as an argument still works and now prints a warning. Hints elsewhere no longer tell people to type the key as an argument.
+
 ### Fixed
+- `purix lang verify` put its scratch workspace under the folder found by walking up from the Purix module's own location (reproduced: run from another project, it wrote into the Purix source tree; for an installed copy it could reach any enclosing project that has a `.git` or `pnpm-workspace.yaml`), not under the folder it was run in. It now uses `.purix/tmp/conformance/` in the current folder, as CI already did. The install message no longer names a path that was not the real install location.
+- `SECURITY.md`, `PRIVACY.md` and the compliance notes named the removed commands `secret-set` and `secret-rotate`; they now name `purix secret set` and `purix secret rotate`.
+- Removed 31 unused imports (lint warnings 186 to 155; errors stay at 0).
+
+## [0.4.0-beta.3]
+
+### Fixed
+- The repository is now spelled `Purix-pure/purix`, GitHub's own spelling, in `server.json` (name and repository), both `mcpName` fields, the three packages' homepage and issues links, and the brand default. npm provenance and the MCP registry both compare it case-sensitively. `version-check` now fails on a case difference and also checks `mcpName`.
+- A blocked name with an empty value in a project `.env` (`PURIX_QUIET=`) no longer produces the "ignored" notice, since it could not change anything.
+- `.env.example` now holds only what a project `.env` may set (provider keys, per-provider model names); the shell-only Purix settings are listed as comments, and the header no longer claims every value reaches Purix or names the old `secret-set` and `provider-set` commands.
+- The "ignored ... from ./.env" notice no longer prints on every command. It shows once per folder and per set of names, and again if the `.env` gains a new blocked name. The names are still ignored on every run; only the notice is remembered (`env-notice.json` in the Purix user folder).
 
 - `purix_create` checks that an approver is registered **before** it calls the model. It used to check afterwards, so a fresh project paid for a model call and was then told to run `purix approve --register`.
 - `purix_change` offers to adopt an indexed file that no component owns (as `purix change` does) instead of proposing a duplicate component with a name made up from the sentence. It points to `purix_adopt`; adopting still needs a person.

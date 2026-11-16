@@ -1,6 +1,6 @@
 // A2a-1: the deterministic floor on the shared matcher. The 21 paths of research 08 (10 missed on the baseline), plus the
 // manifests and lockfiles the plan adds. [path, must the floor hit]
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it } from "node:test";
 import { expect } from "expect";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
