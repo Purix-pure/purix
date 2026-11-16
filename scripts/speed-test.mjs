@@ -120,6 +120,7 @@ const MCP_SKIPPED = {
   purix_approval_status: "needs a pending approval id", purix_change: "needs a model", purix_create: "needs a model", purix_modify: "needs a model",
   purix_index: "timed through the CLI chain (same code)", purix_ingest: "needs a model and a diff", purix_adopt: "timed through the CLI chain (same code)",
   purix_audit_trail: "Pro feature on the free tier", purix_tools_request_install: "starts an install request",
+  purix_remember: "writes a note into the project store; timed through the CLI chain (`purix remember`, same function)",
 };
 
 // ---------------------------------------------------------------------------------------------------------------------

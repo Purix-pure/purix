@@ -93,3 +93,6 @@ coverage/
 
 # Written by packages/core/src/language/conformance/run.ts (uploaded by CI)
 language-parity-report.json
+
+# Written by scripts/repeat-run.mjs (one file per failed run); never commit these
+repeat-run-logs/

@@ -8,6 +8,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Major versions are moved by hand, in their own change, with the full gate run. Two automatic ones failed CI on 2026-11-17:
+    # eslint 9 -> 10 and @types/node 22 -> 26. @types/node must also stay on the Node floor in package.json "engines" (22.13),
+    # or the types describe APIs the oldest supported Node does not have. Security updates are not affected by this rule.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
