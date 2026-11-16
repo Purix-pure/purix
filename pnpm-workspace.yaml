@@ -21,7 +21,7 @@ overrides:
 # "catalog:" with the real range, so published package.json files contain normal versions.
 catalog:
   "@modelcontextprotocol/sdk": ^1.31.0
-  "@types/node": 22.13.0
+  "@types/node": 26.6.6
   cross-spawn: ^7.0.6
   expect: ^29.7.0
   ts-morph: ^28.0.0
