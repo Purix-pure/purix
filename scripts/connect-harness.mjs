@@ -80,7 +80,8 @@ writeFileSync(join(bin, "purix.cmd"), negative ? "@echo off\r\nexit /b 1\r\n" : 
 // ---- reading what each agent's config holds ----
 function parseConfig(format, text) {
   if (format === "toml") return toml.parse(text);
-  if (format === "yaml") return yaml.load(text);
+  // add-mcp 2.6 names Hermes's format "yaml-1.1" (2.4 used "yaml"); both are read with js-yaml.
+  if (typeof format === "string" && format.startsWith("yaml")) return yaml.load(text);
   const errors = [];
   const v = jsonc.parse(text, errors, { allowTrailingComma: true });
   if (errors.length > 0 && v === undefined) throw new Error("not valid JSON");
