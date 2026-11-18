@@ -45,9 +45,9 @@
     "eslint": "^9.39.0",
     "expect": "catalog:",
     "tsx": "catalog:",
-    "turbo": "^2.3.3",
+    "turbo": "^2.11.11",
     "typescript": "catalog:",
-    "typescript-eslint": "^8.46.0"
+    "typescript-eslint": "^8.72.2"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
