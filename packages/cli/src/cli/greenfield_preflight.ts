@@ -166,6 +166,9 @@ export function nodeTypesInstalled(baseDir: string, ceiling?: string): boolean {
   let dir = baseDir;
   for (;;) {
     if (existsSync(join(dir, "node_modules", "@types", "node", "package.json"))) return true;
+    // Yarn Plug'n'Play keeps packages in a zip cache, not in node_modules, so there is nothing to probe. Say "yes" and let the
+    // real compiler decide: a false "not installed" here blocks a project that is fine, a false "yes" costs one failed check.
+    if (existsSync(join(dir, ".pnp.cjs")) || existsSync(join(dir, ".pnp.js"))) return true;
     if (ceiling !== undefined && dir === ceiling) return false;
     const parent = dirname(dir);
     if (parent === dir) return false;
@@ -178,6 +181,20 @@ function packageManagerAddCommand(baseDir: string): string {
   if (existsSync(join(baseDir, "yarn.lock"))) return "yarn add --dev @types/node";
   if (existsSync(join(baseDir, "bun.lock")) || existsSync(join(baseDir, "bun.lockb"))) return "bun add --dev @types/node";
   return "npm install --save-dev @types/node";
+}
+
+function installAllCommand(baseDir: string): string {
+  return packageManagerAddCommand(baseDir).replace(/ (?:add|install) .*$/, " install");
+}
+
+/** True when this folder's package.json already lists @types/node, so the fix is an install, not an add. */
+function declaresNodeTypes(baseDir: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(baseDir, "package.json"), "utf-8")) as { dependencies?: object; devDependencies?: object };
+    return "@types/node" in (pkg.devDependencies ?? {}) || "@types/node" in (pkg.dependencies ?? {});
+  } catch {
+    return false;
+  }
 }
 
 function hasPackageJson(baseDir: string): boolean {
@@ -196,15 +213,41 @@ function hasPackageJson(baseDir: string): boolean {
  * written and then rolled back. Only TypeScript, and only the one case measured on a real empty folder: starter
  * files that import node:test, node:assert, fs and the like fail to compile without @types/node.
  */
-export function checkPlanPrerequisites(language: string, files: readonly PlanFile[], baseDir: string, ceiling?: string): { ok: true } | { ok: false; message: string } {
+export function checkPlanPrerequisites(
+  language: string,
+  files: readonly PlanFile[],
+  baseDir: string,
+  ceiling?: string,
+  /** The folder the command was typed in, when `process.chdir` to the project root moved it (see cli.ts, N-3). */
+  launchDir?: string,
+): { ok: true } | { ok: false; message: string } {
   if (language !== "typescript") return { ok: true };
   const usage = findNodeUsage(files);
   if (!usage || nodeTypesInstalled(baseDir, ceiling)) return { ok: true };
-  const steps = [...(hasPackageJson(baseDir) ? [] : ["npm init -y"]), packageManagerAddCommand(baseDir)];
+
+  const what = `${usage.path} ${usage.evidence}, but TypeScript cannot find @types/node from ${baseDir} (it looked there and in every parent folder).`;
+
+  // The person installed it, just not where Purix is working: cli.ts moved to the nearest parent holding .purix or .git. Telling
+  // them to install it again would be wrong advice, so name the mismatch instead. Still a block: files are written, and tsc runs,
+  // in the project root.
+  if (launchDir !== undefined && launchDir !== baseDir && nodeTypesInstalled(launchDir, ceiling)) {
+    return {
+      ok: false,
+      message:
+        `${what}\n` +
+        `@types/node IS installed in ${launchDir}, where you ran this. Purix is working from ${baseDir} instead, the nearest parent folder with a .purix or .git folder.\n` +
+        `Nothing was written. Either run this from a folder that is its own project (no .purix or .git above it that you did not mean), or install @types/node in ${baseDir}.`,
+    };
+  }
+
+  // Listed in package.json but not in node_modules: the person needs an install, not an add.
+  const steps = declaresNodeTypes(baseDir)
+    ? [installAllCommand(baseDir)]
+    : [...(hasPackageJson(baseDir) ? [] : ["npm init -y"]), packageManagerAddCommand(baseDir)];
   return {
     ok: false,
     message:
-      `${usage.path} ${usage.evidence}, but @types/node is not installed in this project, so TypeScript cannot check it. ` +
+      `${what} ` +
       `If you approved this plan, the files would be written and then rolled back.\n` +
       `Nothing was written. Install the Node type definitions once, then run the same command again:\n` +
       steps.map((s) => `  ${s}`).join("\n"),

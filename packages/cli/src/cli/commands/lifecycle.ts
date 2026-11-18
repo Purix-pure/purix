@@ -90,8 +90,8 @@ export async function runCreate(name: string, opts: CreateOptions = {}): Promise
 
   // IDEA-090: say now, before the approval prompt and before the approver file is created, that these files
   // cannot be checked here. Approving them used to end in a rollback.
-  const { checkPlanPrerequisites } = await import("../greenfield_preflight.js");
-  const prerequisites = checkPlanPrerequisites(preflight.language, plan.files, process.cwd());
+  const [{ checkPlanPrerequisites }, { getLaunchDir }] = await Promise.all([import("../greenfield_preflight.js"), import("../launch_dir.js")]);
+  const prerequisites = checkPlanPrerequisites(preflight.language, plan.files, process.cwd(), undefined, getLaunchDir());
   if (!prerequisites.ok) {
     console.error(`\n🛑 ${prerequisites.message}`);
     process.exitCode = 1;

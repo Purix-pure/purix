@@ -235,6 +235,56 @@ describe("plan prerequisites: files that cannot be checked", () => {
     }
   });
 
+  it("treats Yarn Plug'n'Play as installed, because there is no node_modules to look in", () => {
+    const dir = folder();
+    try {
+      writeFileSync(join(dir, ".pnp.cjs"), "");
+      expect(nodeTypesInstalled(dir, dir)).toBe(true);
+      expect(checkPlanPrerequisites("typescript", [testFile], dir, dir)).toEqual({ ok: true });
+    } finally {
+      safeRmSync(dir);
+    }
+  });
+
+  it("when package.json already lists @types/node, says to install, not to add it again", () => {
+    const dir = folder();
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ devDependencies: { "@types/node": "^22.0.0" } }));
+      writeFileSync(join(dir, "pnpm-lock.yaml"), "");
+      const r = checkPlanPrerequisites("typescript", [testFile], dir, dir);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.message).toContain("  pnpm install");
+        expect(r.message).not.toContain("add --save-dev");
+        expect(r.message).toContain(`from ${dir}`);
+      }
+    } finally {
+      safeRmSync(dir);
+    }
+  });
+
+  it("when @types/node is installed where the command was typed but Purix moved to a parent root, says so instead of asking for a second install", () => {
+    const root = folder();
+    try {
+      const launch = join(root, "invoice-api");
+      mkdirSync(join(launch, "node_modules", "@types", "node"), { recursive: true });
+      writeFileSync(join(launch, "node_modules", "@types", "node", "package.json"), "{}");
+      const r = checkPlanPrerequisites("typescript", [testFile], root, root, launch);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.message).toContain(`@types/node IS installed in ${launch}`);
+        expect(r.message).toContain(`working from ${root}`);
+        expect(r.message).toContain("Nothing was written.");
+        expect(r.message).not.toContain("npm install --save-dev");
+      }
+      // Same folder on both sides: the ordinary message, no mismatch text.
+      const same = checkPlanPrerequisites("typescript", [testFile], root, root, root);
+      if (!same.ok) expect(same.message).not.toContain("IS installed");
+    } finally {
+      safeRmSync(root);
+    }
+  });
+
   it("passes plans that do not touch Node, and languages it does not know about", () => {
     const dir = folder();
     try {

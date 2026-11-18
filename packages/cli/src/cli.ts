@@ -524,6 +524,7 @@ function createBaseProgram(): Command {
       const { findProjectRoot } = await import("@purix/core/platform/project_root");
       const found = findProjectRoot(process.cwd());
       if (found && found.root !== process.cwd()) {
+        (await import("./cli/launch_dir.js")).setLaunchDir(process.cwd());
         process.chdir(found.root);
         // Silent for mcp-serve (stdio is the protocol) and for every `hook ...` command (an agent reads stderr as the reason for a block).
         const silentRoot = cmdName === "mcp-serve" || cmdName === "hook" || cmdName.startsWith("hook ");

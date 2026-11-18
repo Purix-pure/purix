@@ -12,6 +12,8 @@ npm install -g @purix/cli@beta
 purix --help
 ```
 
+The package name is `@purix/cli` (scoped). `npm install purix` returns a 404 because no package by that name is published.
+
 Use the `beta` tag to get the newest beta. Without a tag, npm installs whatever the `latest` tag points at, which can be an older beta.
 
 Or run it without installing:
