@@ -6,8 +6,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-# Keep equal to the tool count asserted in packages/mcp-server/src/live_test.test.ts (14 since MCP-5, 2026-10-14).
-$ExpectedTools = 14
+# Keep equal to the tool count asserted in packages/mcp-server/src/live_test.test.ts (15 since P3, 2026-11-15: 14 since MCP-5, then purix_remember returned).
+$ExpectedTools = 15
 $IsWin = [Environment]::OSVersion.Platform -eq 'Win32NT'
 $script:Results = New-Object System.Collections.ArrayList
 $script:LogN = 0

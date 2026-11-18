@@ -28,3 +28,13 @@ catalog:
   tsx: ^4.19.2
   typescript: 5.7.2
   zod: ^4.6.6
+
+# Audit exceptions. Each needs a reason and a date to look at it again; remove it as soon as a fixed release exists.
+# GHSA-fc5q-39xc-vjpf (CVE-2026-33671, picomatch <= 4.0.7, ReDoS from attacker-supplied extglob patterns such as +(*)).
+# Checked 2026-11-18: 4.0.7 is the newest picomatch, so no fixed version exists to upgrade to. The only production path is
+# ts-morph > @ts-morph/common > tinyglobby > picomatch, and Purix only calls ts-morph on an in-memory file system
+# (createSourceFile on a string in verify/test_integrity.ts and verify/ast_transforms.ts): no glob pattern from any input reaches it.
+# Review again by 2026-12-18, or when picomatch publishes a release after 4.0.7.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf

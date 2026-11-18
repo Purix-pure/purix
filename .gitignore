@@ -96,3 +96,6 @@ language-parity-report.json
 
 # Written by scripts/repeat-run.mjs (one file per failed run); never commit these
 repeat-run-logs/
+
+# Written by `node scripts/smoke-test.mjs` when run by hand (test:all deletes it itself)
+purix-mcp-report.md

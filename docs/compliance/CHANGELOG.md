@@ -8,6 +8,8 @@ same version number.
 
 ## [Unreleased]
 
+## [0.4.0-beta.4]
+
 ### Changed
 - `purix secret set <name>` and `purix secret rotate <name>` now ask for the value (hidden prompt on a terminal) or read it from stdin, so the key never has to be typed on the command line, where it is saved in shell history and visible in `ps`. The old form with the value as an argument still works and now prints a warning. Hints elsewhere no longer tell people to type the key as an argument.
 
