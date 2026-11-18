@@ -38,7 +38,7 @@ jobs:
     if: ${{ !inputs.debug_oidc_only }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # pnpm/action-setup only supports pnpm v10 and older — see the same
       # note in ci.yml. Using it here would break the release pipeline
