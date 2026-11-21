@@ -8,10 +8,39 @@ same version number.
 
 ## [Unreleased]
 
+## [0.4.0-beta.5]
+
+### Added (`purix start`, 2026-11-21)
+- `purix start` is a guided first-run setup for a person at a terminal: choose the model provider, paste Purix's own API key at a hidden prompt, check it with one tiny request, and connect a coding agent (it runs `purix connect`, so detection and the hook offer are the same). It does not index the project and it does not touch the coding agent's own login. Decisions and evidence: `docs/research/PURIX-RESEARCH-KEY-MANAGEMENT-AND-START-2026-11-21.md`.
+- `purix start` refuses to run without a terminal (stdin and stdout) and is human-only in the hook rules, because it asks for a key and decides which provider and key Purix uses.
+- The provider choice can now be kept per user: `purix start` saves a default in the user folder (`provider-default.json`), so one setup covers every folder, including an MCP server an agent starts in a folder of its own choosing. Lookup order: the `PURIX_LLM_PROVIDER` variable, then the project's own `provider-config.json`, then this default. A custom endpoint is never kept there; it stays a per-project choice behind `purix provider trust`.
+- If the key is in the environment, `purix start` offers to save a copy in the user-level store, because apps started outside a terminal often do not see shell variables.
+- The "No LLM provider is configured" and "API key isn't available" messages now name `purix start` first. `purix start` replaces the old "There is no start step" hint.
+- Not done: nothing here has run on Windows or macOS, with a real OS keyring, or with a key the provider accepts (the key check was exercised against a real provider with a made-up key, which it rejected). Linux desktop behaviour of the keyring inside an agent-started MCP server is untested (research note, open item P1).
+
+### Changed (one credential store per user, 2026-11-21)
+- `purix secret set`, `rotate` and `remove` now work on one store per person, found from the user folder and not from the folder a command runs in. A key saved in one folder is found from every folder. The store is the OS keyring (Windows Credential Manager, macOS Keychain, Linux Secret Service) through the optional package `@napi-rs/keyring`, with an encrypted file in `~/.purix` as a fallback that is announced each time it is used. On Linux the keyring is used only when a desktop session bus is present, and every keyring write is read back before it counts as stored. `PURIX_SECRET_BACKEND=file|keyring|auto` overrides this.
+- A key is now looked up in the environment (including `.env`) first, then the user-level store, then this folder's old store. Before, a stored key beat the environment, so an old stored key hid a good environment key. `purix provider status`, `purix secret status` and the "key refused" note name the place the key came from and say when another place holds a different value that was not used.
+- `purix secret migrate` copies keys from this folder's old store into the user-level store. It asks before copying and before removing an old copy, never overwrites a different key, and needs a person at a terminal. It is human-only in the hook rules.
+- The hook rules refuse an agent's shell command or `mcp__` file tool that names a credential file or reads the OS keyring (rule `secret-read`), and any write into the user-level Purix folder. Claude Code's built-in `Read` tool is not in the registered hook matcher and is not covered.
+- An old per-folder key store is now found from the folder it was saved in and from every folder below it (the nearest one wins). Before, only the exact folder Purix was run in was read, so a key saved in a project root was "not found" from its subfolders. `purix secret status` and the migration notice name the store's real location.
+- The hook rule also refuses a shell command that names a credential file by its file name (`secrets.master.key`, `secrets.enc.json`, `user-secrets.enc.json`, `user-secrets.master.key`, `session.enc`) in any folder, such as another project's old store. Still a text check on the command, not a wall.
+- In `auto` mode the real OS keyring is not used when `NODE_ENV=test`, when `CI` is set, or when `PURIX_USER_DIR` points Purix at a specific folder, so a test run cannot write into a developer's Credential Manager or Keychain. `PURIX_SECRET_BACKEND=keyring` still forces it.
+
+### Changed (plain-language `purix check`, 2026-11-21)
+- Every drift failure in `purix check` now ends with what to do. A deleted file says to restore it from version control, or to run `purix migration accept-drift <id>` yourself in a terminal if the deletion was intended; an edited file says to review it, then accept or revert. A next step shared by several items (for example `purix adopt` for five files an agent wrote) is printed once under the group, not once per file. `purix check --json` items gain an optional `next` field.
+- The note for a file an agent wrote outside Purix no longer uses Purix's internal term "component": it says `written by an agent (<name>); not governed by Purix, so Purix did not verify it`.
+- The drift warning in `purix modify` and the related commands now says when files are missing from disk instead of claiming someone edited them.
+- `purix doctor` is not a command; the error now suggests `purix hooks doctor`.
+
+### Fixed (approver and prompt messages, 2026-11-21)
+- A question that nobody could answer (an agent's shell, a pipe, CI) was reported as "Bootstrap declined" or "Cancelled", as if a person had said no. The text now says no input was available, that nothing was changed, and what to do: run `purix approve --register` once in your own terminal, and use the `purix_create` / `purix_modify` MCP tools with `purix approve` for later changes.
+- A webhook secret stored the documented way (`purix secret set PURIX_WEBHOOK_SECRET`) was never read, because the sender looked for the lowercase name `purix_webhook_secret`. It now reads the documented name and still accepts the old one.
+
 ### Fixed (credentials and dry-run findings, 2026-11-20)
 - `purix secret set`, `rotate` and `remove` follow one rule set (`security/credential_guard.ts`): only names Purix reads are accepted, an already-stored name is refused (use `rotate`), a stored key that differs from the environment variable is refused, and a pasted value with spaces, wrapping quotes, line breaks or control characters is refused before it is stored. A provider error that suggests a bad key now says which copy was sent (stored or environment). `secret status` and `provider status` show the store location and warn about dead entries and conflicts. `purix secret set|rotate|remove` is human-only in the hook rules.
 - The hidden key prompt skips terminal escape sequences, including bracketed-paste markers, so a pasted key no longer carries `[200~` or `[A` into the stored value, and it prints how many characters arrived (never the key). Reproduced on Linux with simulated input only; a Windows terminal still needs a manual check.
-- `purix provider status` prints which folder's credential store it read, because each folder has its own store.
+- `purix provider status` prints which credential store it read (superseded 2026-11-21: the store is now per user, not per folder).
 - The refusal for an `unclassified` change now says what happened and how to rephrase (name the file and the intended behaviour, or split the request), instead of "cannot be applied automatically yet".
 - The write-blocking secret scan no longer blocks the four credentials that AWS prints in its own documentation (`AKIAIOSFODNN7EXAMPLE`, `AKIAI44QH8DHBEXAMPLE` and their secret keys), matched exactly. The redaction path still redacts them, and a real-looking key on the same line still blocks.
 - The advisory `dangerous_eval` finding no longer fires on `eval(` written in a comment or a string, or on a method that is only named `eval` (`redis.eval(`, `model.eval()`); `window.eval(`, `globalThis.eval(`, a bare `eval(` and `new Function(` still do.

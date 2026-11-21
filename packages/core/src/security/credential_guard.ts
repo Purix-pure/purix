@@ -4,15 +4,17 @@
 //
 // What went wrong before: `purix secret set <anything>` accepted any name and any value, replaced an existing entry without
 // saying so, and could leave two entries for one provider (`gemini` and `GEMINI_API_KEY`) of which only the second is ever
-// read. A stored key is also used before the environment variable of the same name, so an old stored key quietly beat a good
-// environment key and the provider answered "API key not valid" with no hint about which copy it had been sent.
+// read. A stored key was also used before the environment variable of the same name, so an old stored key quietly beat a good
+// environment key and the provider answered "API key not valid" with no hint about which copy it had been sent. The order is now the
+// environment first, then the user-level store, then the old per-folder store (user_secrets.ts); the rules here say so when it matters.
 //
 // This module only decides. It reads and writes nothing itself; the CLI asks it and then stores. The lookups are passed in so
 // the rules can be tested without a store on disk.
 
 import { dataDrivenEnv } from "../platform/env.js";
 import { knownProviderKeyNames, projectCustomProvider } from "../llm/providers.js";
-import { getSecret, listSecretStatus } from "./secrets_manager.js";
+import { listSecretStatus as listLegacySecretStatus } from "./secrets_manager.js";
+import { createUserSecrets, type UserSecrets } from "./user_secrets.js";
 
 /** The one name outside the provider list that Purix reads from the store (the notification webhook signing secret). */
 const WEBHOOK_SECRET_NAME = "PURIX_WEBHOOK_SECRET";
@@ -28,8 +30,10 @@ export interface KnownCredentialName {
 
 export interface GuardContext {
   known: KnownCredentialName[];
-  /** Names already in the store. */
+  /** Names already in the user-level store. */
   storedNames: string[];
+  /** Names still in the old per-folder store (read as a last resort until `purix secret migrate`). Absent when not checked. */
+  legacyNames?: string[];
   /** The stored value, or null. Used only to compare, never printed. */
   storedValue(name: string): string | null;
   /** The environment variable of that name, or undefined. */
@@ -56,7 +60,7 @@ export function secretValueProblem(value: string): string | null {
   return null;
 }
 
-export function defaultGuardContext(baseDir: string = process.cwd()): GuardContext {
+export function defaultGuardContext(baseDir: string = process.cwd(), userSecrets: UserSecrets = createUserSecrets()): GuardContext {
   const known: KnownCredentialName[] = knownProviderKeyNames().map((k) => ({ name: k.envVar, purpose: `${k.label} API key`, providerId: k.providerId }));
   let custom: { keyEnvVar: string } | undefined;
   try {
@@ -66,10 +70,17 @@ export function defaultGuardContext(baseDir: string = process.cwd()): GuardConte
   }
   if (custom && !known.some((k) => k.name === custom!.keyEnvVar)) known.push({ name: custom.keyEnvVar, purpose: "custom provider API key", providerId: "custom" });
   known.push({ name: WEBHOOK_SECRET_NAME, purpose: "notification webhook signing secret" });
+  let legacyNames: string[] = [];
+  try {
+    legacyNames = listLegacySecretStatus().map((s) => s.name);
+  } catch {
+    legacyNames = []; // an unreadable old store must not stop a person from storing a key in the new one
+  }
   return {
     known,
-    storedNames: listSecretStatus().map((s) => s.name),
-    storedValue: (n) => getSecret(n),
+    storedNames: userSecrets.list().map((s) => s.name),
+    legacyNames,
+    storedValue: (n) => userSecrets.get(n),
     envValue: (n) => dataDrivenEnv(n),
   };
 }
@@ -91,8 +102,9 @@ function envConflict(name: string, value: string, ctx: GuardContext): string | n
   const env = ctx.envValue(name);
   if (env && env !== value) {
     return (
-      `The environment variable ${name} is already set to a different value. Purix would use the stored key and ignore the environment one, ` +
-      `leaving two different keys for one provider. Make them the same key, or unset the environment variable first. Nothing was stored.`
+      `The environment variable ${name} is already set to a different value. Purix uses the environment variable first, so the key you store ` +
+      `would be ignored for as long as that variable is set, leaving two different keys for one provider. Make them the same key, or unset the ` +
+      `environment variable first. Nothing was stored.`
     );
   }
   return null;
@@ -142,7 +154,8 @@ export function checkSecretSet(name: string, value: string, ctx: GuardContext): 
   if (conflict) return { ok: false, reason: conflict };
 
   const notes: string[] = [];
-  if (ctx.envValue(name)) notes.push(`${name} is also set in the environment with the same key. The stored copy is used first; you can drop the environment variable.`);
+  if (ctx.envValue(name)) notes.push(`${name} is also set in the environment with the same key. The environment copy is used first; you can drop either one.`);
+  if (ctx.legacyNames?.includes(name)) notes.push(`An old per-folder key store also holds ${name}. The new copy is used before it. Run "purix secret migrate" to move the old one out, or "purix secret remove ${name}" to delete both.`);
   return { ok: true, notes };
 }
 
@@ -166,7 +179,7 @@ export interface SecretAudit {
   unused: boolean;
   /** The known name it was probably meant to be, when unused. */
   meant?: string;
-  /** Stored and environment values differ; the stored one is used. */
+  /** Stored and environment values differ; the environment one is used and the stored one is ignored. */
   differsFromEnvironment: boolean;
   /** Characters in the stored value, never the value. */
   length: number | null;

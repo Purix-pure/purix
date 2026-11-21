@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { providerKeyStatus, persistProviderChoice, persistCustomProvider } from "./providers";
 import { setSecret, deleteSecret } from "../security/secrets_manager";
+import { createUserSecrets } from "../security/user_secrets";
 import { safeRmSync } from "../platform/fs_retry.js";
 
 describe("providerKeyStatus", () => {
@@ -20,9 +21,13 @@ describe("providerKeyStatus", () => {
     delete process.env.PURIX_LLM_PROVIDER;
     delete process.env.OPENAI_API_KEY;
     delete process.env.MY_CUSTOM_KEY;
+    process.env.PURIX_USER_DIR = join(tmpDir, "user"); // never the developer's own ~/.purix
+    process.env.PURIX_SECRET_BACKEND = "file"; // no keyring in tests
   });
 
   afterEach(() => {
+    delete process.env.PURIX_USER_DIR;
+    delete process.env.PURIX_SECRET_BACKEND;
     process.chdir(oldCwd);
     safeRmSync(tmpDir);
     delete process.env.OPENAI_API_KEY;
@@ -40,10 +45,38 @@ describe("providerKeyStatus", () => {
     expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "environment", conflict: false });
   });
 
-  it("reports stored, and the store wins over the environment, like the real call (and flags the difference)", () => {
+  it("reports the environment, and the environment wins over a stored key, like the real call (and flags the difference)", () => {
     process.env.OPENAI_API_KEY = "sk-env";
-    setSecret("OPENAI_API_KEY", "sk-stored");
+    setSecret("OPENAI_API_KEY", "sk-stored-old-folder");
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "environment", conflict: true });
+  });
+
+  it("reports stored when the user-level store holds it", () => {
+    createUserSecrets({ warn: () => {} }).set("OPENAI_API_KEY", "sk-user");
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored", conflict: false });
+  });
+
+  it("reports stored_folder when only this folder's old store holds it", () => {
+    setSecret("OPENAI_API_KEY", "sk-old-folder");
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored_folder", conflict: false });
+  });
+
+  it("the user-level store beats the old folder store", () => {
+    setSecret("OPENAI_API_KEY", "sk-old-folder");
+    createUserSecrets({ warn: () => {} }).set("OPENAI_API_KEY", "sk-user");
     expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored", conflict: true });
+  });
+
+  it("finds a user-level key from a different folder than the one it was saved in", () => {
+    createUserSecrets({ warn: () => {} }).set("OPENAI_API_KEY", "sk-user");
+    const elsewhere = mkdtempSync(join(tmpdir(), "purix-keystatus-else-"));
+    try {
+      process.chdir(elsewhere);
+      expect(providerKeyStatus("openai")?.source).toBe("stored");
+    } finally {
+      process.chdir(tmpDir);
+      safeRmSync(elsewhere);
+    }
   });
 
   it("never exposes the key value", () => {
@@ -68,10 +101,10 @@ describe("providerKeyStatus", () => {
     expect(providerKeyStatus("custom")).toEqual({ envVar: "MY_CUSTOM_KEY", source: "environment", conflict: false });
   });
 
-  it("flags a conflict when the stored key differs from the environment key (the stored one is used)", () => {
+  it("flags a conflict when the stored key differs from the environment key (the environment one is used)", () => {
     process.env.OPENAI_API_KEY = "sk-env";
-    setSecret("OPENAI_API_KEY", "sk-stored");
-    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored", conflict: true });
+    createUserSecrets({ warn: () => {} }).set("OPENAI_API_KEY", "sk-stored");
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "environment", conflict: true });
   });
 });
 
@@ -88,18 +121,24 @@ describe("keyRefusedNote", () => {
     process.chdir(prev);
     safeRmSync(tmp);
   });
-  it("names the stored copy and the unused environment copy on a refused key", () => {
+  it("names the environment copy that was sent and the unused stored copy on a refused key", () => {
     process.env.OPENAI_API_KEY = "sk-env";
-    setSecret("OPENAI_API_KEY", "sk-stored");
+    createUserSecrets({ warn: () => {} }).set("OPENAI_API_KEY", "sk-stored");
     try {
       const note = keyRefusedNote(400, '{"error":{"message":"API key not valid"}}', "OPENAI_API_KEY");
-      expect(note).toContain("stored in Purix");
+      expect(note).toContain("environment variable");
       expect(note).toContain("NOT used");
       expect(note).not.toContain("sk-stored");
+      expect(note).not.toContain("sk-env");
     } finally {
       delete process.env.OPENAI_API_KEY;
-      deleteSecret("OPENAI_API_KEY");
     }
+  });
+  it("names the user-level store when that is where the key came from", () => {
+    createUserSecrets({ warn: () => {} }).set("OPENAI_API_KEY", "sk-stored");
+    const note = keyRefusedNote(401, "nope", "OPENAI_API_KEY");
+    expect(note).toContain("user-level Purix store");
+    expect(note).not.toContain("NOT used");
   });
   it("adds nothing for an unrelated failure", () => {
     expect(keyRefusedNote(500, "boom", "OPENAI_API_KEY")).toBe("");

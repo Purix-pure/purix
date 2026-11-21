@@ -4,7 +4,7 @@ import { expect } from "expect";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPurixMcpServer, createToolCaller, getAgentId } from "./server";
+import { createPurixMcpServer, createToolCaller, getAgentId, agentLabelForPerson } from "./server";
 import { closeDb, writeManifest } from "@purix/core/manifest/store";
 import { listEvents } from "@purix/core/manifest/events";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
@@ -100,6 +100,11 @@ describe("Purix MCP Server", () => {
     test("getAgentId falls back to an explicit 'unidentified' label, not a plausible-looking default", () => {
       delete process.env.PURIX_MCP_AGENT_ID;
       expect(getAgentId()).toBe("unidentified-agent");
+    });
+
+    test("an approval question names the agent in plain words, and never shows the 'unidentified' placeholder", () => {
+      expect(agentLabelForPerson("unidentified-agent")).toBe("Your coding agent");
+      expect(agentLabelForPerson("claude-code")).toBe('Your coding agent "claude-code"');
     });
 
     test("getAgentId reflects whatever the launching process set", () => {

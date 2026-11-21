@@ -2,7 +2,7 @@
 import { chmodSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { confirm, promptsLocked } from "../cli-io/confirm.js";
+import { confirm, lastConfirmHadNoInputAvailable, promptsLocked } from "../cli-io/confirm.js";
 import { quarantineCorruptFile, readJsonFile, writeJsonAtomic } from "../platform/atomic_write.js";
 import { PURIX_DIRNAME } from "../platform/layout.js";
 
@@ -111,7 +111,15 @@ export async function assertAuthorizedToApprove(): Promise<void> {
       `No authorized approvers configured yet (${AUTH_PATH}). Register "${currentUser}" as the sole approver now?`
     );
     if (!proceed) {
-      throw new Error(`Bootstrap declined — no authorized approver on record. Nothing was registered.`);
+      // Two different things looked identical here: a person typing "n", and a shell where nobody could answer (an agent's tool call,
+      // a pipe, CI). Only the first is a decision; the second needs the person to do the one-time registration themselves.
+      if (lastConfirmHadNoInputAvailable()) {
+        throw new Error(
+          `No approver is registered for this project yet, and this shell cannot ask the question (it is not an interactive terminal). Nothing was registered. ` +
+            `A person has to do this once: in your own terminal, in this project folder, run: ${REGISTER_APPROVER_COMMAND}   Then run this command again.`
+        );
+      }
+      throw new Error(`Bootstrap declined — no authorized approver on record. Nothing was registered. Run "${REGISTER_APPROVER_COMMAND}" when you want to register.`);
     }
     state.authorized = [currentUser];
     save(state);

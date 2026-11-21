@@ -18,9 +18,10 @@ Core reads its variables only through `packages/core/src/platform/env.ts` (three
 | `PURIX_LLM_TIMEOUT_MS` | `platform/net.ts` | Time limit for a model request, in milliseconds. |
 | `PURIX_SANDBOX_ENV_PASS` | `sandbox/sandbox_env.ts` | Names of extra variables to pass into the sandbox. The sandbox otherwise filters the environment. |
 | `PURIX_SCHEDULER_POLL_MS` | `state/scheduler.ts` | How often the scheduler polls, in milliseconds (30,000 by default). |
+| `PURIX_SECRET_BACKEND` | `security/user_secrets.ts` | Where `purix secret set` keeps a key: `auto` (default: the OS keyring when it works, otherwise an encrypted file in your user folder), `file` (never touch the keyring; use this on a server or in CI with no desktop session) or `keyring` (never fall back to a file; fail instead). In `auto` mode the real keyring is also skipped when `NODE_ENV=test`, when `CI` is set, or when `PURIX_USER_DIR` is set. |
 | `PURIX_STRICT_ISOLATION` | `sandbox/sandbox_env.ts` | Strict isolation switch; read as a trimmed, lower-cased text value. |
 | `PURIX_USER_DIR` | `usage/consent.ts` and others | Where Purix keeps its per-user folder; defaults to the folder under the home directory. |
-| `PURIX_WEBHOOK_SECRET` | `cli-io/notify.ts` | Secret for the notification webhook; a stored secret is used when it is not set. |
+| `PURIX_WEBHOOK_SECRET` | `cli-io/notify.ts` | Secret for the notification webhook; a secret stored with `purix secret set PURIX_WEBHOOK_SECRET` is used when it is not set. |
 | `PURIX_WEBHOOK_URL` | `cli-io/notify.ts` | Address of the notification webhook. |
 
 ## Defined by the platform, only read (`ambientEnv`)

@@ -32,7 +32,7 @@ export interface FlowInputs {
   /** ISO time of the last acknowledged savings upload for this project, or null if none/unknown. */
   savingsSyncFileTime: string | null;
   apiUrl: string;
-  provider: { id: string | null; keySource: "stored" | "environment" | "missing" | null };
+  provider: { id: string | null; keySource: "stored" | "stored_folder" | "environment" | "missing" | null };
   webhookUrlSet: boolean;
 }
 
@@ -88,7 +88,7 @@ export function describeOptionalFlows(i: FlowInputs): OptionalFlow[] {
     id: "llm-provider",
     title: "LLM provider",
     state: p.id ? "on" : "not set up",
-    detail: p.id ? `${p.id}${p.keySource ? `; key ${p.keySource === "missing" ? "missing" : `from ${p.keySource}`}` : ""}` : "no provider configured, so no model call can be made",
+    detail: p.id ? `${p.id}${p.keySource ? `; key ${p.keySource === "missing" ? "missing" : p.keySource === "stored_folder" ? "from an old per-folder key store (run: purix secret migrate)" : p.keySource === "stored" ? "from your user-level store" : "from the environment"}` : ""}` : "no provider configured, so no model call can be made",
     sends: "the content needed for a classify or modify call (for example a diff or file excerpt), only when you run such a command",
     to: p.id ? `the ${p.id} service you chose` : "n/a",
     control: "purix provider set <id> | purix provider status",

@@ -55,6 +55,11 @@ export interface NormalizedCall {
   roots: string[];
   /** Every file path the call would write, as sent (not yet resolved). Empty for non-write tools. */
   paths: string[];
+  /**
+   * Paths a read-like tool (Read, Grep, Glob, get_file_contents) names. Present only when there are some. Never treated as writes;
+   * used only to keep an agent from reading a credential file (decide.ts, rule "secret-read").
+   */
+  readPaths?: string[];
   /** Shell command text for shell tools, else null. */
   command: string | null;
   /** True when the agent says it is already continuing because of a Stop hook (loop guard). */
@@ -179,6 +184,7 @@ export function parseHookPayload(agent: HookAgent, event: HookEvent, raw: string
   let toolClass = classifyTool(tool);
   const input = body["tool_input"] ?? toolCall?.["args"];
   const paths: string[] = [];
+  const readPaths: string[] = [];
   let command: string | null = null;
   if (toolClass === "other" && !isPurixTool(tool) && !isReadLikeTool(tool)) {
     // A tool the hook does not know by name (FileWrite, mcp__filesystem__write_file, a new agent's editor) is told apart by what
@@ -194,6 +200,8 @@ export function parseHookPayload(agent: HookAgent, event: HookEvent, raw: string
     }
   } else if (toolClass === "write") {
     collectPaths(input, paths);
+  } else if (toolClass === "other" && !isPurixTool(tool) && isReadLikeTool(tool)) {
+    collectPaths(input, readPaths);
   }
   if (toolClass === "shell" && command === null) {
     command = topCommand;
@@ -202,7 +210,9 @@ export function parseHookPayload(agent: HookAgent, event: HookEvent, raw: string
     }
   }
 
-  return { ok: true, call: { agent, event, tool, toolClass, cwd, roots, paths: [...new Set(paths)], command, stopHookActive } };
+  const call: NormalizedCall = { agent, event, tool, toolClass, cwd, roots, paths: [...new Set(paths)], command, stopHookActive };
+  if (readPaths.length > 0) call.readPaths = [...new Set(readPaths)];
+  return { ok: true, call };
 }
 
 export interface HookAnswer {

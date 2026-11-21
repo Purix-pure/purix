@@ -165,9 +165,9 @@ describe("openai_compat registry providers — full roster", () => {
       expect(capturedAuth).toBe(`Bearer ${id}-secret-store-key`);
     });
 
-    it(`resolveKey() prefers the encrypted secrets store over a plain env var when both are set, for "${id}"`, async () => {
-      process.env[keyEnvVar] = "plain-env-key-should-lose";
-      setSecret(keyEnvVar, `${id}-secret-store-wins`);
+    it(`resolveKey() prefers a plain env var over the old folder store when both are set, for "${id}"`, async () => {
+      process.env[keyEnvVar] = `${id}-env-wins`;
+      setSecret(keyEnvVar, `${id}-old-store-should-lose`);
       let capturedAuth: string | undefined;
       globalThis.fetch = (async (_url: string, init?: RequestInit) => {
         capturedAuth = (init?.headers as Record<string, string> | undefined)?.Authorization;
@@ -176,7 +176,7 @@ describe("openai_compat registry providers — full roster", () => {
 
       const provider = getProvider(id);
       await provider.generate("hi", "low");
-      expect(capturedAuth).toBe(`Bearer ${id}-secret-store-wins`);
+      expect(capturedAuth).toBe(`Bearer ${id}-env-wins`);
     });
 
     it(`generate() falls back to empty text and zero usage when the response omits them, for "${id}"`, async () => {

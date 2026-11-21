@@ -71,7 +71,10 @@ function runNode(files, extraArgs, env) {
 }
 
 const fakeHome = mkdtempSync(join(tmpdir(), "purix-test-home-"));
-const codeA = await runNode(parallelFiles, Number.isInteger(concurrency) && concurrency > 0 ? [`--test-concurrency=${concurrency}`] : [], process.env);
+// The parallel group also gets its own empty home per test file (scripts/test-home-preload.mjs). Before the credential store moved to the user
+// folder these files could not reach a real key; now `createUserSecrets()` defaults to ~/.purix, and a test must never read or write a developer's own.
+const homePreload = new URL("../../../scripts/test-home-preload.mjs", import.meta.url).href;
+const codeA = await runNode(parallelFiles, ["--import", homePreload, ...(Number.isInteger(concurrency) && concurrency > 0 ? [`--test-concurrency=${concurrency}`] : [])], process.env);
 const codeB = await runNode(serialFiles, ["--test-concurrency=1"], { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome });
 try {
   rmSync(fakeHome, { recursive: true, force: true });

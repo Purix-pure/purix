@@ -543,3 +543,19 @@ export async function classifyRepair(
   const decision = routeTier("repair");
   return callJson(prompt, RepairResultSchema, "repair", "repair", { tier: decision.tier, savingsContext: { call: "repair", decision } });
 }
+
+/**
+ * One tiny request to find out whether the configured provider accepts the configured key (`purix start`). It lives here because this
+ * is the file that talks to providers (ADR-061). It is deliberately NOT callLlm: no retry (a wrong key should fail once, at once), no
+ * circuit-breaker or budget bookkeeping, and no call-log row, so it writes no state in the folder it runs from. The prompt is fixed and
+ * contains nothing from the person's project. Provider error text is already sanitized by the adapters (keys and tokens redacted).
+ */
+export async function probeProviderKey(providerId?: string): Promise<{ ok: true; provider: string; model: string } | { ok: false; message: string }> {
+  try {
+    const provider = getProvider(providerId);
+    await provider.generate("Reply with the single word: ok", "low");
+    return { ok: true, provider: provider.id, model: modelName(provider, "low") };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}

@@ -35,6 +35,10 @@ describe("purix approve / deny from an agent's shell", () => {
     "purix secret remove GEMINI_API_KEY",
     "pnpm exec purix secret rotate GEMINI_API_KEY",
     "echo k | purix secret set GEMINI_API_KEY",
+    "purix start",
+    "pnpm exec purix start",
+    "echo hi && purix start",
+    "/usr/local/bin/purix --quiet start",
   ]) {
     test(`denies: ${cmd}`, () => {
       const d = decideHook(shell(cmd), ctx, "/p");
@@ -44,7 +48,7 @@ describe("purix approve / deny from an agent's shell", () => {
     });
   }
 
-  for (const cmd of ["purix status", "purix change \"approve the invoice flow\"", "purix check", "pnpm exec purix status", "purix approvals-report", "purix provider status", "purix provider set openai", "purix secret status"]) {
+  for (const cmd of ["npm start", "pnpm start", "purix status", "purix change \"approve the invoice flow\"", "purix check", "pnpm exec purix status", "purix approvals-report", "purix provider status", "purix provider set openai", "purix secret status"]) {
     test(`still allows: ${cmd}`, () => {
       expect(decideHook(shell(cmd), ctx, "/p").action).toBe("allow");
     });

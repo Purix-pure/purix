@@ -15,7 +15,7 @@
 // the first time `purix login` ran — silently contradicting "session
 // identity is machine-scoped." Two stores, two keys, closes that. 
 import { existsSync, readFileSync, chmodSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { createFileExclusive, writeFileAtomic } from "../platform/atomic_write.js";
 import { purixDir } from "../platform/layout.js";
@@ -111,9 +111,9 @@ export function ensureSecretFilesGitignored(baseDir: string, filenames: string[]
  * provider-key store's name; the session store passes "session.enc" to
  * match the name used in the architecture diagram.
  */
-export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc.json"): SecretsStore {
+export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc.json", opts: { masterKeyFilename?: string } = {}): SecretsStore {
   const storePath = join(baseDir, storeFilename);
-  const masterKeyPath = join(baseDir, "secrets.master.key");
+  const masterKeyPath = join(baseDir, opts.masterKeyFilename ?? "secrets.master.key");
 
   function readMasterKey(): Buffer {
     const key = Buffer.from(readFileSync(masterKeyPath, "utf-8").trim(), "base64");
@@ -219,12 +219,35 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
   };
 }
 
-// Default project-local instance — same directory, same behavior as
-// before this refactor. providers.ts and cli/commands/security.ts import
-// these three names exactly as they always have; nothing at those call
-// sites changes.
+/**
+ * The nearest old per-folder store at or above `start`: a `.purix` folder that holds secrets.enc.json. Null when there is none.
+ * Old versions wrote it into the folder Purix was run in, so a key saved in a project root was invisible from its subfolders; reading
+ * upward finds it from any of them. (Taken from the first of the two parallel key-store changes; the user-level store has its own
+ * file names, so the user folder is never mistaken for an old per-folder store.)
+ */
+export function findFolderStoreDir(start: string = process.cwd()): string | null {
+  let dir = resolve(start);
+  for (let i = 0; i < 64; i++) {
+    const candidate = purixDir(dir);
+    if (existsSync(join(candidate, "secrets.enc.json"))) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+
+/** The old per-folder store file a command run from `start` reads: the nearest one above, or where one would be created here. */
+export function legacyStoreFile(start: string = process.cwd()): string {
+  return join(findFolderStoreDir(start) ?? purixDir(resolve(start)), "secrets.enc.json");
+}
+
+// LEGACY per-folder instance. Old installs saved keys in `<folder>/.purix`, so a key saved from one folder was invisible from another.
+// New code stores credentials in the user-level store (user_secrets.ts). These four names stay because older installs hold keys
+// here: credential lookup still falls back to them (from the folder and from every folder below it), and `purix secret migrate`
+// moves them out.
 function projectStore(): SecretsStore {
-  return createSecretsStore(purixDir(process.cwd()));
+  return createSecretsStore(findFolderStoreDir() ?? purixDir(process.cwd()));
 }
 
 export const setSecret: SecretsStore["setSecret"] = (...args) => projectStore().setSecret(...args);

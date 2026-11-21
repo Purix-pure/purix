@@ -239,7 +239,7 @@ async function requireGatedApproval(
     if (outcome.via === "error") {
       return {
         approved: false,
-        rejectionMessage: `${rejectionVerb} rejected: Purix asked for approval but the connected agent did not answer (it timed out or failed). Nothing was changed. Try again, or run ${cliEquivalent} yourself.${suffix}`,
+        rejectionMessage: `${rejectionVerb} rejected: Purix asked for approval but the connected agent did not answer (it timed out or failed), so nothing was changed. Tell the person, then call this tool again to ask again, or they can run ${cliEquivalent} themselves.${suffix}`,
       };
     }
     if (pending) {
@@ -425,6 +425,11 @@ import { extractMentionCandidates } from "@purix/core/llm/classify";
 export function getAgentId(): string {
   const raw = process.env.PURIX_MCP_AGENT_ID?.trim();
   return raw && raw.length > 0 ? raw : "unidentified-agent";
+}
+
+/** How an approval question names the asker to a person: the label when there is a real one, plain words when there is not. */
+export function agentLabelForPerson(agentId: string): string {
+  return agentId === "unidentified-agent" ? "Your coding agent" : `Your coding agent "${agentId}"`;
 }
 
 /** Redacts likely secrets from any text about to leave this process over the MCP transport. */
@@ -1610,7 +1615,7 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
             gatedActionBudget,
             "mcp_index_full",
             null,
-            `MCP Agent "${agentId}" requests full codebase re-index. Approve?`,
+            `${agentLabelForPerson(agentId)} wants Purix to re-scan the whole project, which can take a while. Approve?`,
             `"purix index --full"`,
             "Full indexing",
             undefined,
@@ -1958,7 +1963,7 @@ async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<t
           gatedActionBudget,
           "mcp_adopt",
           null,
-          `MCP Agent "${agentId}" requests registering "${found.file}" as a component so it can be modified. Approve?`,
+          `${agentLabelForPerson(getAgentId())} wants Purix to start tracking "${found.file}" so the agent can change it. Approve?`,
           `"purix adopt ${found.file}"`,
           "Adopt",
           undefined,

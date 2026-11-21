@@ -93,31 +93,32 @@ export function registerProviderCommands(program: Command) {
     .command("status")
     .description("Show which LLM provider is active and whether a key is configured")
     .action(async () => {
-      const { listProviders, activeProviderId, getProvider, providerKeyStatus } = await import("@purix/core/llm/providers");
+      const { listProviders, activeProviderId, activeProviderSource, getProvider, providerKeyStatus } = await import("@purix/core/llm/providers");
       let id: string;
       try {
         id = activeProviderId();
       } catch {
-        console.log(`No provider configured yet. Run "purix provider list" to see options, then "purix provider set <id>".`);
+        console.log(`No provider configured yet. Easiest: run "purix start" in your own terminal. Or run "purix provider list" to see options, then "purix provider set <id>".`);
         return;
       }
       const known = listProviders().find((p) => p.id === id);
       console.log(`Active provider: ${id}${known ? `  (${known.label})` : ""}`);
+      const chosenBy = activeProviderSource();
+      if (chosenBy === "environment") console.log(`Chosen by: the PURIX_LLM_PROVIDER variable (it wins over anything saved).`);
+      else if (chosenBy === "project") console.log(`Chosen by: this folder's own setting (purix provider set).`);
+      else if (chosenBy === "user_default") console.log(`Chosen by: your saved default for every folder (purix start).`);
       try {
         const p = getProvider(id);
         console.log(`Model (low tier):  ${p.modelFor("low")}`);
         console.log(`Model (high tier): ${p.modelFor("high")}`);
         const key = providerKeyStatus(id);
-        // Each folder has its own credential store (register item 10), so a key stored from another folder is not seen here. Said whenever the
-        // key came from, or was looked for in, the store, so "NOT FOUND" is never a mystery.
-        if (key && key.source !== "environment") {
-          const { join } = await import("node:path");
-          const { purixDir } = await import("@purix/core/platform/layout");
-          console.log(`Credential store read: ${join(purixDir(process.cwd()), "secrets.enc.json")} (each folder has its own)`);
-        }
-        if (key?.source === "stored") console.log(`API key (${key.envVar}): stored in Purix${key.conflict ? `, and the ${key.envVar} environment variable holds a DIFFERENT value that will not be used (run: purix secret status)` : ""}`);
-        else if (key?.source === "environment") console.log(`API key (${key.envVar}): found in the environment`);
-        else if (key) console.log(`API key (${key.envVar}): NOT FOUND. Run: purix secret set ${key.envVar}`);
+        // The key is looked up in this order: the environment (including .env), the user-level store, then this folder's old store.
+        // Said every time, so "NOT FOUND" is never a mystery and a key that came from an unexpected place is named.
+        const diff = key?.conflict ? " Another place holds a DIFFERENT value that is not used (run: purix secret status)." : "";
+        if (key?.source === "environment") console.log(`API key (${key.envVar}): found in the environment (used before stored keys).${diff}`);
+        else if (key?.source === "stored") console.log(`API key (${key.envVar}): found in your user-level Purix store.${diff}`);
+        else if (key?.source === "stored_folder") console.log(`API key (${key.envVar}): found only in an OLD per-folder key store, so it is invisible from other projects. Move it: purix secret migrate.${diff}`);
+        else if (key) console.log(`API key (${key.envVar}): NOT FOUND in the environment, your user-level store, or an old per-folder store (this folder or one above it). Run: purix secret set ${key.envVar}`);
         console.log(`(Whether the provider accepts the key is only known on the first real call.)`);
       } catch (err) {
         console.log(`🛑 ${err instanceof Error ? err.message : String(err)}`);

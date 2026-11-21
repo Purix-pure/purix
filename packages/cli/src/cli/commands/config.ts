@@ -32,7 +32,7 @@ export function registerConfigCommands(program: Command) {
     let syncTime: string | null = null;
     try { syncTime = statSync(path.join(purixDir(process.cwd()), "savings-sync.json")).mtime.toISOString(); } catch { /* none yet */ }
     let providerId: string | null = null;
-    let keySource: "stored" | "environment" | "missing" | null = null;
+    let keySource: "stored" | "stored_folder" | "environment" | "missing" | null = null;
     try {
       providerId = providers.activeProviderId();
       keySource = providers.providerKeyStatus(providerId)?.source ?? null;

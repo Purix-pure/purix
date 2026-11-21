@@ -154,7 +154,7 @@ export function registerApproveCommands(program: Command) {
   };
 
   program
-    .command("approve [id]", { hidden: true })
+    .command("approve [id]")
     .description("Approve a request an agent made through MCP (needs a terminal; list waiting requests with --list)")
     .option("--list", "List requests waiting for an answer")
     .option("--all", "With --list: include answered and expired requests")
@@ -181,7 +181,7 @@ export function registerApproveCommands(program: Command) {
     });
 
   program
-    .command("deny <id>", { hidden: true })
+    .command("deny <id>")
     .description("Deny a request an agent made through MCP (needs a terminal)")
     .action(async (id: string) => {
       const res = await runDecision(id, "denied", await deps());

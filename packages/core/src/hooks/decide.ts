@@ -42,9 +42,14 @@ export interface GovernedContext {
   lockUsed: boolean;
   /** Compare paths case-insensitively (Windows, macOS). */
   caseInsensitive: boolean;
+  /**
+   * Absolute files and folders no tool may READ or write: the credential stores and their master keys. Absent means none are listed.
+   * A write to one is already stopped by protectedAbsolute; this adds the read, which no other rule stopped.
+   */
+  secretPaths?: readonly string[];
 }
 
-export type HookRule = "governed-file" | "protected-file" | "state-unreadable" | "no-path" | "shell-write" | "human-only" | "allow";
+export type HookRule = "governed-file" | "protected-file" | "state-unreadable" | "no-path" | "shell-write" | "human-only" | "secret-read" | "allow";
 
 export interface HookDecision {
   action: "allow" | "deny";
@@ -550,8 +555,98 @@ function mentionHit(ctx: GovernedContext, cwd: string, text: string, exempt: str
   return null;
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Credential files (rule "secret-read"). A write was already refused; a READ was not, so a `cat` of the master-key file followed by
+// the ciphertext gave an agent every stored key. These checks refuse the read as well, for the agent's file tools and for shell text.
+// Like every shell rule here it is a text check, not a wall: it cannot see a path built at run time or a script run later.
+// ---------------------------------------------------------------------------------------------------------------------
+const SECRET_READ_REASON = (target: string): string =>
+  `${target} holds Purix's stored credentials or the key that decrypts them. An agent may not read it, and nothing an agent needs is in it. ` +
+  `To check a key, ask the person to run \`purix secret status\` (it shows where a key is kept and how long it is, never the key itself).`;
+
+/** Commands that read the OS keyring directly. Only refused when the same command also names Purix, to leave other tools' entries alone. */
+const KEYRING_READERS = /\b(?:find-generic-password|find-internet-password|secret-tool\s+lookup|cmdkey|vaultcmd|get-storedcredential|passwordvault|credread|keyctl\s+(?:print|read|pipe))\b/i;
+
+/**
+ * A direct read of the OS keyring in a command that also names Purix anywhere in it. Judged on the WHOLE command, not per pipe segment:
+ * `cmdkey /list | findstr purix` splits into two segments and only one says "purix". Another tool's entry (no mention of Purix) is left alone.
+ */
+function keyringReadHit(command: string): HookDecision | null {
+  if (KEYRING_READERS.test(command) && /purix/i.test(command)) {
+    return { action: "deny", rule: "secret-read", reason: "this command reads the OS keyring where Purix keeps credentials. Only the person may do that." + TRIPWIRE_TAIL_SECRET, targets: [] };
+  }
+  return null;
+}
+
+/**
+ * A command that names a credential file by its file name, in ANY folder (another project's old store, a copy of a store, a path the
+ * context does not list). The path rules below only know this project's and the user's own credential paths; the file names are the same
+ * everywhere, so a name match catches a `cat` of another project's master-key file too. Taken from the second of the two parallel key-store changes.
+ */
+const SECRET_FILE_NAMES = /(?:user-secrets\.(?:enc\.json|master\.key)|secrets\.master\.key|secrets\.enc\.json|session\.enc)(?![\w.-])/i;
+function secretFileNameHit(command: string): HookDecision | null {
+  const m = SECRET_FILE_NAMES.exec(command);
+  if (m === null) return null;
+  return { action: "deny", rule: "secret-read", reason: SECRET_READ_REASON(m[0]) + TRIPWIRE_TAIL_SECRET, targets: [m[0]] };
+}
+
+function secretPathHit(ctx: GovernedContext, abs: string): string | null {
+  for (const p of ctx.secretPaths ?? []) if (isUnder(ctx, abs, p)) return p;
+  return null;
+}
+
+function secretToolHit(ctx: GovernedContext, cwd: string, paths: readonly string[]): HookDecision | null {
+  if (!ctx.secretPaths || ctx.secretPaths.length === 0) return null;
+  for (const raw of paths) {
+    const t = resolveTarget(ctx, cwd, raw);
+    if (secretPathHit(ctx, t.abs) !== null) return { action: "deny", rule: "secret-read", reason: SECRET_READ_REASON(t.rel ?? t.abs), targets: [t.rel ?? t.abs] };
+  }
+  return null;
+}
+
+/** Any spelling of a credential path in shell text, whether the command reads or writes, and any direct read of the OS keyring. */
+function secretShellHit(ctx: GovernedContext, cwd: string, text: string): HookDecision | null {
+  const paths = ctx.secretPaths ?? [];
+  if (paths.length === 0) return null;
+  for (const token of tokens(text)) {
+    if (hasGlob(token)) {
+      // A glob that could match a credential file (a `*.key` or `secrets*` pattern in the Purix state folder) is refused too.
+      const g = globSecretHit(ctx, cwd, token);
+      if (g) return g;
+      continue;
+    }
+    const t = resolveTarget(ctx, cwd, token);
+    if (secretPathHit(ctx, t.abs) !== null) return { action: "deny", rule: "secret-read", reason: SECRET_READ_REASON(t.rel ?? t.abs) + TRIPWIRE_TAIL_SECRET, targets: [t.rel ?? t.abs] };
+  }
+  const scan = foldCase(ctx, text).replace(/\\/g, "/");
+  const root = canonicalize(ctx.projectRoot);
+  for (const abs of paths) {
+    const r = relative(root, canonicalize(abs));
+    const forms = [toPosix(abs)];
+    if (r !== "" && !r.startsWith("..") && !isAbsolute(r)) forms.push(toPosix(r));
+    for (const form of forms) if (mentionsPath(scan, foldCase(ctx, form), true)) return { action: "deny", rule: "secret-read", reason: SECRET_READ_REASON(form) + TRIPWIRE_TAIL_SECRET, targets: [form] };
+  }
+  return null;
+}
+
+const TRIPWIRE_TAIL_SECRET = " This is a text check on the command, not a guarantee.";
+
+function globSecretHit(ctx: GovernedContext, cwd: string, token: string): HookDecision | null {
+  const re = globToRegExp(foldCase(ctx, toPosix(resolveTarget(ctx, cwd, token).abs)));
+  for (const p of ctx.secretPaths ?? []) {
+    const f = foldCase(ctx, toPosix(canonicalize(p)));
+    if (re.test(f)) return { action: "deny", rule: "secret-read", reason: SECRET_READ_REASON(token) + TRIPWIRE_TAIL_SECRET, targets: [token] };
+  }
+  return null;
+}
+
 function screenShell(ctx: GovernedContext, cwd0: string, command: string): HookDecision {
   const home = homedir();
+  const keyringHit = keyringReadHit(command);
+  if (keyringHit) return keyringHit;
+  const secretNameHit = secretFileNameHit(command);
+  if (secretNameHit) return secretNameHit;
   const vars = new Map<string, string>();
   let cwd = cwd0;
 
@@ -581,6 +676,15 @@ function screenShell(ctx: GovernedContext, cwd0: string, command: string): HookD
           targets: [],
         };
       }
+      // `purix start` asks for the person's API key and saves it, and chooses the provider that key goes to. Only the person may run it.
+      if (sub === "start") {
+        return {
+          action: "deny",
+          rule: "human-only",
+          reason: "`purix start` asks for your API key and decides which provider and key Purix uses, so only the person can run it, in their own terminal. Ask the person to run it.",
+          targets: [],
+        };
+      }
       // `purix provider trust` and `purix provider set custom` decide where the user's API key is sent, so they are the person's call too.
       if (sub === "provider") {
         const rest = lead.map((x) => x.toLowerCase().replace(/^["']|["']$/g, "")).filter((x) => !x.startsWith("-"));
@@ -595,16 +699,16 @@ function screenShell(ctx: GovernedContext, cwd0: string, command: string): HookD
           };
         }
       }
-      // `purix secret set|rotate|remove` write the person's credentials. An agent that stores or removes a key can leave the next call
+      // `purix secret set|rotate|remove|migrate` write the person's credentials. An agent that stores or removes a key can leave the next call
       // using a key the person never chose, so these are the person's to run. `secret status` only reads and stays allowed.
       if (sub === "secret") {
         const rest = lead.map((x) => x.toLowerCase().replace(/^["']|["']$/g, "")).filter((x) => !x.startsWith("-"));
         const verb = rest[rest.indexOf("secret") + 1];
-        if (verb === "set" || verb === "rotate" || verb === "remove") {
+        if (verb === "set" || verb === "rotate" || verb === "remove" || verb === "migrate") {
           return {
             action: "deny",
             rule: "human-only",
-            reason: "`purix secret set`, `rotate` and `remove` change the credentials Purix sends to your model provider, so only the person can run them, in their own terminal. Ask the person to run it.",
+            reason: "`purix secret set`, `rotate`, `remove` and `migrate` change the credentials Purix sends to your model provider, so only the person can run them, in their own terminal. Ask the person to run it.",
             targets: [],
           };
         }
@@ -613,6 +717,10 @@ function screenShell(ctx: GovernedContext, cwd0: string, command: string): HookD
     }
 
     const text = expandBraces(expanded);
+
+    // Credential files: refused for a read as well as a write, so this runs before the read-only shortcut below.
+    const secretShell = secretShellHit(ctx, cwd, seg.body ? `${text}\n${expandBraces(expandVars(seg.body, vars, home))}` : text);
+    if (secretShell) return secretShell;
 
     // 1. Redirections are precise: only the file written to matters.
     let dynamicRedirect = false;
@@ -667,6 +775,10 @@ function screenShell(ctx: GovernedContext, cwd0: string, command: string): HookD
 
 export function decideHook(call: NormalizedCall, ctx: GovernedContext, cwd: string): HookDecision {
   if (call.event !== "pre-tool-use") return ALLOW;
+
+  // Credential files may not be read or written by an agent's own file tools.
+  const secretTool = secretToolHit(ctx, cwd, [...call.paths, ...(call.readPaths ?? [])]);
+  if (secretTool) return secretTool;
 
   // A tool the hook does not know by name but that carries a path is a write, unless its name says it only reads (A9-1, research 09).
   const writeLike = call.toolClass === "write" || (call.toolClass === "other" && call.paths.length > 0 && !isPurixTool(call.tool) && !isReadLikeTool(call.tool));
