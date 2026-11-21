@@ -35,6 +35,9 @@ export interface CheckItem {
   /** What the finding is about: a component id, a tool id, or the store itself. */
   subject: string;
   message: string;
+  /** What to do about it, in words the person running `purix check` can act on. The printer shows each distinct line once per section, so
+   *  many items sharing one next step do not repeat it. Optional: most items need none. */
+  next?: string;
 }
 
 export interface CheckSection {
@@ -104,7 +107,15 @@ function driftSection(snapshot: StoreSnapshot, baseDir: string, lock: GovernedLo
       else problems.push(`${rel}: ${r.reason}`);
     }
     if (problems.length > 0) {
-      items.push({ outcome: "fail", subject: entry.component_id, message: `changed outside Purix: ${problems.join("; ")}` });
+      const onlyMissing = problems.every((p) => p.endsWith(": file is missing"));
+      items.push({
+        outcome: "fail",
+        subject: entry.component_id,
+        message: `changed outside Purix: ${problems.join("; ")}`,
+        ...(onlyMissing
+          ? { next: `If ${problems.length === 1 ? "it was" : "they were"} deleted by mistake, restore ${problems.length === 1 ? "it" : "them"} from version control (for example "git restore <file>"). If the deletion was intended, run "purix migration accept-drift ${entry.component_id}" yourself in a terminal; it asks you to confirm.` }
+          : {}),
+      });
     } else if (computeSyncHash(files) !== entry.last_synced_hash) {
       // Only a combined hash is stored, so on its own the store cannot say WHICH file changed. When the committed lock
       // matches this component, its per-file hashes can; otherwise say so rather than name files that did not change.
@@ -112,7 +123,12 @@ function driftSection(snapshot: StoreSnapshot, baseDir: string, lock: GovernedLo
       const trusted = locked !== undefined && locked.last_synced_hash === entry.last_synced_hash;
       const changed = trusted ? files.filter((f) => locked.files.find((l) => l.path === f.path)?.sha256 !== hashGovernedContent(f.content)).map((f) => f.path) : [];
       const detail = changed.length > 0 ? `changed: ${listFiles(changed)}` : `one or more of its files differ; the store keeps one combined hash, so it cannot say which (governed: ${listFiles(entry.files ?? [])})`;
-      items.push({ outcome: "fail", subject: entry.component_id, message: `changed outside Purix since its last sync (${detail})` });
+      items.push({
+        outcome: "fail",
+        subject: entry.component_id,
+        message: `changed outside Purix since its last sync (${detail})`,
+        next: `Review the change. To keep it, run "purix migration accept-drift ${entry.component_id}" yourself in a terminal (it asks you to confirm); otherwise revert it.`,
+      });
     }
     // An unchanged component adds no item: silence is the pass, and the section line counts it.
   }
@@ -122,7 +138,12 @@ function driftSection(snapshot: StoreSnapshot, baseDir: string, lock: GovernedLo
   const seen = new Map<string, string>();
   for (const w of snapshot.unadoptedWrites ?? []) for (const f of w.files) if (!governedNow.has(f) && existsSync(resolve(baseDir, f))) seen.set(f, w.agent);
   for (const [file, agent] of seen) {
-    items.push({ outcome: "skipped", subject: file, message: `written by an agent (${agent}) while no component governed it; not governed by Purix, so Purix did not verify it. \`purix adopt\` brings it under Purix.` });
+    items.push({
+      outcome: "skipped",
+      subject: file,
+      message: `written by an agent (${agent}); not governed by Purix, so Purix did not verify it`,
+      next: 'Run "purix adopt" to bring these files under Purix so they are checked from now on.',
+    });
   }
   return section("drift", "Edits made outside Purix", items);
 }

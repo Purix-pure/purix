@@ -4,8 +4,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodS
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeInstructionBlock, instructionFileFor, hookAgentFor, commandOnPath, checkServerStarts, canPrompt, offerHooks, BLOCK_BEGIN, BLOCK_END, type HookOfferDeps } from "./connect_extras";
+import { INSTRUCTION_BODY, writeInstructionBlock, instructionFileFor, hookAgentFor, commandOnPath, checkServerStarts, canPrompt, offerHooks, BLOCK_BEGIN, BLOCK_END, type HookOfferDeps } from "./connect_extras";
 import { safeRmSync } from "@purix/core/platform/fs_retry";
+import { TOOL_METADATA } from "@purix/mcp-server";
 
 let cwd: string;
 beforeEach(() => {
@@ -240,5 +241,22 @@ describe("hook offer (the prompt a person answers at a terminal)", () => {
     expect(r.failed).toBe(1);
     expect(r.installed).toEqual(["cursor"]);
     expect(m.lines.join("\n")).toContain("Could not install the claude-code hook: read-only folder");
+  });
+});
+
+// The note `purix connect` writes is the only standing instruction a coding agent gets about Purix. It had named 4 of the 15 tools
+// while the server had grown purix_create, purix_adopt, purix_remember and the tool broker. A new tool must now be named in the note
+// or exempted here on purpose, so the two cannot drift apart again.
+describe("instruction block names every tool an agent is meant to call", () => {
+  // Left out on purpose: compliance reads for a person, and the broker lookup that purix_tools_plan covers.
+  const NOT_FOR_AGENT_NOTE = new Set(["purix_audit_trail", "purix_audit_verify", "purix_tools"]);
+
+  test("each tool in the server's table is named, or exempted above", () => {
+    const missing = Object.keys(TOOL_METADATA).filter((t) => !NOT_FOR_AGENT_NOTE.has(t) && !INSTRUCTION_BODY.includes(t));
+    expect(missing).toEqual([]);
+  });
+
+  test("the exemptions are real tools (a renamed tool must not hide behind a stale exemption)", () => {
+    for (const t of NOT_FOR_AGENT_NOTE) expect(Object.keys(TOOL_METADATA)).toContain(t);
   });
 });

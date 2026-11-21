@@ -97,7 +97,7 @@ describe("ordinary strings stay clean", () => {
 
 describe("existing behaviour is kept", () => {
   it("an AWS key is still exactly one finding", () => {
-    expect(scanForSecrets([{ path: "c.ts", content: `const key = "AKIAIOSFODNN7EXAMPLE";` }]).length).toBe(1);
+    expect(scanForSecrets([{ path: "c.ts", content: `const key = "AKIAIOSFODNN7EXAMPLX";` }]).length).toBe(1);
   });
   it("a long mixed token with digits is still flagged by entropy", () => {
     const f = scanForSecrets([{ path: "c.ts", content: `const token = "xK9mQ2vN8pL4wR7tY1zA5bC3dE6fG0hJ9k";` }]);

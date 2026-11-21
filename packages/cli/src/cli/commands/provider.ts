@@ -108,7 +108,14 @@ export function registerProviderCommands(program: Command) {
         console.log(`Model (low tier):  ${p.modelFor("low")}`);
         console.log(`Model (high tier): ${p.modelFor("high")}`);
         const key = providerKeyStatus(id);
-        if (key?.source === "stored") console.log(`API key (${key.envVar}): stored in Purix`);
+        // Each folder has its own credential store (register item 10), so a key stored from another folder is not seen here. Said whenever the
+        // key came from, or was looked for in, the store, so "NOT FOUND" is never a mystery.
+        if (key && key.source !== "environment") {
+          const { join } = await import("node:path");
+          const { purixDir } = await import("@purix/core/platform/layout");
+          console.log(`Credential store read: ${join(purixDir(process.cwd()), "secrets.enc.json")} (each folder has its own)`);
+        }
+        if (key?.source === "stored") console.log(`API key (${key.envVar}): stored in Purix${key.conflict ? `, and the ${key.envVar} environment variable holds a DIFFERENT value that will not be used (run: purix secret status)` : ""}`);
         else if (key?.source === "environment") console.log(`API key (${key.envVar}): found in the environment`);
         else if (key) console.log(`API key (${key.envVar}): NOT FOUND. Run: purix secret set ${key.envVar}`);
         console.log(`(Whether the provider accepts the key is only known on the first real call.)`);

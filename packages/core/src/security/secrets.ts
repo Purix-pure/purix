@@ -265,6 +265,32 @@ export function scrubSecrets(files: { path: string; content: string }[]): Scrubb
   });
 }
 
+// Credentials that AWS prints in its own documentation. They are not secrets: they cannot sign a request, they sit in thousands of
+// public READMEs, SDK tests and tutorials, and they reached Purix as a false block on a test fixture (register item 13).
+// Gitleaks added the same pair to its allowlist ("used in AWS documentation", gitleaks PR 1340) and GitLab Secret Detection has an open
+// request for the second (gitlab-org/gitlab#452105). Only these exact strings are skipped, and only by the BLOCKING scan: a looser rule
+// ("anything ending in EXAMPLE") was considered and rejected, because it would let a real value through whenever someone appends the word.
+// scrubSecrets does not use this list: redacting a documentation key costs nothing, and a prompt that leaves the machine stays clean.
+// A line holding a documented example AND a real key still blocks, because only the example text is blanked, not the line.
+const DOCUMENTED_EXAMPLE_VALUES: readonly string[] = [
+  "AKIAIOSFODNN7EXAMPLE",
+  "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "AKIAI44QH8DHBEXAMPLE",
+  "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY",
+];
+
+/** True when `value` is, exactly, one of the credentials AWS documents as an example. */
+export function isDocumentedExampleCredential(value: string): boolean {
+  return DOCUMENTED_EXAMPLE_VALUES.includes(value);
+}
+
+// Blanks each documented example with a character no pattern accepts, keeping the line's length and the other text on it.
+function blankDocumentedExamples(line: string): string {
+  let out = line;
+  for (const v of DOCUMENTED_EXAMPLE_VALUES) if (out.includes(v)) out = out.split(v).join("~".repeat(v.length));
+  return out;
+}
+
 /**
  * Scans proposed file content — NOT the whole repo, just what's about to
  * be written — for known credential formats plus high-entropy quoted
@@ -277,7 +303,8 @@ export function scanForSecrets(files: { path: string; content: string }[]): Secr
   const findings: SecretFinding[] = [];
   for (const file of files) {
     const lines = file.content.split("\n");
-    lines.forEach((line, i) => {
+    lines.forEach((rawLine, i) => {
+      const line = blankDocumentedExamples(rawLine);
       const matched: string[] = [];
       for (const { name, re } of PATTERNS) {
         const m = line.match(re);
@@ -317,7 +344,7 @@ export function scanForSecrets(files: { path: string; content: string }[]): Secr
     if (!/["'][ \t]*(?:\+|\r?\n)/.test(file.content)) continue;
     for (const run of literalRuns(file.content)) {
       const hit = splitSecretName(run);
-      if (hit) findings.push({ path: file.path, line: file.content.slice(0, run.start).split("\n").length, match: redact(hit.match), reason: `${hit.name} (split across string pieces)` });
+      if (hit && !isDocumentedExampleCredential(hit.match) && !isDocumentedExampleCredential(run.joined)) findings.push({ path: file.path, line: file.content.slice(0, run.start).split("\n").length, match: redact(hit.match), reason: `${hit.name} (split across string pieces)` });
     }
   }
   return findings;

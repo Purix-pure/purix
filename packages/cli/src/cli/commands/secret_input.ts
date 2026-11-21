@@ -71,8 +71,16 @@ function readHiddenFromTerminal(stdin: SecretInputStream, stderr: SecretInputIO[
       stderr.write("\n");
       if (err) reject(err); else resolve(buf);
     };
+    // An escape sequence is skipped whole: a terminal that wraps a paste in bracketed-paste markers (ESC [ 200 ~ ... ESC [ 201 ~) or a
+    // key such as an arrow (ESC [ A) would otherwise leave "[200~" or "[A" inside the value, and the key would be stored with that text in it.
+    // The state survives between chunks because a sequence can arrive split.
+    let esc: "none" | "start" | "csi" | "ss3" = "none";
     const onData = (chunk: string | Buffer) => {
       for (const ch of chunk.toString()) {
+        if (esc === "start") { esc = ch === "[" ? "csi" : ch === "O" ? "ss3" : "none"; continue; }
+        if (esc === "csi") { if (ch >= "@" && ch <= "~") esc = "none"; continue; }   // parameters run until a final byte
+        if (esc === "ss3") { esc = "none"; continue; }
+        if (ch === "\u001b") { esc = "start"; continue; }
         if (ch === "\r" || ch === "\n" || ch === "\u0004") return finish();   // Enter, or Ctrl-D
         if (ch === "\u0003") return finish(new SecretInputCancelled());       // Ctrl-C (raw mode swallows the signal)
         if (ch === "\u007f" || ch === "\b") { buf = buf.slice(0, -1); continue; }
@@ -96,6 +104,8 @@ export async function readSecretValue(name: string, io: SecretInputIO): Promise<
   const raw = stdin.isTTY
     ? await readHiddenFromTerminal(stdin, stderr, `Value for ${name} (input is hidden): `)
     : stripTrailingNewline(await readAllPiped(stdin));
+  // Nothing is echoed, so a person cannot tell whether a paste arrived. The length says so without showing the key.
+  if (stdin.isTTY) stderr.write(`Received ${raw.length} character${raw.length === 1 ? "" : "s"} (not shown).\n`);
   if (raw.length === 0) {
     throw new Error(
       stdin.isTTY

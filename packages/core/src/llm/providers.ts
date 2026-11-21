@@ -293,6 +293,38 @@ function resolveKey(envVarName: string, providerLabel: string): string {
   return key;
 }
 
+/** Where a key would come from and whether two different values are in play. Never returns a key. */
+export function keySourceInfo(envVarName: string): { source: ProviderKeySource; conflict: boolean } {
+  let stored: string | null | undefined;
+  try {
+    stored = getSecret(envVarName);
+  } catch {
+    stored = undefined; // an unreadable store must not crash a status command; fall through to the environment
+  }
+  const env = dataDrivenEnv(envVarName);
+  if (stored) return { source: "stored", conflict: Boolean(env) && env !== stored };
+  if (env) return { source: "environment", conflict: false };
+  return { source: "missing", conflict: false };
+}
+
+/**
+ * Appended to a provider's error when the provider says the key was refused (401, 403, or a 400 that names the key). The raw
+ * error says "API key not valid" and nothing about which of the two places Purix took the key from, and the stored copy wins over
+ * the environment, so a stale stored key looked like a bad environment key.
+ */
+export function keyRefusedNote(status: number | undefined, body: string, envVarName: string): string {
+  const refused = status === 401 || status === 403 || (status === 400 && /api[ _-]?key|API_KEY_INVALID/i.test(body));
+  if (!refused) return "";
+  const { source, conflict } = keySourceInfo(envVarName);
+  const where =
+    source === "stored"
+      ? `the key stored in Purix as ${envVarName} (the stored key is used before the environment${conflict ? "; the environment holds a different value that was NOT used" : ""})`
+      : source === "environment"
+        ? `the ${envVarName} environment variable`
+        : `no key (${envVarName} was not found)`;
+  return ` [Purix sent ${where}. Check it with "purix secret status" and "purix provider status".]`;
+}
+
 function genericTransientCheck(status: number | undefined, message: string): boolean {
   if (status === 429) return true;
   if (typeof status === "number" && status >= 500 && status < 600) return true;
@@ -333,7 +365,7 @@ function openAiCompatibleAdapter(def: ProviderDefinition): LlmProvider {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw httpError(`${def.label} ${res.status}: ${providerErrorBody(body)}`, res.status);
+        throw httpError(`${def.label} ${res.status}: ${providerErrorBody(body)}${keyRefusedNote(res.status, body, def.keyEnvVar)}`, res.status);
       }
       const data = asObject(await res.json());
       const usage = asObject(data.usage);
@@ -373,7 +405,7 @@ function geminiAdapter(def: ProviderDefinition): LlmProvider {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw httpError(`Gemini ${res.status}: ${providerErrorBody(body)}`, res.status);
+        throw httpError(`Gemini ${res.status}: ${providerErrorBody(body)}${keyRefusedNote(res.status, body, def.keyEnvVar)}`, res.status);
       }
       const data = asObject(await res.json());
       const meta = asObject(data.usageMetadata);
@@ -417,7 +449,7 @@ function anthropicAdapter(def: ProviderDefinition): LlmProvider {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw httpError(`Anthropic ${res.status}: ${providerErrorBody(body)}`, res.status);
+        throw httpError(`Anthropic ${res.status}: ${providerErrorBody(body)}${keyRefusedNote(res.status, body, def.keyEnvVar)}`, res.status);
       }
       const data = asObject(await res.json());
       const usage = asObject(data.usage);
@@ -695,6 +727,8 @@ export interface ProviderKeyStatus {
   envVar: string;
   /** Where the key was found. Never the key itself. */
   source: ProviderKeySource;
+  /** True when a stored key and an environment variable of the same name hold different values (the stored one is used). */
+  conflict: boolean;
 }
 
 /**
@@ -709,15 +743,12 @@ export function providerKeyStatus(id?: string): ProviderKeyStatus | undefined {
   if (wanted === "custom") envVar = readPersistedConfig()?.custom?.keyEnvVar;
   else envVar = REGISTRY_BY_ID.get(wanted)?.keyEnvVar;
   if (!envVar) return undefined;
-  let stored: string | null | undefined;
-  try {
-    stored = getSecret(envVar);
-  } catch {
-    stored = undefined; // an unreadable store must not crash a status command; fall through to the environment
-  }
-  if (stored) return { envVar, source: "stored" };
-  if (dataDrivenEnv(envVar)) return { envVar, source: "environment" };
-  return { envVar, source: "missing" };
+  return { envVar, ...keySourceInfo(envVar) };
+}
+
+/** Every variable name a provider key is looked up under, with its provider, for the credential guard. Custom endpoints are added by the caller. */
+export function knownProviderKeyNames(): { envVar: string; providerId: string; label: string }[] {
+  return REGISTRY.map((d) => ({ envVar: d.keyEnvVar, providerId: d.id, label: d.label }));
 }
 
 export function persistProviderChoice(id: string, baseDir: string = process.cwd()): void {

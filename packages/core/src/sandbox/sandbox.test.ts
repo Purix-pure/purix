@@ -61,7 +61,7 @@ describe("verifyInSandbox — secret scan gate (ADR-037)", () => {
     // this gate, which is exactly the point: it's unconditional on the
     // candidate content, not specific to one call site.
     const candidateFiles = [
-      { path: "component.ts", new_content: `export const key = "AKIAIOSFODNN7EXAMPLE";\n` },
+      { path: "component.ts", new_content: `export const key = "AKIAIOSFODNN7EXAMPLX";\n` },
     ];
 
     const result = verifyInSandbox("comp-a", candidateFiles, tmpDir);
@@ -74,7 +74,7 @@ describe("verifyInSandbox — secret scan gate (ADR-037)", () => {
       // itself gives — a blocked-patch reason string is exactly the
       // kind of thing that ends up in a local audit log (recordEvent)
       // or on a person's screen, so it must never carry the raw secret.
-      expect(result.reason).not.toContain("AKIAIOSFODNN7EXAMPLE");
+      expect(result.reason).not.toContain("AKIAIOSFODNN7EXAMPLX");
     }
   });
 
@@ -85,7 +85,7 @@ describe("verifyInSandbox — secret scan gate (ADR-037)", () => {
     // but wastes a real filesystem copy on content that was always
     // going to be rejected.
     const before = process.cwd();
-    const candidateFiles = [{ path: "component.ts", new_content: `const key = "AKIAIOSFODNN7EXAMPLE";\n` }];
+    const candidateFiles = [{ path: "component.ts", new_content: `const key = "AKIAIOSFODNN7EXAMPLX";\n` }];
     verifyInSandbox("comp-a", candidateFiles, tmpDir);
     // No assertion on /tmp contents directly (that's the OS's business,
     // not this test's) — the real guarantee is behavioral: the call

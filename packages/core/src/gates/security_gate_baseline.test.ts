@@ -20,7 +20,7 @@ describe("F03-05: prose and text files are not read as JavaScript", () => {
   }
 
   it("a real secret in a prose file still blocks", () => {
-    const r = runSecurityGate([{ path: "README.md", content: 'Set the key: const awsKey = "AKIAIOSFODNN7EXAMPLE";\n' }]);
+    const r = runSecurityGate([{ path: "README.md", content: 'Set the key: const awsKey = "AKIAIOSFODNN7EXAMPLX";\n' }]);
     expect(r.blocked).toBe(true);
     expect(r.findings.some((f) => f.category === "Hardcoded Secret")).toBe(true);
   });
@@ -80,7 +80,7 @@ describe("F03-05: only findings the change introduces block", () => {
   });
 
   it("a secret already in the file still blocks: secrets are never forgiven as old", () => {
-    const secret = 'const awsKey = "AKIAIOSFODNN7EXAMPLE";\n';
+    const secret = 'const awsKey = "AKIAIOSFODNN7EXAMPLX";\n';
     const r = runSecurityGate([{ path: "src/a.ts", base: secret, content: secret + "export const v = 1;\n" }]);
     expect(r.blocked).toBe(true);
     expect(r.findings.some((f) => f.category === "Hardcoded Secret" && f.severity === "Critical")).toBe(true);

@@ -82,3 +82,40 @@ describe("Purix Indexer & Components Sync", () => {
     expect(entry.components).toEqual([]);
   });
 });
+
+describe("What the index records (problem register 2026-11-20)", () => {
+  it("lists the left-out files by name, and the count is the length of that list (IDX-07)", async () => {
+    writeFileSync(join(tmpDir, "data.json"), "{}");
+    writeFileSync(join(tmpDir, "notes.md"), "x");
+    writeFileSync(join(tmpDir, "run.go"), "package main\n");
+    const result = await runIndex(tmpDir);
+    expect(result.unsupportedFiles).toEqual(expect.arrayContaining(["data.json", "notes.md", "run.go"]));
+    expect(result.unsupportedFileCount).toBe(result.unsupportedFiles.length);
+    expect(result.unsupportedFiles).toEqual([...result.unsupportedFiles].sort());
+  });
+
+  it("records no symbol for export text inside a string or comment, and no test-file symbol as reusable (IDX-01, IDX-04)", async () => {
+    writeFileSync(join(tmpDir, "x.test.ts"), 'const SRC = "export const a = 1;\\n";\n// export function inComment() {}\nexport function helper() {}\n');
+    const result = await runIndex(tmpDir);
+    const inTest = result.components.filter((c) => c.file_location === "x.test.ts");
+    expect(inTest.map((c) => c.symbol_name)).toEqual(["helper"]);
+    expect(inTest.every((c) => c.reusable === false)).toBe(true);
+    expect(result.components.find((c) => c.symbol_name === "helloWorld")?.reusable).toBe(true);
+  });
+
+  it("gives every (name, file) pair one entry (IDX-06) and a whole-file entry only to a file with nothing to record", async () => {
+    writeFileSync(join(tmpDir, "y.test.ts"), 'const A = "export const a = 1;";\nconst B = "export const a = 2;";\n');
+    const result = await runIndex(tmpDir);
+    const keys = result.components.map((c) => `${c.symbol_name}@${c.file_location}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    const whole = result.components.filter((c) => c.file_location === "y.test.ts");
+    expect(whole).toHaveLength(1);
+    expect(whole[0]!.signature).toBe("file:y.test.ts");
+    expect(whole[0]!.reusable).toBe(false);
+  });
+
+  it("stores the parameters and return type in the signature (IDX-03)", async () => {
+    const result = await runIndex(tmpDir);
+    expect(result.components.find((c) => c.symbol_name === "helloWorld")?.signature).toBe("export function helloWorld(): string");
+  });
+});

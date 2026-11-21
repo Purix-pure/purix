@@ -17,6 +17,9 @@ export function renderCheckReport(report: CheckReport): string {
   for (const s of report.sections) {
     lines.push(`${MARK[s.outcome] ?? "  "} ${s.title}`);
     for (const i of s.items) lines.push(`     ${i.subject}: ${i.message}`);
+    // A next step shared by several items (five agent-written files, one "purix adopt") is printed once, after the items.
+    const nexts = [...new Set(s.items.flatMap((i) => (i.next === undefined ? [] : [i.next])))];
+    for (const n of nexts) lines.push(`     → ${n}`);
   }
   lines.push("", report.summary);
   if (report.strict && report.outcome === "skipped") lines.push("--strict: skipped items count as failures, so this exits 1.");

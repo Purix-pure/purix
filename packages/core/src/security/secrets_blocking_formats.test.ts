@@ -29,8 +29,8 @@ const PROBES: Probe[] = [
   { id: "short password in json", fmt: "short password", path: "a.json", content: `{"password": "s3cret99"}`, secret: "s3cret99" },
   { id: "token split by +", fmt: "split across lines", path: "a.ts", content: `const k = "ghp_aB3dE5fG7hJ9kL1mN3pQ5" +\n  "rS7tU9vW1xY3zA5bC7dE9";`, secret: "ghp_aB3dE5fG7hJ9kL1mN3pQ5" },
   { id: "key split by implicit concatenation", fmt: "split across lines", path: "a.py", content: `key = (\n  "sk-proj-aB3dE5fG7hJ9kL1m"\n  "N3pQ5rS7tU9vW1xY3zA5bC7dE9fG1hJ3"\n)`, secret: "sk-proj" },
-  { id: "AWS key split in two literals", fmt: "split across lines", path: "a.ts", content: `const key = "AKIAIOSF" + "ODNN7EXAMPLE";`, secret: "AKIAIOSF" },
-  { id: "AWS key split in two literals over two lines", fmt: "split across lines", path: "a.ts", content: `const key = "AKIAIOSF" +\n  "ODNN7EXAMPLE";`, secret: "AKIAIOSF" },
+  { id: "AWS key split in two literals", fmt: "split across lines", path: "a.ts", content: `const key = "AKIAIOSF" + "ODNN7EXAMPLX";`, secret: "AKIAIOSF" },
+  { id: "AWS key split in two literals over two lines", fmt: "split across lines", path: "a.ts", content: `const key = "AKIAIOSF" +\n  "ODNN7EXAMPLX";`, secret: "AKIAIOSF" },
 ];
 
 // Ordinary code and config. Written by the session; none holds a real secret.

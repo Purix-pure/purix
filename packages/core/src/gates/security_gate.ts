@@ -139,7 +139,7 @@ export const GOLDEN_CORPUS: { name: string; code: string; shouldBlock: boolean; 
   },
   {
     name: "Hardcoded secret",
-    code: 'const apiKey = "AKIAIOSFODNN7EXAMPLE";',
+    code: 'const apiKey = "AKIAIOSFODNN7EXAMPLX";',
     shouldBlock: true,
     severity: "Critical",
   },

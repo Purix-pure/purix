@@ -595,6 +595,20 @@ function screenShell(ctx: GovernedContext, cwd0: string, command: string): HookD
           };
         }
       }
+      // `purix secret set|rotate|remove` write the person's credentials. An agent that stores or removes a key can leave the next call
+      // using a key the person never chose, so these are the person's to run. `secret status` only reads and stays allowed.
+      if (sub === "secret") {
+        const rest = lead.map((x) => x.toLowerCase().replace(/^["']|["']$/g, "")).filter((x) => !x.startsWith("-"));
+        const verb = rest[rest.indexOf("secret") + 1];
+        if (verb === "set" || verb === "rotate" || verb === "remove") {
+          return {
+            action: "deny",
+            rule: "human-only",
+            reason: "`purix secret set`, `rotate` and `remove` change the credentials Purix sends to your model provider, so only the person can run them, in their own terminal. Ask the person to run it.",
+            targets: [],
+          };
+        }
+      }
       continue;
     }
 

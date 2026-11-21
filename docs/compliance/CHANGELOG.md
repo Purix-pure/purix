@@ -8,6 +8,29 @@ same version number.
 
 ## [Unreleased]
 
+### Fixed (credentials and dry-run findings, 2026-11-20)
+- `purix secret set`, `rotate` and `remove` follow one rule set (`security/credential_guard.ts`): only names Purix reads are accepted, an already-stored name is refused (use `rotate`), a stored key that differs from the environment variable is refused, and a pasted value with spaces, wrapping quotes, line breaks or control characters is refused before it is stored. A provider error that suggests a bad key now says which copy was sent (stored or environment). `secret status` and `provider status` show the store location and warn about dead entries and conflicts. `purix secret set|rotate|remove` is human-only in the hook rules.
+- The hidden key prompt skips terminal escape sequences, including bracketed-paste markers, so a pasted key no longer carries `[200~` or `[A` into the stored value, and it prints how many characters arrived (never the key). Reproduced on Linux with simulated input only; a Windows terminal still needs a manual check.
+- `purix provider status` prints which folder's credential store it read, because each folder has its own store.
+- The refusal for an `unclassified` change now says what happened and how to rephrase (name the file and the intended behaviour, or split the request), instead of "cannot be applied automatically yet".
+- The write-blocking secret scan no longer blocks the four credentials that AWS prints in its own documentation (`AKIAIOSFODNN7EXAMPLE`, `AKIAI44QH8DHBEXAMPLE` and their secret keys), matched exactly. The redaction path still redacts them, and a real-looking key on the same line still blocks.
+- The advisory `dangerous_eval` finding no longer fires on `eval(` written in a comment or a string, or on a method that is only named `eval` (`redis.eval(`, `model.eval()`); `window.eval(`, `globalThis.eval(`, a bare `eval(` and `new Function(` still do.
+
+### Fixed
+- `purix index` read symbols with one regex over raw text (problem register 2026-11-20, items 2 to 5; reproduced on 0.4.0-beta.4 by probes IDX-01 to IDX-06). On Purix's own source that made 352 of 1,845 TypeScript entries false (text inside comments and strings, mostly fixtures in test files), 87 (name, file) pairs duplicated, and all 346 symbols in test files "reusable". The extractor is now `manifest/index_extract.ts`: the TypeScript compiler's own parser for TypeScript and JavaScript, and a string- and comment-aware scanner for Python. Measured on the same source: 0 duplicate pairs, 0 reusable entries in test files, 1,961 components (was 2,201).
+- The index now records `export default`, `export enum`, `export abstract class`, `export namespace`, `export { a, b as c }`, `export * as ns`, re-exports with a name, `export var`, and the public methods of an exported class (`Class.method`, TypeScript and Python). Private, protected and `#private` members, Python names starting with `_`, and `export * from` (which names nothing) are not recorded.
+- A symbol's `signature` now carries parameters, generics, heritage and return type (`export function real(a: number, b: string): boolean`), cut at 300 characters. A constant's initialiser is never copied, so a value that is a secret cannot land in `components.json`; a function-valued constant keeps its parameters and return type.
+- `reusable` now means what the indexer can check: the symbol is exported and its file is not a test file (the same `isTestPath` and `isPythonTestPath` rules the verifier uses). The field keeps its name: renaming it needs a manifest migration, and who owns `manifest/` is an open ruling (D-l).
+- `purix index` said only "N file(s) ... left out". It now says which file types (`Left out by type: 90 .json, 60 .md ...`), and `purix index --list-skipped` lists every file. The result carries `unsupportedFiles`; the MCP `purix_index` result carries `unsupportedByExtension` instead of hundreds of paths.
+- `purix status --detail full` and `purix status --json` were "unknown option". Both now print every manifest entry as JSON, the same text the MCP tool `purix_status` returns for detail "full". `--detail concise` and the default are unchanged. A bad level, or `--json` with `--detail concise`, exits 2 (invalid usage).
+
+### Changed
+- The note `purix connect` writes into an agent's instruction file now names every tool the server offers (purix_create, purix_adopt, purix_remember, purix_ingest and the tool broker were missing), says to keep each change small, and tells an agent to call again with `componentId` when several components match. The model prompts and their golden file were aligned with the same set (`purix-llm-alignment.patch`, applied as given).
+
+### Known, not changed
+- The index still records no import edges between files (register item 1). Storing them changes the manifest, which is under the open ruling D-l, and the register's own research (RepoGraph, ICLR 2025) measured a different, line-level graph on Python repositories, so it is not evidence for a Purix design. It needs that ruling and a `purix eval` before and after.
+- `rationale` stays empty and every entry stays `pending` at index time (register item 6, probe IDX-08). Verifying each file at index time cost about 1.5 s per file, which is why it was removed; the indexer header says so. `purix index --why` does not exist.
+
 ## [0.4.0-beta.4]
 
 ### Changed

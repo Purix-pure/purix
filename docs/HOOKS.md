@@ -43,6 +43,7 @@ The plugin for OpenCode, and the config commands for the others, all run the sam
 | A write to `.mcp.json`, `.vscode/settings.json`, `.git/hooks`, `.claude/skills`, `.claude/commands`, or a shell startup file in the home folder | Blocked as protected (they start programs or steer the agent) |
 | A shell command that runs `purix approve` or `purix deny` | Blocked (`human-only`): those answer the agent's own pending MCP request, so only the person may run them, in their own terminal. `purix approve` also refuses to run without a terminal. |
 | A shell command that runs `purix provider trust` or `purix provider set custom` | Blocked (`human-only`): they decide where the person's API key is sent, so only the person may run them. |
+| A shell command that runs `purix secret set`, `rotate` or `remove` | Blocked (`human-only`): an agent must not change which key Purix uses. `purix secret status` is allowed (it never prints a key). |
 | A write tool call whose target file cannot be read from the payload | Blocked (cannot be checked) |
 | The hook cannot read its payload, find the project, or read the store | Blocked for a pre-tool event; allowed for `Stop` so a bug cannot trap the agent |
 | Governed files changed during the session by some other means | `Stop` (Claude Code and Codex) reports them, and the agent continues and tells the person. It reports; it cannot undo. |

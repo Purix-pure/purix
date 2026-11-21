@@ -32,18 +32,18 @@ describe("providerKeyStatus", () => {
   });
 
   it("reports missing when neither the store nor the environment has the key", () => {
-    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "missing" });
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "missing", conflict: false });
   });
 
   it("reports environment when only the environment has it", () => {
     process.env.OPENAI_API_KEY = "sk-env";
-    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "environment" });
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "environment", conflict: false });
   });
 
-  it("reports stored, and the store wins over the environment, like the real call", () => {
+  it("reports stored, and the store wins over the environment, like the real call (and flags the difference)", () => {
     process.env.OPENAI_API_KEY = "sk-env";
     setSecret("OPENAI_API_KEY", "sk-stored");
-    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored" });
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored", conflict: true });
   });
 
   it("never exposes the key value", () => {
@@ -65,6 +65,44 @@ describe("providerKeyStatus", () => {
   it("follows the custom provider's own key variable", () => {
     persistCustomProvider({ baseUrl: "http://localhost:11434/v1", keyEnvVar: "MY_CUSTOM_KEY", modelLow: "a", modelHigh: "b" }, tmpDir);
     process.env.MY_CUSTOM_KEY = "k";
-    expect(providerKeyStatus("custom")).toEqual({ envVar: "MY_CUSTOM_KEY", source: "environment" });
+    expect(providerKeyStatus("custom")).toEqual({ envVar: "MY_CUSTOM_KEY", source: "environment", conflict: false });
+  });
+
+  it("flags a conflict when the stored key differs from the environment key (the stored one is used)", () => {
+    process.env.OPENAI_API_KEY = "sk-env";
+    setSecret("OPENAI_API_KEY", "sk-stored");
+    expect(providerKeyStatus("openai")).toEqual({ envVar: "OPENAI_API_KEY", source: "stored", conflict: true });
+  });
+});
+
+import { keyRefusedNote } from "./providers";
+describe("keyRefusedNote", () => {
+  let tmp: string;
+  let prev: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "purix-refused-"));
+    prev = process.cwd();
+    process.chdir(tmp);
+  });
+  afterEach(() => {
+    process.chdir(prev);
+    safeRmSync(tmp);
+  });
+  it("names the stored copy and the unused environment copy on a refused key", () => {
+    process.env.OPENAI_API_KEY = "sk-env";
+    setSecret("OPENAI_API_KEY", "sk-stored");
+    try {
+      const note = keyRefusedNote(400, '{"error":{"message":"API key not valid"}}', "OPENAI_API_KEY");
+      expect(note).toContain("stored in Purix");
+      expect(note).toContain("NOT used");
+      expect(note).not.toContain("sk-stored");
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+      deleteSecret("OPENAI_API_KEY");
+    }
+  });
+  it("adds nothing for an unrelated failure", () => {
+    expect(keyRefusedNote(500, "boom", "OPENAI_API_KEY")).toBe("");
+    expect(keyRefusedNote(400, "bad request: missing field", "OPENAI_API_KEY")).toBe("");
   });
 });

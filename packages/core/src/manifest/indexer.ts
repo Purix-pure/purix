@@ -12,12 +12,13 @@
 // per-file pass or fail: `purix check`, `purix status`, the evidence bundle, the hook and the governed lock skip the index row, and
 // the resolver, adopt and change-target read only file, symbol and language from it.
 import { readdirSync, readFileSync, existsSync, mkdirSync, lstatSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { basename, extname, join, relative, resolve } from "node:path";
 import { spawnSync } from "../platform/spawn_sync.js";
 import { writeManifest, listManifest } from "./store.js";
 import { languageForFile, getLanguageProvider } from "../language/registry.js";
 import { requireLanguage } from "../licensing/tier.js";
 import type { ComponentRecord, ManifestEntry } from "./schema.js";
+import { extractFileRecords } from "./index_extract.js";
 import { computeSyncHash } from "../state/hash.js";
 import { writeJsonAtomic } from "../platform/atomic_write.js";
 import { purixDir, PURIX_DIRNAME, toPosixPath } from "../platform/layout.js";
@@ -38,6 +39,11 @@ export interface IndexResult {
   verification: "not_run";
   /** Files seen in the tree that no registered language claims, so they were not indexed. */
   unsupportedFileCount: number;
+  /**
+   * The same files by name (relative, forward slashes, sorted), so a person can see WHICH files were left out and why a number changed
+   * between runs (register item 7, IDX-07). `unsupportedFileCount` is its length.
+   */
+  unsupportedFiles: string[];
   /**
    * Where the list of files came from. "git": inside a git repository, git's own list (tracked plus untracked and not ignored), so
    * every .gitignore rule is honoured exactly (research 05 section 2.1). "walk": outside a repository, or when git could not run,
@@ -133,64 +139,47 @@ function walkDir(dir: string, baseDir: string, ignorePatterns: string[], fileLis
   return fileList;
 }
 
-// Builds one ComponentRecord with the fields shared by every extraction
-// branch below. Only symbol_name/signature/reusable vary per call site;
-// factoring this out keeps the per-language regexes from having to repeat
-// the other 5 fields verbatim each time (see audit finding 2.7).
-function makeRecord(
-  symbolName: string,
-  relPath: string,
-  signature: string,
-  lang: string,
-  reusable: boolean
-): ComponentRecord {
-  return {
-    symbol_name: symbolName,
-    file_location: relPath,
-    signature,
-    language: lang,
-    // Indexing records that a symbol exists, not that anything was run on it.
-    verification_status: "pending",
-    last_verified_commit_hash: null,
-    reusable,
-    rationale: null,
-  };
-}
-
-// NOTE: Rust/Go/Ruby extraction was intentionally removed for this beta
-// (see BETA_SCOPE.md) — only TypeScript and Python are supported. If a
-// language is reintroduced, add its extraction branch here AND register
-// its provider in core/src/language/registry.ts so the two stay in sync
-// (see audit finding 3.1, where the two had drifted).
+// NOTE: Rust/Go/Ruby extraction was intentionally removed for this beta (see BETA_SCOPE.md): only TypeScript and Python are supported.
+// If a language is reintroduced, add its extraction branch in index_extract.ts AND register its provider in
+// core/src/language/registry.ts so the two stay in sync (see audit finding 3.1, where the two had drifted).
 function extractSymbols(filePath: string, content: string, lang: string, baseDir: string = process.cwd()): ComponentRecord[] {
-  const records: ComponentRecord[] = [];
   // Relative to the folder being indexed, the same base every other path in this run uses. It was the current directory, which is the
   // same folder only until a caller names another, or spells it differently (macOS: cwd is /private/var/..., the caller's is /var/...).
   const relPath = toPosixPath(relative(baseDir, filePath));
-  // A UTF-8 byte-order mark sits in front of the first line and would hide a first-line `def`/`class` from the line-anchored regex below.
-  if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
-
-  const exportRegex = /export\s+(?:async\s+)?(?:function|class|const|let|interface|type)\s+(\w+)/g;
-  let match;
-  while ((match = exportRegex.exec(content)) !== null) {
-    records.push(makeRecord(match[1]!, relPath, match[0], lang, true));
+  const records = extractFileRecords(relPath, content, lang);
+  if (records === null) {
+    throw new Error("Purix could not load its TypeScript parser (the ts-morph package), so it cannot index TypeScript or JavaScript files. Reinstall Purix (the @purix/cli package) and run purix index again.");
   }
-
-  if (lang === "python") {
-    const pyRegex = /^(?:async\s+)?(def|class)\s+(\w+)/gm;
-    while ((match = pyRegex.exec(content)) !== null) {
-      const symbolName = match[2]!;
-      if (!symbolName.startsWith("_")) {
-        records.push(makeRecord(symbolName, relPath, match[0], lang, true));
-      }
-    }
-  }
-
   if (records.length === 0) {
-    records.push(makeRecord(relPath, relPath, `file:${relPath}`, lang, false));
+    // Nothing to record in this file. The whole-file entry keeps the file findable; it is never "reusable".
+    records.push({
+      symbol_name: relPath,
+      file_location: relPath,
+      signature: `file:${relPath}`,
+      language: lang,
+      verification_status: "pending",
+      last_verified_commit_hash: null,
+      reusable: false,
+      rationale: null,
+    });
   }
-
   return records;
+}
+
+/**
+ * The left-out files grouped by file type, biggest group first: `.json 90`, `.md 60`. A file with no extension (Dockerfile, LICENSE,
+ * .gitignore) is grouped under its own name. Pure; the CLI and the MCP tool both print it so neither shows a bare count.
+ */
+export function skippedByExtension(files: readonly string[]): { extension: string; count: number }[] {
+  const by = new Map<string, number>();
+  for (const f of files) {
+    const ext = extname(f).toLowerCase();
+    const key = ext !== "" ? ext : basename(f);
+    by.set(key, (by.get(key) ?? 0) + 1);
+  }
+  return [...by.entries()]
+    .map(([extension, count]) => ({ extension, count }))
+    .sort((a, b) => b.count - a.count || a.extension.localeCompare(b.extension));
 }
 
 export async function runIndex(baseDir: string = process.cwd(), options: IndexOptions = {}): Promise<IndexResult> {
@@ -207,7 +196,7 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
   }
 
   let fileCount = 0;
-  let unsupportedFileCount = 0;
+  const unsupportedFiles: string[] = [];
   const allComponents: ComponentRecord[] = [];
   // Exactly the files this run indexed, with the content it read — the source
   // of truth for the manifest entry's tracked file list and its drift baseline.
@@ -221,7 +210,7 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
     // component count with whole-file records for config and docs files.
     const lang = languageForFile(relPath);
     if (lang === undefined) {
-      unsupportedFileCount++;
+      unsupportedFiles.push(relPath);
       continue;
     }
 
@@ -305,7 +294,8 @@ export async function runIndex(baseDir: string = process.cwd(), options: IndexOp
     fileCount,
     componentCount: allComponents.length,
     verification: "not_run",
-    unsupportedFileCount,
+    unsupportedFileCount: unsupportedFiles.length,
+    unsupportedFiles: unsupportedFiles.sort(),
     fileListSource,
     components: allComponents,
   };

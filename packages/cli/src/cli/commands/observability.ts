@@ -1,5 +1,5 @@
 // src/cli/commands/observability.ts
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import { writeFile } from "node:fs/promises";
 import { getRecentLogs, redactLogContent } from "../../telemetry/log.js";
 
@@ -10,8 +10,22 @@ export function registerObservabilityCommands(program: Command) {
   program
     .command("status")
     .description("List all manifest components")
-    .action(async () => {
+    // Register item 8 (CLI-01, CLI-02): the MCP tool purix_status has `detail` and the CLI had no way to export the full list, so a person
+    // had to copy .purix/components.json by hand. "full" here is the same text purix_status returns for detail "full".
+    .addOption(new Option("--detail <level>", 'how much to print: "concise" (the default, one line per component) or "full" (every manifest entry as JSON, the same as the MCP tool purix_status with detail "full")').choices(["concise", "full"]))
+    .option("--json", 'machine-readable output: every manifest entry as JSON (same as --detail full)')
+    .action(async (opts: { detail?: "concise" | "full"; json?: boolean }) => {
       const { listManifest, storeExists, NO_STATE_MESSAGE } = await import("@purix/core/manifest/store");
+      if (opts.json && opts.detail === "concise") {
+        console.error('error: --json prints the full list as JSON, so it cannot be combined with --detail concise. Use --detail full or --json alone.');
+        process.exitCode = 2; // invalid usage, as core cli-io/exit_codes.ts defines it (an unknown --detail level exits 2 the same way)
+        return;
+      }
+      if (opts.json || opts.detail === "full") {
+        // Same as the MCP handler: no state yet is an empty list, not prose, so a script can parse it either way.
+        console.log(storeExists() ? JSON.stringify(listManifest(), null, 2) : "[]");
+        return;
+      }
       if (!storeExists()) { console.log(NO_STATE_MESSAGE); return; }
       const { splitIndexRow, indexedFilesLine } = await import("./status_index_line.js");
       // D-b: the aggregate index row is shown as one "indexed files" line, not as a component.

@@ -29,7 +29,7 @@ describe("ADR-009 Deterministic Security Gate", () => {
 
   it("catches hardcoded secrets and blocks unconditionally", () => {
     const res = runSecurityGate([
-      { path: "src/config.ts", content: 'const awsKey = "AKIAIOSFODNN7EXAMPLE";\n' },
+      { path: "src/config.ts", content: 'const awsKey = "AKIAIOSFODNN7EXAMPLX";\n' },
     ]);
     expect(res.ok).toBe(false);
     expect(res.blocked).toBe(true);

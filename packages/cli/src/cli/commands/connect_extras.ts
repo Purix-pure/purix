@@ -18,8 +18,11 @@ export const INSTRUCTION_BODY = [
   "",
   "Purix checks and records changes to tracked code. Use it instead of editing tracked files directly.",
   "",
-  "- To change tracked code, call `purix_change` (plain-language intent) or `purix_modify` (known component id).",
+  "- To change tracked code, call `purix_change` (plain-language intent) or `purix_modify` (known component id). Keep each call small and about one thing: a change too large for a few small edits is refused, so split it. Add `dryRun: true` to see the diff first. If several components match, nothing runs: call again with `componentId`.",
   "- `purix_status` lists tracked components; `purix_find` locates one.",
+  "- A new component: `purix_create`. A file Purix indexed but does not track can be edited directly, and the edit is listed by `purix check`; to bring it under Purix, call `purix_index`, then `purix_adopt` (a person approves).",
+  "- `purix_remember` saves one convention a later change must follow (one plain statement); Purix shows it to later creates and modifies.",
+  "- `purix_ingest` verifies a diff file another tool produced against a tracked component and commits it if it passes. `purix_tools_plan` shows which checkers the project needs; `purix_tools_request_install` asks for one (a person approves).",
   "- If a call returns a request id, a person must approve it: tell them to run `purix approve <id>` in their own terminal, then check `purix_approval_status`. You cannot approve it yourself, so do not retry in a loop.",
   "- A Purix result says what it covered. A pass means those checks passed; it does not mean the code is correct or safe.",
 ].join("\n");

@@ -473,6 +473,9 @@ function createBaseProgram(): Command {
         write('  Start a project:           purix create "what you want to build"\n');
         write("  Connect your coding agent: purix connect\n");
         write("  Install a tool it needs:   purix tools\n");
+      } else if (unknown === "doctor") {
+        write('  Did you mean "purix hooks doctor"? It checks each installed agent hook.\n');
+        write('  Run "purix --help" to see every command.\n');
       } else {
         write('  Run "purix --help" to see every command.\n');
       }

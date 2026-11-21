@@ -10,7 +10,7 @@ describe("verifyInSandbox — early guards", () => {
   it("blocks a patch that contains a secret, without creating any sandbox", () => {
     const dir = mkdtempSync(join(tmpdir(), "purix-sbx-"));
     try {
-      const r = verifyInSandbox("c", [{ path: "src/a.ts", new_content: 'export const key = "AKIAIOSFODNN7EXAMPLE";\n' }], dir);
+      const r = verifyInSandbox("c", [{ path: "src/a.ts", new_content: 'export const key = "AKIAIOSFODNN7EXAMPLX";\n' }], dir);
       expect(r.status).toBe("fail");
       if (r.status === "fail") expect(r.reason).toContain("Secrets/entropy scan blocked this patch");
       expect(r.idiomFindings).toEqual([]);

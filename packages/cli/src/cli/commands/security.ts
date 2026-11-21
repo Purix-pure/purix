@@ -40,27 +40,33 @@ export function registerSecurityCommands(program: Command) {
     }
   };
 
-  secretCmd.command("set <name> [value]").description("Store a credential in an encrypted file (the key is stored beside it). Leave [value] out to be asked, or pipe it on stdin; a value on the command line is kept in shell history").action(async (name: string, value: string | undefined) => {
+  secretCmd.command("set <name> [value]").description("Store a credential in an encrypted file (the key is stored beside it). Leave [value] out to be asked, or pipe it on stdin; a value on the command line is kept in shell history. Refuses a name Purix does not read, a credential that is already stored (use rotate), and a key that conflicts with the environment").action(async (name: string, value: string | undefined) => {
     const { setSecret } = await import("@purix/core/security/secrets_manager");
+    const { checkSecretSet, defaultGuardContext } = await import("@purix/core/security/credential_guard");
+    // Name and stored-state checks first, so a person is not asked to type a key that would be refused anyway. The value is checked again once it is in hand.
+    const early = checkSecretSet(name, "x", defaultGuardContext());
+    if (!early.ok && !/^The value /.test(early.reason)) { console.error(`🛑 ${early.reason}`); process.exitCode = 1; return; }
     const v = await obtainValue("set", name, value);
     if (v === undefined) return;
+    const verdict = checkSecretSet(name, v, defaultGuardContext());
+    if (!verdict.ok) { console.error(`🛑 ${verdict.reason}`); process.exitCode = 1; return; }
     setSecret(name, v);
-    console.log(`✅ Stored "${name}" encrypted. Remove it from any .env once you've confirmed this works.`);
+    console.log(`✅ Stored "${name}" encrypted (${v.length} characters). Remove it from any .env once you've confirmed this works.`);
+    for (const note of verdict.notes) console.log(`   ${note}`);
   });
 
-  secretCmd.command("rotate <name> [newValue]").description("Rotate a stored credential. Leave [newValue] out to be asked, or pipe it on stdin").action(async (name: string, newValue: string | undefined) => {
-    const { setSecret, listSecretStatus } = await import("@purix/core/security/secrets_manager");
-    // TEST-REPORT F12: rotating a name that was never stored used to print
-    // "✅ Rotated" while silently creating it.
-    if (!listSecretStatus().some((s) => s.name === name)) {
-      console.error(`No secret stored as "${name}" — nothing to rotate. Use "purix secret set ${name}" to create it.`);
-      process.exitCode = 1;
-      return;
-    }
+  secretCmd.command("rotate <name> [newValue]").description("Replace a stored credential with a new key. Leave [newValue] out to be asked, or pipe it on stdin").action(async (name: string, newValue: string | undefined) => {
+    const { setSecret } = await import("@purix/core/security/secrets_manager");
+    const { checkSecretRotate, defaultGuardContext } = await import("@purix/core/security/credential_guard");
+    // TEST-REPORT F12: rotating a name that was never stored used to print "✅ Rotated" while silently creating it.
+    const early = checkSecretRotate(name, "x", defaultGuardContext());
+    if (!early.ok && !/^The value /.test(early.reason)) { console.error(`🛑 ${early.reason}`); process.exitCode = 1; return; }
     const v = await obtainValue("rotate", name, newValue);
     if (v === undefined) return;
+    const verdict = checkSecretRotate(name, v, defaultGuardContext());
+    if (!verdict.ok) { console.error(`🛑 ${verdict.reason}`); process.exitCode = 1; return; }
     setSecret(name, v);
-    console.log(`✅ Rotated "${name}".`);
+    console.log(`✅ Rotated "${name}" (${v.length} characters). Purix does not check the key with the provider; the first model call will.`);
   });
 
   secretCmd.command("remove <name>").description("Delete a stored credential").action(async (name: string) => {
@@ -68,14 +74,23 @@ export function registerSecurityCommands(program: Command) {
     console.log(deleteSecret(name) ? `✅ Removed "${name}".` : `No secret stored as "${name}".`);
   });
 
-  secretCmd.command("status").description("Show credential age / rotation status").action(async () => {
+  secretCmd.command("status").description("Show credential age, size and any problem (an entry Purix never reads, or a stored key that differs from the environment)").action(async () => {
     const { listSecretStatus } = await import("@purix/core/security/secrets_manager");
+    const { auditStoredSecrets, defaultGuardContext } = await import("@purix/core/security/credential_guard");
+    const { join } = await import("node:path");
+    const { purixDir } = await import("@purix/core/platform/layout");
     const statuses = listSecretStatus();
+    console.log(`Store for this folder: ${join(purixDir(process.cwd()), "secrets.enc.json")} (another folder has its own store)`);
     if (statuses.length === 0) { console.log("No secrets stored yet."); return; }
+    const audit = new Map(auditStoredSecrets(defaultGuardContext()).map((a) => [a.name, a]));
     for (const s of statuses) {
       const age = s.ageDays === 0 ? "set today" : `set ${s.ageDays}d ago`;
       const rotated = s.rotationCount === 0 ? "never rotated" : `rotated ${s.rotationCount} time${s.rotationCount === 1 ? "" : "s"}`;
-      console.log(`${s.name}  ${age}${s.rotationDue ? "  ⚠ ROTATION DUE" : ""}  (${rotated})`);
+      const a = audit.get(s.name);
+      const size = a?.length != null ? `, ${a.length} characters` : "";
+      console.log(`${s.name}  ${age}${s.rotationDue ? "  ⚠ ROTATION DUE" : ""}  (${rotated}${size})`);
+      if (a?.unused) console.log(`   ⚠ Purix never reads an entry named "${s.name}"${a.meant ? `; the key for it is stored as ${a.meant}` : ""}. Remove it: purix secret remove ${s.name}`);
+      if (a?.differsFromEnvironment) console.log(`   ⚠ Differs from the ${s.name} environment variable. The stored key is used and the environment one is ignored.`);
     }
   });
 }

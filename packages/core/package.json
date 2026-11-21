@@ -316,6 +316,10 @@
       "types": "./dist/security/secrets.d.ts",
       "default": "./dist/security/secrets.js"
     },
+    "./security/credential_guard": {
+      "types": "./dist/security/credential_guard.d.ts",
+      "default": "./dist/security/credential_guard.js"
+    },
     "./security/secrets_manager": {
       "types": "./dist/security/secrets_manager.d.ts",
       "default": "./dist/security/secrets_manager.js"

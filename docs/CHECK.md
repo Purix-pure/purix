@@ -67,7 +67,7 @@ source; never file contents), not only tool installs and drift events.
 ## `--json`
 
 Schema version 1. `outcome` is the worst result (`fail` > `error` > `skipped` > `pass`). Each section has an `id`, a
-`title`, an `outcome` and `items` (`outcome`, `subject`, `message`). `exitCode` is the code the command will exit with.
+`title`, an `outcome` and `items` (`outcome`, `subject`, `message`, and an optional `next`: what to do about it). The printed report shows each distinct `next` once per section. `exitCode` is the code the command will exit with.
 
 ## What it does not do
 
