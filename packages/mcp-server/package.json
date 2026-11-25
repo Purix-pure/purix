@@ -1,6 +1,6 @@
 {
   "name": "@purix/mcp-server",
-  "version": "0.4.0-beta.4",
+  "version": "0.4.0-beta.5",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -30,12 +30,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --import ./scripts/test_user_dir.mjs --test \"src/**/*.test.ts\"",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
-    "@purix/core": "workspace:^0.4.0-beta.4"
+    "@purix/core": "workspace:^0.4.0-beta.5"
   },
   "devDependencies": {
     "@types/node": "catalog:",

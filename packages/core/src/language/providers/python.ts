@@ -1,12 +1,14 @@
 // packages/core/src/language/providers/python.ts
-import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { writeFileAtomic } from "../../platform/atomic_write.js";
 import { resolve, join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { spawnSync } from "../../platform/spawn_sync.js";
 import type { LanguageProvider, ParseCheckResult } from "../provider.js";
 import type { VerificationResult } from "../../verify/verify.js";
-import type { TestRunResult } from "../../verify/tests.js";
+import { readAndRemove, type RunTestsOptions, type TestRunResult } from "../../verify/tests.js";
+import { changedLineCoverage, parseLcov, parseLcovBranchMisses } from "../../verify/changed_line_coverage.js";
 import type { IdiomCheckResult, IdiomFinding } from "../../verify/idiom.js";
 import type { PinningFinding, VulnFinding } from "../../security/deps_audit.js";
 import { parseLockfileFingerprint, providerKitHooks, runIsolatedOrNotInstalled } from "../provider-kit.js";
@@ -56,6 +58,44 @@ try:
 except SyntaxError as e:
     print(json.dumps({"ok": False, "line": e.lineno or 1, "column": e.offset or 1, "message": e.msg}))
 `;
+
+/** What the coverage producer decided: flags to add and where the report will be, or why nothing can be measured. */
+interface PytestCoveragePlan { dir?: string; file?: string; args: string[]; env?: Record<string, string>; notMeasured?: string }
+
+/**
+ * Changed-line coverage for Python (F06-04, the producer the first slice left out). pytest-cov is the one tool that writes an lcov report from
+ * pytest, and a run that is given `--cov` without it fails outright ("unrecognized arguments"). So the plugin is looked for first, with
+ * `pytest --version --version`, which lists the installed plugins and runs no test. Without it nothing is added, the run is exactly what it
+ * was, and the result says why no figure exists. Every flag is there so coverage can never change whether a run passes: the project's own
+ * `--cov-fail-under` and `fail_under` are overridden to 0, and the data file and report go in a folder this function removes afterwards.
+ */
+function pytestCoveragePlan(pytest: { loc: ToolLocation }, baseDir: string): PytestCoveragePlan {
+  const probe = providerKitHooks.runIsolatedOrNotInstalled([...pytest.loc.command, "--version", "--version"], {
+    cwd: baseDir,
+    writableDir: baseDir,
+    extraReadOnlyBinds: bindsFor(pytest.loc),
+  });
+  if ("status" in probe || probe.exitCode !== 0) return { args: [], notMeasured: "could not ask pytest which plugins are installed, so line coverage was not measured" };
+  if (!/pytest[-_]cov/i.test(`${probe.stdout}\n${probe.stderr}`)) {
+    return { args: [], notMeasured: "pytest-cov is not installed for this project's pytest, so line coverage was not measured (install it in the same environment as pytest to get a figure)" };
+  }
+  const dir = resolve(baseDir, `.purix-cov-${randomBytes(6).toString("hex")}`);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, "lcov.info");
+  return {
+    dir,
+    file,
+    args: ["--cov=.", "--cov-branch", `--cov-report=lcov:${file}`, "--cov-fail-under=0"],
+    env: { COVERAGE_FILE: join(dir, ".coverage") },
+  };
+}
+
+/** Turns the lcov text of a passing pytest run into the result fields. A missing report is "not measured", never "covered". */
+function pytestCoverageResult(asked: NonNullable<RunTestsOptions["coverage"]>, lcovText: string | undefined, notMeasured?: string): Pick<TestRunResult, "changedLineCoverage" | "coverageNotMeasured"> {
+  if (notMeasured !== undefined) return { coverageNotMeasured: notMeasured };
+  if (lcovText === undefined || lcovText.trim() === "") return { coverageNotMeasured: "the pytest run wrote no coverage report" };
+  return { changedLineCoverage: changedLineCoverage(asked.changed, parseLcov(lcovText), parseLcovBranchMisses(lcovText)) };
+}
 
 export const pythonProvider: LanguageProvider = {
   id: "python",
@@ -124,7 +164,7 @@ export const pythonProvider: LanguageProvider = {
   // `changedFiles` are the files that changed (the sandbox passes them for every language), NOT test
   // files. Tests are chosen by relation to the change, as for TypeScript. This used to hand the changed
   // source files themselves to pytest, which collects nothing from them and exits 5 ("no tests collected").
-  runTests(componentId: string, changedFiles: string[], baseDir: string = process.cwd()): TestRunResult {
+  runTests(componentId: string, changedFiles: string[], baseDir: string = process.cwd(), options: RunTestsOptions = {}): TestRunResult {
     const pytest = toolOrHint(baseDir, "pytest");
     if ("hint" in pytest) {
       return { status: "not_installed", reason: "Python tooling (pytest) not installed", actionHint: pytest.hint, quarantinedFailures: [] };
@@ -141,11 +181,16 @@ export const pythonProvider: LanguageProvider = {
         discovery: discoverySummary,
       };
     }
-    const result = providerKitHooks.runIsolatedOrNotInstalled([...pytest.loc.command, ...discovery.tests], {
+    // Coverage is asked for only when the caller offered it; the plan is made (and its probe run) after discovery, so a run that has no tests never pays for it.
+    const plan = options.coverage !== undefined ? pytestCoveragePlan(pytest, baseDir) : undefined;
+    const result = providerKitHooks.runIsolatedOrNotInstalled([...pytest.loc.command, ...discovery.tests, ...(plan?.args ?? [])], {
       cwd: baseDir,
       writableDir: baseDir,
       extraReadOnlyBinds: bindsFor(pytest.loc),
+      ...(plan?.env ? { env: plan.env } : {}),
     });
+    // Read the report and remove its folder now, before any return below.
+    const lcovText = plan?.file ? readAndRemove(plan.file, plan.dir) : undefined;
 
     if ("status" in result) {
       return {
@@ -188,6 +233,7 @@ export const pythonProvider: LanguageProvider = {
         isolation: result.isolation,
         discovery: discoverySummary,
         ...(counts ? { counts: { passed: counts.passed, failed: counts.failed, skipped: counts.skipped + counts.xfailed } } : {}),
+        ...(options.coverage ? pytestCoverageResult(options.coverage, lcovText, plan?.notMeasured) : {}),
       };
     }
     // pytest exit code 5 = "no tests collected": the selected files hold no test functions, so nothing ran.

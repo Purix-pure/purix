@@ -8,6 +8,7 @@ import { purixEnv } from "../platform/env.js";
 import { netFetch } from "../platform/net.js";
 import { createHmac } from "node:crypto";
 import { getSecret } from "../security/secrets_manager.js";
+import { resolveCredential } from "../security/user_secrets.js";
 
 /** The one place this file writes to the terminal. */
 function warn(message: string): void {
@@ -19,13 +20,19 @@ function warn(message: string): void {
  * can be forged by anyone who reads it, so with no secret configured nothing is sent (fails closed; one-day security fix,
  * "Purix Security After the Plan").
  */
-function getWebhookSecret(): string | null {
+export function getWebhookSecret(): string | null {
   const envSecret = purixEnv("PURIX_WEBHOOK_SECRET");
   if (envSecret) return envSecret;
+  // `purix secret set PURIX_WEBHOOK_SECRET` is the documented name (credential_guard.ts). This used to look only for the
+  // lowercase "purix_webhook_secret", a name the CLI refuses to store, so a secret stored the documented way was never read.
   try {
-    const stored = getSecret("purix_webhook_secret");
-    if (stored) return stored;
-  } catch { /* no webhook secret stored */ }
+    const found = resolveCredential("PURIX_WEBHOOK_SECRET");
+    if (found) return found.value;
+  } catch { /* no webhook secret stored, or the store cannot be read */ }
+  try {
+    const old = getSecret("purix_webhook_secret"); // a lowercase entry written by an older version
+    if (old) return old;
+  } catch { /* none */ }
   return null;
 }
 

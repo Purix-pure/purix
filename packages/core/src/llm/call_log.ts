@@ -16,6 +16,7 @@ import { getDbCompat as getDb } from "../manifest/store.js";
 import { withSqliteRetry } from "./sqlite_retry.js";
 import { CHARS_PER_TOKEN } from "./context/tokens.js";
 import type { RoutingCall } from "./router.js";
+import { currentChangeId } from "../observe/change_context.js";
 
 /** "timeout": the provider did not answer within the deadline (A10c-1). Like "provider_error", it costs nothing and has no usable token counts. */
 export type CallStatus = "ok" | "format_error" | "provider_error" | "timeout";
@@ -74,6 +75,9 @@ function ensureTable(): void {
     )
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_llm_call_log_type ON llm_call_log (call_type)`);
+  // The change this call was made for (observe/change_context.ts). Added after the table first shipped, so an older store gets the column here.
+  const cols = db.query(`PRAGMA table_info(llm_call_log)`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === "change_id")) db.run(`ALTER TABLE llm_call_log ADD COLUMN change_id TEXT`);
 }
 
 /** Writes one row. Returns its id, or null when the write could not be made. Never throws. */
@@ -84,12 +88,12 @@ export function recordLlmCall(c: CallLogInput): number | null {
       const res = getDb().run(
         `INSERT INTO llm_call_log
            (session_id, created_at, call_type, tier, provider, model, est_input_tokens, input_tokens, output_tokens,
-            cached_input_tokens, retry, latency_ms, cost_usd, status, prompt_chars)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            cached_input_tokens, retry, latency_ms, cost_usd, status, prompt_chars, change_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           SESSION_ID, new Date().toISOString(), c.callType, c.tier, c.provider, c.model,
           estimateInputTokens(c.promptChars), c.inputTokens, c.outputTokens,
-          c.cachedInputTokens ?? null, c.retry ? 1 : 0, Math.round(c.latencyMs), c.costUsd, c.status, c.promptChars,
+          c.cachedInputTokens ?? null, c.retry ? 1 : 0, Math.round(c.latencyMs), c.costUsd, c.status, c.promptChars, currentChangeId(),
         ],
       );
       const id = Number((res as { lastInsertRowid?: number | bigint }).lastInsertRowid ?? NaN);

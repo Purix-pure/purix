@@ -38,12 +38,13 @@ describe("one help page", () => {
     expect(r.out).not.toContain("More commands");
   });
 
-  test("most used first: the groups appear in order and the first command is `connect`", () => {
+  test("most used first: the groups appear in order and the first command is `start`, then `connect`", () => {
     const r = help(["--help"]);
     const order = HELP_GROUPS.map((g) => g.heading);
     const seen = r.headings.filter((h) => order.includes(h));
     expect(seen).toEqual(order);
-    expect(r.names[0]).toBe("connect");
+    expect(r.names[0]).toBe("start");
+    expect(r.names[1]).toBe("connect");
     // Within the page: change comes before modify, check before audit, login before ingest.
     const at = (n: string) => r.names.indexOf(n);
     expect(at("change")).toBeLessThan(at("modify"));

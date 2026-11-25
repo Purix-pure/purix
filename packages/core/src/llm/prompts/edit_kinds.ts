@@ -33,6 +33,28 @@ export const MODIFY_CODE_MAX_LINES = 60;
  */
 export const MODIFY_CODE_SPEC = `Operation "modify_code" is for a plain code change that none of the other operations describes (fixing a condition, changing a literal, adding or removing a few statements). Use it only with "prompt_text", "config_value" or "tool_binding" edits: at most ${MODIFY_CODE_MAX_EDITS} edits, and no edit may replace or insert more than ${MODIFY_CODE_MAX_LINES} lines. Keep each anchor small and make sure it occurs exactly once. If the change needs more than that, choose "unclassified" with empty edits.`;
 
+/**
+ * Said to every prompt whose output becomes code in the developer's files (greenfield starter files, classification edits,
+ * repair, escalation). Evidence it is needed: gates/security_gate.ts blocks a change on Critical and High findings (SQL or
+ * shell text built from variables, run-time eval, MD5/SHA-1, pickle/yaml.load, a hardcoded secret, environment values sent
+ * over the network) and gates/manifest_delta.ts flags a dependency that comes from git, a URL or a path. Before this rule the
+ * model learned that only after a failed verification, which cost repair rounds and then a high-tier escalation call.
+ * It is written as what to do, not as a list of patterns to avoid matching: it must not read as a recipe for getting past the
+ * scan, and the scan stays the check either way.
+ */
+export const CODE_SAFETY_RULE =
+  `Code you write is security-scanned and the change is blocked if the scan objects. Build database queries with parameters and run programs with an argument list, never by joining text into a SQL or shell string. ` +
+  `Do not evaluate text as code, and do not load untrusted data with pickle or yaml.load. Use SHA-256 or stronger, not MD5 or SHA-1. ` +
+  `Never write a secret into a file: read it from an environment variable by its name, and read only the variables you need, not the whole environment. ` +
+  `Do not add or change a dependency unless the request asks for it. If it does, use only a package name you are certain exists on the registry, never a git, URL or path source.`;
+
+/**
+ * Repair and escalation only. compilePatch(..., { blockTestFileEdits: true }) rejects the whole patch when any edit targets a
+ * test file or test-runner configuration (verify/compile.ts, §E-TESTLOCK), and that counts as one of the capped attempts.
+ */
+export const TEST_LOCK_RULE =
+  `Test files and test-runner configuration are locked during repair: any edit that touches one is rejected and the attempt is wasted. Fix the code under test, never the test.`;
+
 export const EDIT_KINDS_SPEC = `
 You never write whole files. You propose small, checkable edits; a deterministic patch compiler applies them to the real files and fails loudly if an edit does not fit. Edit kinds:
 - kind "prompt_text": { path, kind, old_text, new_text }. old_text must be copied verbatim from the current file content and must occur exactly once in it.

@@ -1,6 +1,6 @@
 {
   "name": "@purix/core",
-  "version": "0.4.0-beta.4",
+  "version": "0.4.0-beta.5",
   "description": "Purix core: the classify, sandbox-verify and record-evidence pipeline behind the @purix/cli and @purix/mcp-server packages. Most people want @purix/cli.",
   "keywords": [
     "ai",
@@ -52,9 +52,17 @@
       "types": "./dist/cli-io/gated-confirm.d.ts",
       "default": "./dist/cli-io/gated-confirm.js"
     },
+    "./entrypoints/briefing": {
+      "types": "./dist/entrypoints/briefing.d.ts",
+      "default": "./dist/entrypoints/briefing.js"
+    },
     "./entrypoints/check": {
       "types": "./dist/entrypoints/check.d.ts",
       "default": "./dist/entrypoints/check.js"
+    },
+    "./entrypoints/create_plan": {
+      "types": "./dist/entrypoints/create_plan.d.ts",
+      "default": "./dist/entrypoints/create_plan.js"
     },
     "./entrypoints/ingest": {
       "types": "./dist/entrypoints/ingest.d.ts",
@@ -67,6 +75,10 @@
     "./entrypoints/modify": {
       "types": "./dist/entrypoints/modify.d.ts",
       "default": "./dist/entrypoints/modify.js"
+    },
+    "./entrypoints/modify_intent": {
+      "types": "./dist/entrypoints/modify_intent.d.ts",
+      "default": "./dist/entrypoints/modify_intent.js"
     },
     "./entrypoints/scaffold": {
       "types": "./dist/entrypoints/scaffold.d.ts",
@@ -184,22 +196,6 @@
       "types": "./dist/manifest/library.d.ts",
       "default": "./dist/manifest/library.js"
     },
-    "./manifest/similar": {
-      "types": "./dist/manifest/similar.d.ts",
-      "default": "./dist/manifest/similar.js"
-    },
-    "./entrypoints/briefing": {
-      "types": "./dist/entrypoints/briefing.d.ts",
-      "default": "./dist/entrypoints/briefing.js"
-    },
-    "./entrypoints/create_plan": {
-      "types": "./dist/entrypoints/create_plan.d.ts",
-      "default": "./dist/entrypoints/create_plan.js"
-    },
-    "./entrypoints/modify_intent": {
-      "types": "./dist/entrypoints/modify_intent.d.ts",
-      "default": "./dist/entrypoints/modify_intent.js"
-    },
     "./manifest/memory": {
       "types": "./dist/manifest/memory.d.ts",
       "default": "./dist/manifest/memory.js"
@@ -232,9 +228,53 @@
       "types": "./dist/manifest/schema.d.ts",
       "default": "./dist/manifest/schema.js"
     },
+    "./manifest/similar": {
+      "types": "./dist/manifest/similar.d.ts",
+      "default": "./dist/manifest/similar.js"
+    },
     "./manifest/store": {
       "types": "./dist/manifest/store.d.ts",
       "default": "./dist/manifest/store.js"
+    },
+    "./observe/change_context": {
+      "types": "./dist/observe/change_context.d.ts",
+      "default": "./dist/observe/change_context.js"
+    },
+    "./observe/event_lines": {
+      "types": "./dist/observe/event_lines.d.ts",
+      "default": "./dist/observe/event_lines.js"
+    },
+    "./security/dep_lookup": {
+      "types": "./dist/security/dep_lookup.d.ts",
+      "default": "./dist/security/dep_lookup.js"
+    },
+    "./security/dep_lookup_setting": {
+      "types": "./dist/security/dep_lookup_setting.d.ts",
+      "default": "./dist/security/dep_lookup_setting.js"
+    },
+    "./observe/opencode_panel": {
+      "types": "./dist/observe/opencode_panel.d.ts",
+      "default": "./dist/observe/opencode_panel.js"
+    },
+    "./observe/ledger_reader": {
+      "types": "./dist/observe/ledger_reader.d.ts",
+      "default": "./dist/observe/ledger_reader.js"
+    },
+    "./observe/ledger_version": {
+      "types": "./dist/observe/ledger_version.d.ts",
+      "default": "./dist/observe/ledger_version.js"
+    },
+    "./observe/registry": {
+      "types": "./dist/observe/registry.d.ts",
+      "default": "./dist/observe/registry.js"
+    },
+    "./observe/result_line": {
+      "types": "./dist/observe/result_line.d.ts",
+      "default": "./dist/observe/result_line.js"
+    },
+    "./observe/statusline_install": {
+      "types": "./dist/observe/statusline_install.d.ts",
+      "default": "./dist/observe/statusline_install.js"
     },
     "./platform/atomic_write": {
       "types": "./dist/platform/atomic_write.d.ts",
@@ -296,6 +336,10 @@
       "types": "./dist/security/auth.d.ts",
       "default": "./dist/security/auth.js"
     },
+    "./security/credential_guard": {
+      "types": "./dist/security/credential_guard.d.ts",
+      "default": "./dist/security/credential_guard.js"
+    },
     "./security/error_text": {
       "types": "./dist/security/error_text.d.ts",
       "default": "./dist/security/error_text.js"
@@ -311,6 +355,10 @@
     "./security/savings_sync_run": {
       "types": "./dist/security/savings_sync_run.d.ts",
       "default": "./dist/security/savings_sync_run.js"
+    },
+    "./security/secret_migration": {
+      "types": "./dist/security/secret_migration.d.ts",
+      "default": "./dist/security/secret_migration.js"
     },
     "./security/secrets": {
       "types": "./dist/security/secrets.d.ts",
@@ -328,6 +376,10 @@
       "types": "./dist/security/session.d.ts",
       "default": "./dist/security/session.js"
     },
+    "./security/user_secrets": {
+      "types": "./dist/security/user_secrets.d.ts",
+      "default": "./dist/security/user_secrets.js"
+    },
     "./state/config": {
       "types": "./dist/state/config.d.ts",
       "default": "./dist/state/config.js"
@@ -335,6 +387,10 @@
     "./state/drift": {
       "types": "./dist/state/drift.d.ts",
       "default": "./dist/state/drift.js"
+    },
+    "./state/git_common_dir": {
+      "types": "./dist/state/git_common_dir.d.ts",
+      "default": "./dist/state/git_common_dir.js"
     },
     "./state/governed_lock": {
       "types": "./dist/state/governed_lock.d.ts",
@@ -371,6 +427,10 @@
     "./state/repo_lock": {
       "types": "./dist/state/repo_lock.d.ts",
       "default": "./dist/state/repo_lock.js"
+    },
+    "./state/rework": {
+      "types": "./dist/state/rework.d.ts",
+      "default": "./dist/state/rework.js"
     },
     "./state/scheduler": {
       "types": "./dist/state/scheduler.d.ts",
@@ -470,5 +530,8 @@
     "@modelcontextprotocol/sdk": "catalog:",
     "ts-morph": "catalog:",
     "zod": "catalog:"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.2"
   }
 }

@@ -1,14 +1,14 @@
 # Privacy
 
 **Applies to:** the Purix software in this repository (`@purix/core`, `@purix/mcp-server`, `@purix/cli`), version `0.4.0-beta.x`.
-**Last updated:** 2026-11-11.
+**Last updated:** 2026-11-24.
 
 Purix runs on your own machine. This document says what the software sends off that machine, what it keeps on it, and how you control both. It was written from the code, and where the code leaves a gap it says so. If the code and this document disagree, the code is right and the document is a bug: please [open an issue](https://github.com/purix-pure/purix/issues).
 
 ## In short
 
 - Everything in this repository runs without a Purix account. No sign-in is needed to check, verify or change code.
-- Purix's own code makes network requests to only three kinds of place, all through one file (`packages/core/src/platform/net.ts`): **the model provider you choose**, **a webhook URL if you set one**, and **the Purix API if you run `purix login`**.
+- Purix's own code makes network requests to only four kinds of place, all through one file (`packages/core/src/platform/net.ts`): **the model provider you choose**, **a webhook URL if you set one**, **the Purix API if you run `purix login`**, and **package registries and OSV, only if you set `PURIX_DEP_LOOKUP`** (off by default).
 - The text of the files Purix is working on goes to your model provider. That is the main thing that leaves your machine. It does not go to Purix.
 - `purix check` makes no network request at all.
 - Usage-data sharing is **off by default**, and upload is **not part of this version**: nothing is sent whether it is on or off.
@@ -21,6 +21,7 @@ Purix runs on your own machine. This document says what the software sends off t
 | **The model provider you choose** (Anthropic, OpenAI, Gemini, or a custom OpenAI-compatible address) | Whenever Purix calls a model: classify, modify, create, repair, escalate | A prompt built from your request, the text of the files being changed, test or compiler output, a small slice of the project's own `AGENTS.md`, `CLAUDE.md` or `GEMINI.md` if one exists, and, when Purix escalates a failure, text from neighbouring components. Your provider API key, in the request header. | Files unrelated to the change. Purix does not send the whole repository. |
 | **A webhook** | Only if you set `PURIX_WEBHOOK_URL` and a signing secret, when a change is waiting for confirmation | A short JSON notice: the kind of checkpoint, the component id, and a message. It is signed with your secret. With no secret configured, nothing is sent. | Code, diffs. |
 | **The Purix API** (`https://api.purix.dev` unless you set `PURIX_API_URL`) | Only after you run `purix login` | Your email address and the one-time code you type; a random machine id and your computer's host name, so the server can list and revoke the device; session and refresh tokens; requests for your plan's entitlements; and savings records (see below). | Source code, file names, prompts, replies, git remotes. |
+| **Package registries and OSV (dependency lookup)** | Only when you set `PURIX_DEP_LOOKUP` (`all`, `registry` or `osv`), or answer yes to the one-time question at the end of `purix connect` (asked only in a terminal, never in CI, once; `purix lookup on|off|status` changes it; the stored answer is ignored in CI). Until then it is off. For a change that adds or raises a dependency in `package.json`, `requirements.txt`, `pyproject.toml` or a lockfile | The package **names** (registry check, in the request address) and the exact **names and versions** (OSV check, in one request to `api.osv.dev`). npm names go to `registry.npmjs.org`, or to the registry your project's `.npmrc` names for that package; Python names go to `pypi.org`. | File contents, headers, credentials, your project's name. A name that resolves to a private npm registry is never sent to OSV. The requests are unauthenticated, so a registry that needs a login answers with a refusal and the name is shown as "not checked". |
 | **The package registry and OSV database** | Only when you run `purix audit` | Whatever your package manager (and `pip-audit` for Python) sends for an audit. Purix runs those programs; it does not control their requests. | |
 | **Download hosts for tools** | Only when you approve `purix tools install <tool>` | A download of a pinned tool, checked against a recorded hash. | |
 
@@ -36,21 +37,25 @@ Purix scans a proposed change for secrets before it verifies it, and redacts kno
 
 When a coding agent is connected through MCP, what Purix returns to it (including repository text in results) goes to that agent and to whatever model provider the agent uses. Purix does not control that. Results that can include repository text end with a note that the text is data, not instructions.
 
+Replies for a change tool also end with one result line such as `Purix: 41 tests passed, 1 stopped, $0.03 spent, $1.97 left`. It holds counts and dollar amounts only, is at most 120 characters, and goes to the agent and its provider like the rest of the reply. `PURIX_RESULT_LINE=off` removes it.
+
 ## What Purix stores on your machine
 
 Nothing below is uploaded by Purix.
 
 | Where | What |
 |---|---|
-| `<project>/.purix/` | Configuration, the provider choice, an encrypted store of secrets you save with `purix secret set`, a notes log (`memory/log.jsonl`), locks, and the component list. Disposable files (language toolchains, caches) are under `.purix/tmp/`. |
+| `<project>/.purix/` | Configuration, the provider choice, an old encrypted store of secrets saved by earlier versions (read only until `purix secret migrate` moves it), a notes log (`memory/log.jsonl`), locks, and the component list. Disposable files (language toolchains, caches) are under `.purix/tmp/`. |
 | `<project>/.git/purix-state/` | The manifest database (components, classifications, confirmations, verification results, the audit trail), the model-call log, and the budget ledger. Because it sits inside `.git`, `clone` and `push` do not carry it. |
-| `~/.purix/` | Your session (if you signed in), the machine id, usage counts, the telemetry choice, diagnostic logs, and installed tools (`~/.purix/tools/`). |
+| `~/.purix/` | Your session (if you signed in), the machine id, usage counts, the telemetry choice, **a list of the projects Purix has run in (`projects.json`: each project's full folder path, the folder holding its record, the folder's name, first and last time Purix ran there, and the agent ids seen; no counts, file names or prompts)**, diagnostic logs, installed tools (`~/.purix/tools/`), and the credentials you save with `purix secret set` when the OS keyring is not used (an encrypted file with its own master key; with the keyring, only a list of names and dates is kept here). |
 | Your system's temporary folder | A short-lived copy of your project that a change is verified in, deleted after each run. It leaves out `.git`, `.env*`, `node_modules` and the secrets and state files under `.purix`. |
 
 Things worth knowing about these files:
 
 - **The model-call log stores no prompt or reply text.** It records sizes, tier, timing, cost, a status, and the one-word operation label the model chose. A test checks this with a marker string.
 - **The audit trail records decisions and results**, such as classifications, who confirmed a change and what was verified. It is not a copy of your prompts.
+- **The event record of each project (added in the unreleased work on showing what Purix did) also keeps, in the same database:** a change id on each event; test counts (passed, failed, skipped) and verification time; how long you took to answer an approval; the agent id; when a change stopped at the secret scan or at a Critical or High security-gate finding, the **source, the number of findings, the pattern or category names and up to 10 file paths**, never a matched value or a message; how many secrets were removed from prompts and replies and the **format names** (never the values); when `PURIX_DEP_LOOKUP` is on, per change the number of package names looked up, how many the registry did not know and which of them (up to 10 names), and which exact versions have advisories (up to 10); each `purix audit` run's counts; and your own `purix feedback` answers with the reason word. Delete the project's `purix-state/` folder to remove all of it.
+- **`purix dashboard` serves these pages from your own machine.** It listens on `127.0.0.1` only, on a random port, behind a one-time token; it answers GET requests only and makes no outbound request (a test fails if its source imports a network module other than `node:http`). It reads `projects.json` and each project's database read-only. The JSON export button downloads to your browser; nothing is uploaded. The "hide names" switch replaces project, agent, component and file names with aliases for screenshots; it does not change what is stored.
 - **The notes log can end up in your repository.** `.purix/memory/log.jsonl` is in the working tree, so it can be committed, and its notes are placed into later prompts. Known secret formats are removed from a note before it is written. Do not put anything private in a note you would not commit.
 - **Saved secrets are encrypted at rest, but the key sits next to the file.** The master key is created beside the encrypted store with owner-only permissions. That stops an accidental commit or a casual read; it does not protect against someone who can read your user folder. The OS keychain is the usual answer and is not used yet. Purix keeps these files out of version control and out of the verification copy.
 - **Diagnostic logs** in `~/.purix/logs/` hold error messages, stack traces (which can contain file paths) and the Purix version. They stay on your machine and files older than 7 days are deleted.

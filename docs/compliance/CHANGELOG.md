@@ -8,6 +8,98 @@ same version number.
 
 ## [Unreleased]
 
+### Added (open items and decisions, 2026-11-24)
+- `purix panel`: Purix line in OpenCode 1.x's sidebar (one plugin file and one `tui.json` entry; never touches what it did not write). Not checked in a live OpenCode session.
+- Dashboard: `purix check` state on each project card (background, read-only, never shown as clean when it could not run) and a per-agent split on the project page.
+- Python changed-line coverage through pytest-cov; pytest-cov is locked into the pinned pytest install.
+- `purix lookup on|off|status` and a one-time question at the end of `purix connect`; the dependency lookup stays off until a person says yes, and the stored answer is ignored in CI.
+- `docs/PR_RECEIPTS.md` (trailer plus redacted receipt; bundle on request) and `docs/BENCHMARK_PROTOCOL.md` with `scripts/benchmark-analyze.ts`.
+- The R6 guard test for the dashboard folder now also forbids network clients, dynamic imports of network modules and `require`, and allows a child process only in `check_state.ts` (`execFile`, no shell).
+
+### Added (showing what Purix did, 2026-11-24)
+- `purix receipt [changeId] [--last n] [--out file] [--redact]`: one change's receipt as Markdown for a pull request, from the local record, read-only, with the chain head to compare with the `Purix-Evidence` trailer.
+- Change receipt: "Changed lines", "Dependencies added" and "Rework risk" lines; a missing fact reads "not measured" or "not checked", never none. The verification event now stores changed-line coverage as counts (no file names).
+- Project page: a four-week trend table and a Process panel (repairs, library reuse, changed-line coverage, landed by agent, drift accepted, notes kept, approvals by kind). `/telemetry` shows what `purix telemetry show` would send.
+- Optional duplication check, `PURIX_DUPLICATION_CHECK=1`: lines of the changed files inside a repeating block of six or more lines elsewhere in the project, before and after. Local, no network, information only, never a gate.
+- `/how` no longer lists finished work as "not built yet".
+
+### Added (showing what Purix did, 2026-11-22 and 2026-11-23)
+- One local record of what Purix does, read by every surface: a result line on MCP replies (`PURIX_RESULT_LINE=off` turns it off), `purix watch`, `purix statusline`, `purix dashboard` (127.0.0.1 only, read-only), `purix feedback`, and `purix digest [--days n] [--json]`. Description: `docs/OBSERVABILITY.md`.
+- Stored per change: a change id, test counts and verification time, approval wait times, `change_landed`, plus events for secrets removed from prompts and replies (counts and format names, never values), dependency lookups, `purix audit` runs and rolled-back applies. A project registry (`projects.json`) in the user folder lists the projects Purix has run in.
+- A change stopped by the secret scan or by a Critical or High security-gate finding stores a `policy_block` event: source, finding count, categories and up to 10 paths. Never a matched value and never message text. Nothing is written in a folder that has no store.
+- `purix budget show` also says how much is left.
+- The dashboard's Security panel lists what the scans look for, including the advisory scan that `purix modify` runs (rate limiting, input validation, `eval`). A test reads the scanner source files and fails when a category exists there that the list does not name.
+- `purix digest` reads the same record as the dashboard. It takes no repository lock, so a change in progress does not stop it. Invalid `--days` exits 2.
+
+### Added (2026-11-24)
+- `purix statusline --install | --uninstall | --status [--shared|--user]`: adds or removes Claude Code's `statusLine` entry that runs `purix statusline`. It never replaces a status line that is not Purix's, keeps every other setting, and refuses a settings file that is not valid JSON.
+- Change receipt (dashboard): a "Dependencies added" line and a "Rework risk" line. Each says "not recorded" or "too recent to judge" instead of "none" when the record cannot say.
+- `purix digest` says when the record does not cover the period before (the date the record starts), and prints no "the period before" figure when the record starts inside the current period. `--json` carries `firstEventAt`.
+- The result line is capped at 120 characters; the least urgent parts are dropped first.
+
+### Changed (what the software sends or stores, 2026-11-24)
+- `PRIVACY.md` now lists the dependency lookup (`PURIX_DEP_LOOKUP`, off by default) as a fourth place Purix can send package names, says what it sends and to which hosts, and describes the project list `projects.json`, the new event fields stored per project, the result line and the local dashboard. The code already did all of this; the document had said "three kinds of place" and "only when you run `purix audit`".
+
+### Fixed
+- `BETA_SCOPE.md` no longer says the free tier enforces 25 components; `licensing/tier.ts` has had no free-tier cap since 2026-11-02.
+- `docs/OBSERVABILITY.md` listed built features as "not built yet".
+- The CLI test suite no longer writes `projects.json` and the usage ledger into the real user folder (`PURIX_USER_DIR` is set to a temporary folder for the run).
+
+### Not done
+- OpenCode sidebar panel, changed-line coverage, an optional duplication check, pull-request receipts, and a benchmark mode. All of it was run only on Linux, Node 22, with no real model; nothing on Windows or macOS.
+
+## [0.4.0-beta.5]
+
+### Added (`purix start`, 2026-11-21)
+- `purix start` is a guided first-run setup for a person at a terminal: choose the model provider, paste Purix's own API key at a hidden prompt, check it with one tiny request, and connect a coding agent (it runs `purix connect`, so detection and the hook offer are the same). It does not index the project and it does not touch the coding agent's own login. Decisions and evidence: `docs/research/PURIX-RESEARCH-KEY-MANAGEMENT-AND-START-2026-11-21.md`.
+- `purix start` refuses to run without a terminal (stdin and stdout) and is human-only in the hook rules, because it asks for a key and decides which provider and key Purix uses.
+- The provider choice can now be kept per user: `purix start` saves a default in the user folder (`provider-default.json`), so one setup covers every folder, including an MCP server an agent starts in a folder of its own choosing. Lookup order: the `PURIX_LLM_PROVIDER` variable, then the project's own `provider-config.json`, then this default. A custom endpoint is never kept there; it stays a per-project choice behind `purix provider trust`.
+- If the key is in the environment, `purix start` offers to save a copy in the user-level store, because apps started outside a terminal often do not see shell variables.
+- The "No LLM provider is configured" and "API key isn't available" messages now name `purix start` first. `purix start` replaces the old "There is no start step" hint.
+- Not done: nothing here has run on Windows or macOS, with a real OS keyring, or with a key the provider accepts (the key check was exercised against a real provider with a made-up key, which it rejected). Linux desktop behaviour of the keyring inside an agent-started MCP server is untested (research note, open item P1).
+
+### Changed (one credential store per user, 2026-11-21)
+- `purix secret set`, `rotate` and `remove` now work on one store per person, found from the user folder and not from the folder a command runs in. A key saved in one folder is found from every folder. The store is the OS keyring (Windows Credential Manager, macOS Keychain, Linux Secret Service) through the optional package `@napi-rs/keyring`, with an encrypted file in `~/.purix` as a fallback that is announced each time it is used. On Linux the keyring is used only when a desktop session bus is present, and every keyring write is read back before it counts as stored. `PURIX_SECRET_BACKEND=file|keyring|auto` overrides this.
+- A key is now looked up in the environment (including `.env`) first, then the user-level store, then this folder's old store. Before, a stored key beat the environment, so an old stored key hid a good environment key. `purix provider status`, `purix secret status` and the "key refused" note name the place the key came from and say when another place holds a different value that was not used.
+- `purix secret migrate` copies keys from this folder's old store into the user-level store. It asks before copying and before removing an old copy, never overwrites a different key, and needs a person at a terminal. It is human-only in the hook rules.
+- The hook rules refuse an agent's shell command or `mcp__` file tool that names a credential file or reads the OS keyring (rule `secret-read`), and any write into the user-level Purix folder. Claude Code's built-in `Read` tool is not in the registered hook matcher and is not covered.
+- An old per-folder key store is now found from the folder it was saved in and from every folder below it (the nearest one wins). Before, only the exact folder Purix was run in was read, so a key saved in a project root was "not found" from its subfolders. `purix secret status` and the migration notice name the store's real location.
+- The hook rule also refuses a shell command that names a credential file by its file name (`secrets.master.key`, `secrets.enc.json`, `user-secrets.enc.json`, `user-secrets.master.key`, `session.enc`) in any folder, such as another project's old store. Still a text check on the command, not a wall.
+- In `auto` mode the real OS keyring is not used when `NODE_ENV=test`, when `CI` is set, or when `PURIX_USER_DIR` points Purix at a specific folder, so a test run cannot write into a developer's Credential Manager or Keychain. `PURIX_SECRET_BACKEND=keyring` still forces it.
+
+### Changed (plain-language `purix check`, 2026-11-21)
+- Every drift failure in `purix check` now ends with what to do. A deleted file says to restore it from version control, or to run `purix migration accept-drift <id>` yourself in a terminal if the deletion was intended; an edited file says to review it, then accept or revert. A next step shared by several items (for example `purix adopt` for five files an agent wrote) is printed once under the group, not once per file. `purix check --json` items gain an optional `next` field.
+- The note for a file an agent wrote outside Purix no longer uses Purix's internal term "component": it says `written by an agent (<name>); not governed by Purix, so Purix did not verify it`.
+- The drift warning in `purix modify` and the related commands now says when files are missing from disk instead of claiming someone edited them.
+- `purix doctor` is not a command; the error now suggests `purix hooks doctor`.
+
+### Fixed (approver and prompt messages, 2026-11-21)
+- A question that nobody could answer (an agent's shell, a pipe, CI) was reported as "Bootstrap declined" or "Cancelled", as if a person had said no. The text now says no input was available, that nothing was changed, and what to do: run `purix approve --register` once in your own terminal, and use the `purix_create` / `purix_modify` MCP tools with `purix approve` for later changes.
+- A webhook secret stored the documented way (`purix secret set PURIX_WEBHOOK_SECRET`) was never read, because the sender looked for the lowercase name `purix_webhook_secret`. It now reads the documented name and still accepts the old one.
+
+### Fixed (credentials and dry-run findings, 2026-11-20)
+- `purix secret set`, `rotate` and `remove` follow one rule set (`security/credential_guard.ts`): only names Purix reads are accepted, an already-stored name is refused (use `rotate`), a stored key that differs from the environment variable is refused, and a pasted value with spaces, wrapping quotes, line breaks or control characters is refused before it is stored. A provider error that suggests a bad key now says which copy was sent (stored or environment). `secret status` and `provider status` show the store location and warn about dead entries and conflicts. `purix secret set|rotate|remove` is human-only in the hook rules.
+- The hidden key prompt skips terminal escape sequences, including bracketed-paste markers, so a pasted key no longer carries `[200~` or `[A` into the stored value, and it prints how many characters arrived (never the key). Reproduced on Linux with simulated input only; a Windows terminal still needs a manual check.
+- `purix provider status` prints which credential store it read (superseded 2026-11-21: the store is now per user, not per folder).
+- The refusal for an `unclassified` change now says what happened and how to rephrase (name the file and the intended behaviour, or split the request), instead of "cannot be applied automatically yet".
+- The write-blocking secret scan no longer blocks the four credentials that AWS prints in its own documentation (`AKIAIOSFODNN7EXAMPLE`, `AKIAI44QH8DHBEXAMPLE` and their secret keys), matched exactly. The redaction path still redacts them, and a real-looking key on the same line still blocks.
+- The advisory `dangerous_eval` finding no longer fires on `eval(` written in a comment or a string, or on a method that is only named `eval` (`redis.eval(`, `model.eval()`); `window.eval(`, `globalThis.eval(`, a bare `eval(` and `new Function(` still do.
+
+### Fixed
+- `purix index` read symbols with one regex over raw text (problem register 2026-11-20, items 2 to 5; reproduced on 0.4.0-beta.4 by probes IDX-01 to IDX-06). On Purix's own source that made 352 of 1,845 TypeScript entries false (text inside comments and strings, mostly fixtures in test files), 87 (name, file) pairs duplicated, and all 346 symbols in test files "reusable". The extractor is now `manifest/index_extract.ts`: the TypeScript compiler's own parser for TypeScript and JavaScript, and a string- and comment-aware scanner for Python. Measured on the same source: 0 duplicate pairs, 0 reusable entries in test files, 1,961 components (was 2,201).
+- The index now records `export default`, `export enum`, `export abstract class`, `export namespace`, `export { a, b as c }`, `export * as ns`, re-exports with a name, `export var`, and the public methods of an exported class (`Class.method`, TypeScript and Python). Private, protected and `#private` members, Python names starting with `_`, and `export * from` (which names nothing) are not recorded.
+- A symbol's `signature` now carries parameters, generics, heritage and return type (`export function real(a: number, b: string): boolean`), cut at 300 characters. A constant's initialiser is never copied, so a value that is a secret cannot land in `components.json`; a function-valued constant keeps its parameters and return type.
+- `reusable` now means what the indexer can check: the symbol is exported and its file is not a test file (the same `isTestPath` and `isPythonTestPath` rules the verifier uses). The field keeps its name: renaming it needs a manifest migration, and who owns `manifest/` is an open ruling (D-l).
+- `purix index` said only "N file(s) ... left out". It now says which file types (`Left out by type: 90 .json, 60 .md ...`), and `purix index --list-skipped` lists every file. The result carries `unsupportedFiles`; the MCP `purix_index` result carries `unsupportedByExtension` instead of hundreds of paths.
+- `purix status --detail full` and `purix status --json` were "unknown option". Both now print every manifest entry as JSON, the same text the MCP tool `purix_status` returns for detail "full". `--detail concise` and the default are unchanged. A bad level, or `--json` with `--detail concise`, exits 2 (invalid usage).
+
+### Changed
+- The note `purix connect` writes into an agent's instruction file now names every tool the server offers (purix_create, purix_adopt, purix_remember, purix_ingest and the tool broker were missing), says to keep each change small, and tells an agent to call again with `componentId` when several components match. The model prompts and their golden file were aligned with the same set (`purix-llm-alignment.patch`, applied as given).
+
+### Known, not changed
+- The index still records no import edges between files (register item 1). Storing them changes the manifest, which is under the open ruling D-l, and the register's own research (RepoGraph, ICLR 2025) measured a different, line-level graph on Python repositories, so it is not evidence for a Purix design. It needs that ruling and a `purix eval` before and after.
+- `rationale` stays empty and every entry stays `pending` at index time (register item 6, probe IDX-08). Verifying each file at index time cost about 1.5 s per file, which is why it was removed; the indexer header says so. `purix index --why` does not exist.
+
 ## [0.4.0-beta.4]
 
 ### Changed

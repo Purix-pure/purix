@@ -123,7 +123,7 @@ describe("verifyInSandbox with the parse check", () => {
 
   it("policy blocks keep precedence over the parse check", () => {
     put("a.ts", "export const a = 1;\n");
-    const secret = "export const k = 'AKIAIOSFODNN7EXAMPLE'; const = ;\n";
+    const secret = "export const k = 'AKIAIOSFODNN7EXAMPLX'; const = ;\n";
     const r = verifyInSandbox("comp-x", [{ path: "a.ts", new_content: secret }], dir, "typescript");
     expect(r.status).toBe("fail");
     if (r.status === "fail") expect(r.policyBlock).toBe(true);

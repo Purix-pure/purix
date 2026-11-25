@@ -8,7 +8,7 @@
 //   R3 no ".purix" path text outside platform/layout.ts   (one place for state paths)
 //   R4 no process.env outside platform/env.ts      (one place for environment variables)
 //   R5 no writeFileSync / renameSync outside platform/atomic_write.ts   (one place that writes state files)
-//   R8 no node:child_process import in core, except the OpenCode plugin text in hooks/install.ts (one spawn point: platform/spawn_sync.ts,
+//   R8 no node:child_process import in core, except the OpenCode plugin text in hooks/install.ts and observe/opencode_panel_source.ts (one spawn point: platform/spawn_sync.ts,
 //      which carries the deadline, the output cap and the stop marker; a direct spawnSync gets none of them. Zero tolerated)
 //   R7 the words "not tested" are written in verify/outcome.ts only (one wording for every front door, zero tolerated)
 //   R6 no network-capable import (an SDK or node:http/https/tls/dgram) anywhere in core, cli or mcp-server, except
@@ -56,7 +56,9 @@ export const RULES: Rule[] = [
     id: "R6",
     describe: "network-capable import outside platform/net.ts (an SDK or node:http, https, tls, dgram; use netFetch)",
     pattern: /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:@google\/genai|@google-cloud\/[\w-]+|@anthropic-ai\/sdk|openai|axios|node-fetch|undici|got|superagent|ws|node:https?|https?|node:tls|tls|node:dgram|dgram|node:http2|http2)["']/g,
-    exempt: (p) => p === "platform/net.ts",
+    // @cli/cli/dashboard/server.ts is the one inbound listener: `purix dashboard` binds 127.0.0.1 only, serves GET and HEAD from local records,
+    // and makes no outbound request, so the reason for this rule (every outbound call goes through netFetch) does not apply to it.
+    exempt: (p) => p === "platform/net.ts" || p === "@cli/cli/dashboard/server.ts",
     allPackages: true,
   },
   {
@@ -72,7 +74,8 @@ export const RULES: Rule[] = [
     pattern: /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:node:)?child_process["']/g,
     // hooks/install.ts holds the source text of the OpenCode plugin. That text is written to disk and runs inside OpenCode, a
     // separate process that cannot import Purix, so it is not a spawn made by Purix. The scanner keeps template text, hence this exemption.
-    exempt: (p) => p === "hooks/install.ts",
+    // observe/opencode_panel_source.ts is the same kind of text (the sidebar panel plugin); it is only ever written to a file for OpenCode to load.
+    exempt: (p) => p === "hooks/install.ts" || p === "observe/opencode_panel_source.ts",
   },
 ];
 

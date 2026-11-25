@@ -7,7 +7,7 @@ export const PYTHON_GOLDEN_CORPUS = [
   { name: "clean python code", code: "def add(a: int, b: int) -> int:\n    return a + b\n", shouldBlock: false },
   { name: "sql injection via f-string", code: 'cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")\n', shouldBlock: true },
   { name: "weak md5 hash", code: 'h = hashlib.md5(data.encode()).hexdigest()\n', shouldBlock: true },
-  { name: "hardcoded aws key", code: 'AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"\n', shouldBlock: true },
+  { name: "hardcoded aws key", code: 'AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLX"\n', shouldBlock: true },
   { name: "insecure pickle load", code: 'data = pickle.loads(payload)\n', shouldBlock: true },
 ];
 

@@ -27,7 +27,7 @@ afterEach(() => {
 describe("resolveVerification: policy blocks", () => {
   it("returns the secret-scan reason directly and never enters healing or escalation", async () => {
     const original = [{ path: "src/a.ts", content: "export const a = 1;\n" }];
-    const candidate = [{ path: "src/a.ts", new_content: 'export const a = "AKIAIOSFODNN7EXAMPLE";\n' }];
+    const candidate = [{ path: "src/a.ts", new_content: 'export const a = "AKIAIOSFODNN7EXAMPLX";\n' }];
     // No LLM provider is configured in this test. If the code tried healing or
     // escalation it would fail with a provider error, not with the scan reason.
     const result = await resolveVerification("a", "update_prompt_text", original, candidate, "direct_patch", "x", dir);

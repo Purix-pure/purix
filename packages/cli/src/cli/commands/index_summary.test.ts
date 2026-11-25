@@ -26,4 +26,23 @@ describe("indexSummaryLines", () => {
     const git = indexSummaryLines({ componentCount: 1, fileCount: 1, unsupportedFileCount: 0, fileListSource: "git" }).join("\n");
     expect(git).not.toContain("folder walk");
   });
+
+  it("says which file types were left out, biggest group first, and where the full list is (register item 7)", () => {
+    const files = ["a.json", "b.json", "c.json", "d.md", "e.md", "run.go"];
+    const text = indexSummaryLines({ componentCount: 1, fileCount: 1, unsupportedFileCount: files.length, unsupportedFiles: files }).join("\n");
+    expect(text).toContain("Left out by type: 3 .json, 2 .md, 1 .go.");
+    expect(text).toContain("purix index --list-skipped");
+    expect(text).not.toContain("a.json");
+  });
+  it("lists every left-out file with --list-skipped, and stops pointing at the flag", () => {
+    const files = ["a.json", "docs/d.md"];
+    const text = indexSummaryLines({ componentCount: 1, fileCount: 1, unsupportedFileCount: 2, unsupportedFiles: files }, { listSkipped: true }).join("\n");
+    expect(text).toContain("     a.json");
+    expect(text).toContain("     docs/d.md");
+    expect(text).not.toContain("--list-skipped");
+  });
+  it("caps the type list at eight and says how many more", () => {
+    const files = Array.from({ length: 10 }, (_, i) => `f.ext${i}`);
+    expect(indexSummaryLines({ componentCount: 1, fileCount: 1, unsupportedFileCount: 10, unsupportedFiles: files }).join("\n")).toContain("and 2 more type(s)");
+  });
 });

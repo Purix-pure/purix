@@ -8,7 +8,7 @@ Release 1 is published as **0.4.0-beta.x** under the npm `beta` tag. What a user
 
 A command-line tool and an MCP server that run on your own machine. Apache 2.0. Everything in this repository runs without a Purix account. Sign-in, billing, team features and the hosted API are not part of Release 1.
 
-In this snapshot the client still enforces a limit of 25 tracked components on the free tier, and there is no way to pay to lift it yet. Treat that limit as a known rough edge until it is changed.
+There is no limit on tracked components in Release 1: the free tier has none (changed 2026-11-02, since there is no way to pay). The client would still honour a limit sent by a server (`flags.componentLimit`); the hosted API is not part of Release 1. Earlier release notes (0.4.0-beta.0) mention a limit of 25; that no longer applies.
 
 ## Languages
 

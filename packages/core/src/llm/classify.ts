@@ -17,6 +17,8 @@ import { loadContextConfig } from "./context/config.js";
 import { buildRepairFilesBlock } from "./context/failure_windows.js";
 import { sanitizeAndRecord } from "./input_scan.js";
 import { scrubOutboundPrompt, scrubOutboundText } from "../security/outbound_scrub.js";
+import { recordEvent } from "../manifest/events.js";
+import { storeExists } from "../manifest/store.js";
 import type { FailureLocation } from "../verify/failure_shape.js";
 import { OPERATIONS } from "./prompts/edit_kinds.js";
 import {
@@ -81,7 +83,9 @@ export async function callLlm(
     // A7-1: the one place text leaves for a provider. Known secret formats are redacted on the way out (component files,
     // the instruction, the rejected reply of a format re-ask, anything a caller put in the prompt) and on the way back.
     // promptChars below stays the size of what the caller built, so the call log is unchanged.
-    const outbound = scrubOutboundPrompt(prompt).prompt;
+    const scrubbedOut = scrubOutboundPrompt(prompt);
+    const outbound = scrubbedOut.prompt;
+    if (scrubbedOut.count > 0 && storeExists()) recordEvent("secrets_scrubbed", { operation: callType, detail: { direction: "outbound", count: scrubbedOut.count, formats: scrubbedOut.formats } });
     const result = typeof outbound === "string"
       ? await provider.generate(outbound, tier)
       : await provider.generate(outbound.user, tier, outbound.system);
@@ -101,7 +105,9 @@ export async function callLlm(
       recordSavings(savingsContext.call, savingsContext.decision, result.usage, provider.id);
     }
     recordCircuitSuccess();
-    return scrubOutboundText(result.text ?? "").text;
+    const scrubbedIn = scrubOutboundText(result.text ?? "");
+    if (scrubbedIn.count > 0 && storeExists()) recordEvent("secrets_scrubbed", { operation: callType, detail: { direction: "inbound", count: scrubbedIn.count, formats: scrubbedIn.formats } });
+    return scrubbedIn.text;
   } catch (err: any) {
     // BUG FIX (GAPS-REPORT-2 §2): assertBudgetAvailable() reserves
     // estimatedCost into total_spent_usd at the top of THIS invocation —
@@ -542,4 +548,20 @@ export async function classifyRepair(
   // AI-05: repair goes through the router, default low (as before), so which tier repair should run on can be measured.
   const decision = routeTier("repair");
   return callJson(prompt, RepairResultSchema, "repair", "repair", { tier: decision.tier, savingsContext: { call: "repair", decision } });
+}
+
+/**
+ * One tiny request to find out whether the configured provider accepts the configured key (`purix start`). It lives here because this
+ * is the file that talks to providers (ADR-061). It is deliberately NOT callLlm: no retry (a wrong key should fail once, at once), no
+ * circuit-breaker or budget bookkeeping, and no call-log row, so it writes no state in the folder it runs from. The prompt is fixed and
+ * contains nothing from the person's project. Provider error text is already sanitized by the adapters (keys and tokens redacted).
+ */
+export async function probeProviderKey(providerId?: string): Promise<{ ok: true; provider: string; model: string } | { ok: false; message: string }> {
+  try {
+    const provider = getProvider(providerId);
+    await provider.generate("Reply with the single word: ok", "low");
+    return { ok: true, provider: provider.id, model: modelName(provider, "low") };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
 }

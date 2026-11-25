@@ -76,7 +76,9 @@ the flat files stay where every command already expects them.
   exclude `.purix` completely.
 - `secrets.master.key` sits beside `secrets.enc.json`, so the encryption protects nothing against
   anyone who can read the folder. `ensureSecretFilesGitignored` stops accidental commits only.
-  The OS keychain is the usual answer.
+  The OS keychain is the usual answer. (2026-11-21: `purix secret set` now writes to the OS keyring through
+  `security/user_secrets.ts` and falls back to an encrypted file in `~/.purix` only where the keyring cannot be used; the
+  per-folder file above is the old store, read as a last resort until `purix secret migrate`.)
 
 ---
 

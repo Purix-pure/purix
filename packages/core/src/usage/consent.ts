@@ -5,12 +5,11 @@
 // uploads. The state lives in the user directory (~/.purix), not the
 // project, and is keyed by a random install id, never by account or email.
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readJsonFile, writeJsonAtomic } from "../platform/atomic_write.js";
-import { envSnapshot, purixEnv } from "../platform/env.js";
-import { purixDir } from "../platform/layout.js";
+import { envSnapshot } from "../platform/env.js";
+import { userDir } from "../platform/user_dir.js";
 
 export type ConsentState = "unset" | "on" | "off";
 
@@ -24,7 +23,7 @@ export interface TelemetryFile {
 }
 
 export function userStateDir(): string {
-  return purixEnv("PURIX_USER_DIR") ?? purixDir(homedir());
+  return userDir();
 }
 
 function statePath(dir: string): string {

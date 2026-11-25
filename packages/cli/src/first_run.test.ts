@@ -66,6 +66,16 @@ describe("orientation for a new user", () => {
     });
   });
 
+  it("`purix doctor` is not a command, and the error points at `purix hooks doctor`", () => {
+    inFreshFolder((dir) => {
+      const r = run(["doctor"], dir);
+      expect(r.status).toBe(2);
+      expect(r.output).toContain("unknown command 'doctor'");
+      expect(r.output).toContain('Did you mean "purix hooks doctor"?');
+      expect(readdirSync(dir)).toEqual([]);
+    });
+  });
+
   it("any other unknown command points at the help page", () => {
     inFreshFolder((dir) => {
       const r = run(["frobnicate"], dir);

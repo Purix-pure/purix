@@ -70,7 +70,8 @@ describe("approval through a real MCP client", () => {
     const { client, server, asked } = await connect(true, () => ({ action: "accept", content: { approve: true } }));
     const res = (await client.callTool({ name: "purix_index", arguments: { full: true } })) as { content: { text: string }[] };
     expect(asked.length).toBe(1);
-    expect(asked[0]).toContain("full codebase re-index");
+    expect(asked[0]).toContain("re-scan the whole project");
+    expect(asked[0]).not.toContain("unidentified-agent");
     expect(res.content[0]!.text).toContain("fileCount");
     await client.close();
     await server.close();

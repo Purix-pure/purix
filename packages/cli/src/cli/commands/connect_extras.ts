@@ -18,8 +18,11 @@ export const INSTRUCTION_BODY = [
   "",
   "Purix checks and records changes to tracked code. Use it instead of editing tracked files directly.",
   "",
-  "- To change tracked code, call `purix_change` (plain-language intent) or `purix_modify` (known component id).",
+  "- To change tracked code, call `purix_change` (plain-language intent) or `purix_modify` (known component id). Keep each call small and about one thing: a change too large for a few small edits is refused, so split it. Add `dryRun: true` to see the diff first. If several components match, nothing runs: call again with `componentId`.",
   "- `purix_status` lists tracked components; `purix_find` locates one.",
+  "- A new component: `purix_create`. A file Purix indexed but does not track can be edited directly, and the edit is listed by `purix check`; to bring it under Purix, call `purix_index`, then `purix_adopt` (a person approves).",
+  "- `purix_remember` saves one convention a later change must follow (one plain statement); Purix shows it to later creates and modifies.",
+  "- `purix_ingest` verifies a diff file another tool produced against a tracked component and commits it if it passes. `purix_tools_plan` shows which checkers the project needs; `purix_tools_request_install` asks for one (a person approves).",
   "- If a call returns a request id, a person must approve it: tell them to run `purix approve <id>` in their own terminal, then check `purix_approval_status`. You cannot approve it yourself, so do not retry in a loop.",
   "- A Purix result says what it covered. A pass means those checks passed; it does not mean the code is correct or safe.",
 ].join("\n");
@@ -208,4 +211,24 @@ export async function checkServerStarts(opts: { timeoutMs?: number; execPath?: s
       /* best effort */
     }
   }
+}
+
+export interface LookupOfferDeps {
+  interactive: boolean;
+  /** Already decided (a stored answer exists) or the variable is deciding. */
+  alreadyDecided: boolean;
+  disclosure: string;
+  ask: (question: string) => Promise<boolean>;
+  save: (state: "on" | "off") => void;
+  print: (line: string) => void;
+}
+
+/** The one-time question about looking up added packages. Asked once, only when a person can answer; "no" is remembered too, so it is not asked again. */
+export async function offerLookup(d: LookupOfferDeps): Promise<"asked-on" | "asked-off" | "skipped"> {
+  if (!d.interactive || d.alreadyDecided) return "skipped";
+  d.print(`\n${d.disclosure}`);
+  const yes = await d.ask("Turn the package check on?");
+  d.save(yes ? "on" : "off");
+  d.print(yes ? "Package check is on. `purix lookup off` turns it off." : "Package check stays off. `purix lookup on` turns it on later.");
+  return yes ? "asked-on" : "asked-off";
 }

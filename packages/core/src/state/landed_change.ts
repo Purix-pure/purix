@@ -10,6 +10,8 @@
 import { appendAuditRecord } from "../security/audit_tamper_evidence.js";
 import { readStoreSnapshot } from "../manifest/store.js";
 import { refreshLockIfPresent } from "./governed_lock.js";
+import { recordEvent } from "../manifest/events.js";
+import { LEDGER_SCHEMA_VERSION } from "../observe/ledger_version.js";
 
 export type LandedChangeKind = "create" | "modify" | "ingest" | "adopt" | "delete" | "accept_drift";
 
@@ -46,6 +48,8 @@ export function recordLandedChange(change: LandedChange, baseDir: string = proce
       source: change.source ?? null,
     });
     audited = true;
+    // The closing line of a change's record in the event stream (carries the change id). Identifiers only, like the chain record.
+    recordEvent("change_landed", { component_id: change.component_id, operation: change.operation ?? null, detail: { schema: LEDGER_SCHEMA_VERSION, kind: change.kind, version: change.version ?? null, source: change.source ?? null } });
   } catch (err) {
     problems.push(`could not append to the audit chain: ${err instanceof Error ? err.message : String(err)}`);
   }

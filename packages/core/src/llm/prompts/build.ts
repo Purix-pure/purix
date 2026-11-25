@@ -13,7 +13,7 @@
 // Nothing in here refers to internal document section numbers ("Node 3b", "§9.3"):
 // the model cannot read them, so they were only wasted tokens and confusing labels.
 import { dataBlock, newTag, DATA_RULE, JSON_RULE, type PromptPair } from "./frames.js";
-import { EDIT_KINDS_SPEC, MODIFY_CODE_SPEC, OPERATIONS } from "./edit_kinds.js";
+import { CODE_SAFETY_RULE, EDIT_KINDS_SPEC, MODIFY_CODE_SPEC, OPERATIONS, TEST_LOCK_RULE } from "./edit_kinds.js";
 
 const TAXONOMY = OPERATIONS.join(", ");
 // AI-15a: "modify_code" is offered where a developer's request is turned into edits (classification, escalation). The prompt for an
@@ -62,6 +62,7 @@ export function greenfieldPrompt(i: {
       ...(known.length > 0 ? [`depends_on may contain only ids from the list of existing component ids in the user message. Do not invent an id. Use [] when no existing component is genuinely needed.`] : []),
       ...(conventions.length > 0 ? [`Follow the project conventions listed in the user message unless the request clearly asks otherwise.`] : []),
       i.testGuidance,
+      CODE_SAFETY_RULE,
       DATA_RULE,
       JSON_RULE,
       `Format: { "component_id": string, "component_type": string, "files": [{ "path": string, "purpose": string, "starter_content": string }], "depends_on": string[] }`,
@@ -135,6 +136,7 @@ export function classifyPrompt(i: {
       EDIT_KINDS_SPEC,
       `Which edits go with which operation: update_prompt_text -> "prompt_text" edits; update_config_value -> "config_value" edits; swap_tool_binding -> "tool_binding" edits; add_error_handling -> "error_handling" edits; change_control_flow -> "control_flow" edits; modify_code -> "prompt_text", "config_value" or "tool_binding" edits. For any other operation return an empty edits array. If you cannot propose a safe, exact edit, choose "unclassified" with empty edits instead of guessing.`,
       MODIFY_CODE_SPEC,
+      CODE_SAFETY_RULE,
       ...(i.neighborFiles ? [`Files of neighbouring components (ones this component depends on, and ones that depend on it) are given as read-only context so you can judge "contract_changing" with its callers in view. Never propose an edit to them: edits apply only to this component's own files.`] : []),
       DATA_RULE,
       JSON_RULE,
@@ -194,6 +196,8 @@ export function repairPrompt(i: { componentId: string; operation: string; files:
     system: [
       `You are the repair step of a code-modification tool. A patch for a component failed verification (compile, tests, idiom or security check). Propose the smallest fix that makes the failure go away without changing what the patch set out to do.`,
       EDIT_KINDS_SPEC,
+      CODE_SAFETY_RULE,
+      TEST_LOCK_RULE,
       `Edits must match the CURRENT content of the files shown, not the original. If the failure cannot be fixed with these edit kinds, return an empty edits array and say why in "reasoning"; do not force a fix into a kind that does not apply. If a fix would address only some of the symptoms, still prefer the minimal correct fix over a broad guess. Never weaken or delete a test to make it pass.`,
       DATA_RULE,
       JSON_RULE,
@@ -224,6 +228,8 @@ export function escalatePrompt(i: {
       `You are the escalation step of a code-modification tool. You run only after the standard patch path and capped self-healing both failed, or because the operation "${i.operation}" has no deterministic transform yet (a real capability gap).`,
       `Propose edits to the files marked as the edit target so that the developer's request is met and the last failure is resolved. Other components' files are read-only context for understanding dependencies; never propose edits to them.`,
       EDIT_KINDS_SPEC,
+      CODE_SAFETY_RULE,
+      TEST_LOCK_RULE,
       `If none of the edit kinds can express the needed fix, that is a genuine capability gap: set "is_new_capability" to true, explain the gap in "reasoning", and return no edits rather than forcing a fix into a kind that does not apply. Also set "is_new_capability" to true if this kind of task is not one the standard operations (${TAXONOMY}) already cover.`,
       DATA_RULE,
       JSON_RULE,

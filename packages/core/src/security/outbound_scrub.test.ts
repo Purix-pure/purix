@@ -8,7 +8,7 @@ const AWS = "AKIAIOSFODNN7EXAMPLE";
 describe("scrubOutboundText", () => {
   it("returns clean text unchanged and counts nothing", () => {
     const t = "rename the function foo to bar in src/a.ts";
-    expect(scrubOutboundText(t)).toEqual({ text: t, count: 0 });
+    expect(scrubOutboundText(t)).toEqual({ text: t, count: 0, formats: {} });
   });
 
   it("redacts a known token and says how many", () => {
@@ -45,7 +45,7 @@ describe("scrubOutboundText: unquoted passwords", () => {
 
   it("leaves placeholders, plain words, numbers and names alone", () => {
     for (const c of ["DB_PASSWORD=${DB_PASSWORD}", "password=changeme", "PASSWORD=123456789", "password_hash=<hash>", "password: %s", "the password field is required", "passwd = readSecret2(env)", "password = req.body.pass1"]) {
-      expect(scrubOutboundText(c)).toEqual({ text: c, count: 0 });
+      expect(scrubOutboundText(c)).toEqual({ text: c, count: 0, formats: {} });
     }
   });
 });
@@ -93,4 +93,25 @@ describe("scrubOutboundText on shapes built to make a regex backtrack", () => {
       expect(Date.now() - t0).toBeLessThan(6000);
     });
   }
+});
+
+describe("scrubOutboundText: formats", () => {
+  it("names the format that was redacted and how many, never the value", () => {
+    const r = scrubOutboundText(`const k = "${AWS}";\nconst j = "${AWS}";`);
+    const total = Object.values(r.formats).reduce((a, b) => a + b, 0);
+    expect(total).toBe(r.count);
+    expect(JSON.stringify(r.formats)).not.toContain(AWS);
+  });
+
+  it("counts nothing for text that arrives already redacted", () => {
+    const r = scrubOutboundText("token is [REDACTED:high-entropy] here");
+    expect(r.count).toBe(0);
+    expect(r.formats).toEqual({});
+  });
+
+  it("merges the system and user parts of a prompt pair", () => {
+    const r = scrubOutboundPrompt({ system: `k="${AWS}"`, user: `j="${AWS}"` });
+    expect(r.count).toBe(2);
+    expect(Object.values(r.formats).reduce((a, b) => a + b, 0)).toBe(2);
+  });
 });

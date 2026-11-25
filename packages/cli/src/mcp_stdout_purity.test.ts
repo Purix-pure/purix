@@ -69,7 +69,7 @@ const call = (id: number, name: string, args: object = {}) => ({ jsonrpc: "2.0",
 
 describe("MCP server stdout carries only protocol messages", { timeout: 60_000 }, () => {
   it("every stdout line is a JSON-RPC 2.0 message: startup, tool listing, and overlapping tool calls", async () => {
-    assert.ok(existsSync(CLI), `build first: ${CLI} is missing (the test drives the built artifact, not the sources)`);
+    assert.ok(existsSync(CLI), `${CLI} is missing: this test drives the built CLI, not the sources. Run \`pnpm build\` at the repository root, or run the tests with \`pnpm test\` from the root (it builds first).`);
     const dir = mkdtempSync(join(tmpdir(), "purix-mcp-purity-"));
     try {
       const run = await runServer(

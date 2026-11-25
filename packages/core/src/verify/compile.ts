@@ -117,6 +117,14 @@ export function compilePatch(
   currentFiles: { path: string; content: string }[],
   opts: CompilePatchOptions = {}
 ): CompileResult {
+  if (verdict.operation === "unclassified") {
+    // The classifier would not guess. The prefix is kept because recovery/classify_and_compile.ts reads it to skip a pointless re-ask.
+    return {
+      ok: false,
+      reason: `operation "unclassified" cannot be applied automatically, so nothing was changed. The classifier could not match the request to one kind of change (a prompt text, a config value, a tool binding, error handling, control flow, or a small code edit) with enough confidence, and Purix does not guess. Run it again naming the file and what it should do after the change (for example: "in src/gate.ts, return false when the input is empty"), or split the request into one change per run.`,
+    };
+  }
+
   if (!WIRED_UP_OPERATIONS.has(verdict.operation)) {
     return {
       ok: false,

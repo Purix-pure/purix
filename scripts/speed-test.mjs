@@ -72,12 +72,17 @@ const READ = [
   { args: ["evidence", "report"] }, { args: ["evidence", "export"] }, { args: ["evidence", "trailer"] }, { args: ["telemetry", "status"] },
   { args: ["telemetry", "show"] }, { args: ["migration", "list"] }, { args: ["diagnostics"] }, { args: ["audit"], ok: [0, 1] }, { args: ["approve"] },
   { args: ["audit-log", "trail"], ok: [0, 1] },
+  // the commands that show what Purix did (all read-only; in the throw-away project they answer "nothing recorded yet", which is still the real code path)
+  { args: ["watch", "--once"] }, { args: ["digest"] }, { args: ["digest", "--json"] }, { args: ["receipt"] }, { args: ["statusline"] },
 ].map((s) => ({ ...s, class: "read" }));
 
 /** Light writes: change a little local state, still offline. Safe to repeat. They run in the throw-away project and HOME. */
 const WRITE = [
   { args: ["config", "set", "show-savings", "off"] }, { args: ["config", "delete", "show-savings"] },
-  { args: ["secret", "set", "SPEED_TEST_KEY", "not-a-real-secret"] }, { args: ["secret", "remove", "SPEED_TEST_KEY"] },
+  // PURIX_WEBHOOK_SECRET is a name Purix reads and has no model provider behind it, so storing and removing it cannot clash with a key in the environment.
+  { args: ["secret", "set", "PURIX_WEBHOOK_SECRET", "not-a-real-secret"], before: [["secret", "remove", "PURIX_WEBHOOK_SECRET"]] },
+  { args: ["secret", "remove", "PURIX_WEBHOOK_SECRET"], before: [["secret", "set", "PURIX_WEBHOOK_SECRET", "not-a-real-secret"]] },
+  { args: ["feedback", "yes"] },
   { args: ["provider", "set", "gemini"] }, { args: ["telemetry", "enable"] }, { args: ["telemetry", "disable"] },
   { args: ["remember", "speed test note"] }, { args: ["hooks", "install", "claude-code"] }, { args: ["hooks", "uninstall", "claude-code"] },
   { args: ["backup", "create", "{TMP}/speed-backup.json"] }, { args: ["reconcile"] }, { args: ["lock"] },
@@ -95,6 +100,9 @@ const CHAIN = [
  * READ, WRITE, CHAIN nor here makes the run FAIL: somebody added a command and nobody said how to time it.
  */
 const HELP_ONLY = {
+  "start": "interactive guided setup: asks questions, checks a model key and writes agent config",
+  "dashboard": "starts a local web server that runs until Ctrl+C; its answers are timed by the dashboard tests, not here",
+  "secret migrate": "needs a person at a terminal (it changes which key is sent to the model provider)",
   "create": "needs a model (use `speed-test --live` once it exists, or eval:l1 for model latency)",
   "change": "needs a model", "modify": "needs a model", "ingest": "needs a model and a diff file", "delete": "destructive",
   "login": "needs the hosted service", "logout": "changes the machine-wide login", "mcp-serve": "timed in the mcp section",
@@ -187,10 +195,13 @@ function judge({ section, id, cls, samples, cold, codes, okCodes, extra = {} }) 
 const fail = (section, id, reason) => rows.push({ section, id, class: "-", budgetMs: 0, runs: [], minMs: 0, medianMs: 0, p95Ms: 0, maxMs: 0, status: "FAIL", reason });
 
 /** Time args RUNS times after one untimed warm-up. */
-function series(p, args, input) {
+/** `before`: commands run (untimed, result ignored) ahead of every run, to put the state back (a second `secret set` of the same name is refused, so it removes first). */
+function series(p, args, input, before = []) {
+  const prep = () => { for (const b of before) run(p, b); };
+  prep();
   const first = run(p, args, input); // warm-up: also the "cold" number users see on their first run
   const samples = []; const codes = [first.code];
-  for (let i = 0; i < RUNS; i++) { const r = run(p, args, input); samples.push(r.ms); codes.push(r.code); }
+  for (let i = 0; i < RUNS; i++) { prep(); const r = run(p, args, input); samples.push(r.ms); codes.push(r.code); }
   return { samples, codes, cold: first.ms };
 }
 
@@ -295,7 +306,7 @@ try {
 
     process.stdout.write(`real run of ${READ.length + WRITE.length} commands ... `);
     for (const sc of [...READ, ...WRITE]) {
-      const s = series(last, sc.args);
+      const s = series(last, sc.args, undefined, sc.before);
       judge({ section: "commands", id: `run: purix ${sc.args.join(" ").replace("{TMP}/", "")}`, cls: sc.class, samples: s.samples, cold: s.cold, codes: s.codes, okCodes: sc.ok ?? [0] });
     }
     console.log("done");

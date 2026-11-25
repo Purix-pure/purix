@@ -133,20 +133,47 @@ export async function promptLine(question: string): Promise<string | null> {
 }
 
 /**
+ * Runs `fn`, which reads stdin by itself (a hidden key prompt in raw mode), without what it reads leaking into the shared line reader.
+ * The reader stays attached to stdin for the life of the process, so it hears every byte `fn` reads too and would queue the pasted key as
+ * the answer to the NEXT question. Whatever the reader queued while `fn` ran is discarded when it finishes.
+ */
+export async function withExclusiveStdin<T>(fn: () => Promise<T>): Promise<T> {
+  const queuedBefore = lineQueue.length;
+  try {
+    return await fn();
+  } finally {
+    if (lineQueue.length > queuedBefore) lineQueue.length = queuedBefore;
+  }
+}
+
+let lastConfirmHadNoInput = false;
+/** True when the most recent confirm() answered "no" because nobody could answer (no terminal, closed input, or a locked prompt), not because a person said no. */
+export function lastConfirmHadNoInputAvailable(): boolean {
+  return lastConfirmHadNoInput;
+}
+
+/**
  * Section 20 human checkpoint: blocks until the developer answers.
  * Defaults to "no" on anything ambiguous (empty enter, garbage input) —
  * a confirmation gate that fails closed, not open. That includes stdin
  * being closed: no input means no approval.
  */
 export async function confirm(message: string): Promise<boolean> {
+  lastConfirmHadNoInput = false;
   if (isAutoConfirmActive()) return true;
   if (promptLockReason !== null) {
+    lastConfirmHadNoInput = true;
     refuseToPrompt(message);
     return false;
   }
   const answer = await promptLine(`${message} [y/N] `);
   if (answer === null) {
-    stdout.write("(no input available — treating as 'no')\n");
+    lastConfirmHadNoInput = true;
+    // Said with the next step, because "treating as 'no'" alone read as the tool refusing, when nobody had been able to answer.
+    stdout.write(
+      "(no input available — treating as 'no'. This question needs a person at an interactive terminal, so nothing was changed. " +
+        "Run the command in your own terminal. Through an agent, use the purix_create / purix_modify MCP tools and approve the pending request with `purix approve`.)\n"
+    );
     return false;
   }
   const normalized = answer.trim().toLowerCase();

@@ -72,7 +72,7 @@ for (const m of manifest) {
   let files;
   let releasedAt;
   if (m.method === "pip-venv") {
-    writeFileSync(join(dir, "in.txt"), `${m.package}==${m.version}\n`);
+    writeFileSync(join(dir, "in.txt"), [`${m.package}==${m.version}`, ...(m.alsoInstall ?? [])].join("\n") + "\n"); // alsoInstall: exact pins locked in the same venv (a plugin the tool needs)
     execFileSync("uv", ["pip", "compile", "-q", "--universal", "--python-version", "3.10", "--generate-hashes", "--no-header", "--no-annotate", join(dir, "in.txt"), "-o", join(dir, "requirements.txt")], { stdio: "inherit" });
     files = { "requirements.txt": readFileSync(join(dir, "requirements.txt"), "utf-8").replace(/\r\n/g, "\n") };
     releasedAt = await pypiReleasedAt(m.package, m.version);

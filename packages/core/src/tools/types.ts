@@ -31,6 +31,8 @@ export interface CatalogEntry {
   package: string;
   /** Exact version. Never a range. */
   version: string;
+  /** pip only: extra exact pins locked into the same environment (a plugin of the tool, e.g. pytest-cov for pytest). */
+  alsoInstall?: string[];
   /** Executable name inside the tool's own folder (no extension). */
   bin: string;
   license: string;

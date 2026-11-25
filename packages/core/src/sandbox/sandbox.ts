@@ -1,6 +1,8 @@
 // src/sandbox/sandbox.ts
+import { duplicationEnabled, measureChangeDuplication } from "../verify/duplication.js";
 import { changedLineNumbers, summarizeCoverage, type ChangedLineCoverage } from "../verify/changed_line_coverage.js";
 import { isJsTsFile, isTestPath } from "../verify/test_discovery.js";
+import { isPythonFile, isPythonTestPath } from "../verify/python_test_discovery.js";
 import { precheckEdits } from "../verify/precheck.js";
 import { recordEvent } from "../manifest/events.js";
 import { storeExists } from "../manifest/store.js";
@@ -12,6 +14,7 @@ import { aliasToolState, clearToolStateAliases, unaliasToolState } from "../tool
 import { tmpdir } from "node:os";
 import { join, dirname, relative, sep } from "node:path";
 import { scanForSecrets } from "../security/secrets.js";
+import { secretBlockDetail, securityGateBlockDetail } from "../gates/policy_block_detail.js";
 import { runSecurityGate } from "../gates/security_gate.js";
 import { credentialFileReason } from "./copy_exclusions.js";
 import { getLanguageProvider, resolveLanguage } from "../language/registry.js";
@@ -166,7 +169,9 @@ function coverageRequest(
   const changed: Record<string, number[]> = {};
   const newText: Record<string, string> = {};
   for (const c of changes) {
-    if (!relPaths.includes(c.path) || !isJsTsFile(c.path) || isTestPath(c.path)) continue;
+    // A source file of either language with a coverage producer: JavaScript/TypeScript runners, and Python through pytest-cov.
+    const isSource = (isJsTsFile(c.path) && !isTestPath(c.path)) || (isPythonFile(c.path) && !isPythonTestPath(c.path));
+    if (!relPaths.includes(c.path) || !isSource) continue;
     changed[c.path] = changedLineNumbers(readBaseContent(targetDir, c.path), c.new_content);
     newText[c.path] = c.new_content;
   }
@@ -195,8 +200,10 @@ export function verifyInSandbox(
    */
   options: { candidateOnDisk?: boolean } = {}
 ): SandboxVerificationResult {
+  const verifyStartedAt = Date.now();
   const secretFindings = scanForSecrets(changes.map((c) => ({ path: c.path, content: c.new_content })));
   if (secretFindings.length > 0) {
+    if (storeExists()) recordEvent("policy_block", { component_id: componentId, detail: { ...secretBlockDetail(secretFindings) } });
     return {
       status: "fail",
       reason:
@@ -224,6 +231,7 @@ export function verifyInSandbox(
   const securityGateResult = runSecurityGate(changes.map((c) => ({ path: c.path, content: c.new_content, base: readBaseContent(targetDir, c.path) })), undefined, dependencyGateOptions());
 
   if (!securityGateResult.ok) {
+    if (storeExists()) recordEvent("policy_block", { component_id: componentId, detail: { ...securityGateBlockDetail(securityGateResult.findings) } });
     return {
       status: "fail",
       reason: securityGateResult.reason ?? "Security gate blocked this patch.",
@@ -317,6 +325,8 @@ export function verifyInSandbox(
 
     const allIdiomFindings: IdiomFinding[] = [];
     const notTested: string[] = [];
+    // Observability: the runners' own pass / fail / skip counts, summed over language groups. Never read by any decision.
+    let testCounts: { passed: number; failed: number; skipped: number } | undefined;
     let testSearchCut = false;
     const testSearchCutFiles: string[] = [];
     // F06-04: one coverage part per language group; summarised into the result. Information only.
@@ -392,6 +402,13 @@ export function verifyInSandbox(
         return withExcluded({ status: "fail", reason: (testRes.reason ?? "tests failed") + excludedNote, idiomFindings: [], ...(testRes.infrastructure ? { infrastructure: testRes.infrastructure } : {}) });
       }
       noteIsolation(testRes.isolation);
+      if (testRes.counts) {
+        testCounts = {
+          passed: (testCounts?.passed ?? 0) + testRes.counts.passed,
+          failed: (testCounts?.failed ?? 0) + testRes.counts.failed,
+          skipped: (testCounts?.skipped ?? 0) + testRes.counts.skipped,
+        };
+      }
       if (testRes.discovery) notTested.push(...testRes.discovery.uncovered);
       // F06-05: a search for tests that hit its file limit cannot vouch for any changed file, so they read as partial, not clean.
       notTested.push(...changedFilesNotVouchedFor(testRes.discovery, relPaths));
@@ -428,6 +445,7 @@ export function verifyInSandbox(
     }
     const notChecked = [...new Set(unchecked.map((u) => u.path))];
     const coverageSummary = summarizeCoverage(coverageParts);
+    const duplication = duplicationEnabled() ? measureChangeDuplication(changes, targetDir) : null;
     return {
       status: "pass",
       idiomFindings: allIdiomFindings,
@@ -440,6 +458,9 @@ export function verifyInSandbox(
       ...(securityGateResult.advisories.length > 0 ? { securityAdvisories: securityGateResult.advisories.map((f) => ({ path: f.path, line: f.line, category: f.category, message: f.message })) } : {}),
       ...(securityGateResult.notRead.length > 0 ? { securityNotRead: securityGateResult.notRead } : {}),
       ...(coverageSummary ? { changedCoverage: coverageSummary } : {}),
+      ...(duplication ? { duplication } : {}),
+      ...(testCounts ? { testCounts } : {}),
+      verifyMs: Date.now() - verifyStartedAt,
     };
   } finally {
     unaliasToolState(tmpRoot);

@@ -89,3 +89,59 @@ describe("readSecretValue, terminal", () => {
     await expect(p).rejects.toThrow(/nothing was stored/);
   });
 });
+
+// Register item 11: the hidden prompt could not take a paste on the person's terminal. The cause on Windows was not reproduced here, so
+// these tests pin what can be checked on any machine: escape sequences a terminal adds around or inside a paste never reach the value, a
+// paste that arrives in one chunk or in pieces gives the same key, and the person is told how many characters arrived.
+describe("readSecretValue, terminal paste", () => {
+  const KEY = "AIzaSyA-1234567890abcdefghijklmnopqrstu";
+
+  it("takes a whole key pasted in one chunk, then Enter", async () => {
+    const { stdin, io, err } = fakeIO(true);
+    const p = readSecretValue("K", io);
+    stdin.write(KEY + "\r");
+    expect(await p).toBe(KEY);
+    expect(err()).toContain(`Received ${KEY.length} characters (not shown).`);
+    expect(err()).not.toContain(KEY);
+  });
+
+  it("drops bracketed-paste markers around the pasted text", async () => {
+    const { stdin, io } = fakeIO(true);
+    const p = readSecretValue("K", io);
+    stdin.write("\u001b[200~" + KEY + "\u001b[201~\r");
+    expect(await p).toBe(KEY);
+  });
+
+  it("drops a marker that arrives split across chunks", async () => {
+    const { stdin, io } = fakeIO(true);
+    const p = readSecretValue("K", io);
+    stdin.write("\u001b[20");
+    stdin.write("0~" + KEY.slice(0, 10));
+    stdin.write(KEY.slice(10) + "\u001b");
+    stdin.write("[201~\r");
+    expect(await p).toBe(KEY);
+  });
+
+  it("ignores an arrow key or other escape sequence typed in the middle", async () => {
+    const { stdin, io } = fakeIO(true);
+    const p = readSecretValue("K", io);
+    stdin.write("abc\u001b[Ade\u001bOPf\r");
+    expect(await p).toBe("abcdef");
+  });
+
+  it("reports one character in the singular", async () => {
+    const { stdin, io, err } = fakeIO(true);
+    const p = readSecretValue("K", io);
+    stdin.write("x\r");
+    await p;
+    expect(err()).toContain("Received 1 character (not shown).");
+  });
+
+  it("does not print a length when the value was piped", async () => {
+    const { stdin, io, err } = fakeIO(false);
+    const p = readSecretValue("K", io);
+    stdin.end(KEY + "\n");
+    await p;
+    expect(err()).not.toContain("Received");
+  });
+});

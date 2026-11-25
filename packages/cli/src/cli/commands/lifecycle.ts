@@ -247,9 +247,15 @@ export async function runModify(componentId: string, instruction: string, option
   // Node 2a: Drift Detector — shared convergence point for both paths (§3.2)
   const drift = await checkDrift(entry, process.cwd());
   if (drift.drifted) {
+    const live = new Set(drift.liveFiles.map((f) => f.path));
+    const missing = (entry.files ?? []).filter((f) => !live.has(f));
+    // Files that are gone (moved, renamed, deleted) are not "edited"; saying so sent people looking for an edit that never happened.
+    const why = missing.length > 0
+      ? `${missing.length} of the ${(entry.files ?? []).length} files it lists are not on disk (${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ", ..." : ""}): moved, renamed or deleted outside Purix. Restore them, or accept what is there now.`
+      : `Someone edited the files outside Purix.`;
     console.error(
       `\n⚠ "${componentId}" has drifted from its last known state (§7.2).\n` +
-        `Someone edited the files outside Purix. Run "purix migration accept-drift ${componentId}" first, ` +
+        `${why} Run "purix migration accept-drift ${componentId}" first, ` +
         `then retry this modify.`
     );
     process.exitCode = 1;

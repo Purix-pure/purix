@@ -10,6 +10,8 @@
 // Core returns data and never prints (rule R1); the CLI prints what this returns.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { userDir } from "../platform/user_dir.js";
+import { findFolderStoreDir } from "../security/secrets_manager.js";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataDrivenEnv } from "../platform/env.js";
@@ -125,14 +127,29 @@ export function loadGovernedContext(root: string): GovernedContext {
   return buildContext(root, governed, state, lockUsed);
 }
 
+/**
+ * The files that hold credentials, or the key that decrypts them: the user-level store (OS-keyring fallback file, its master key, the
+ * login session) and the old per-folder store of this project. No agent tool may read or write them (decide.ts, rule "secret-read").
+ * The credential index (names and dates only) is not listed: it holds no key.
+ */
+export function credentialFilePaths(root: string): string[] {
+  const user = userDir();
+  const names = ["user-secrets.enc.json", "user-secrets.master.key", "secrets.enc.json", "secrets.master.key", "session.enc"];
+  // The old per-folder store: this project's, and the one `purix` would actually read from here, which may sit in a folder above it.
+  const oldDirs = new Set([join(root, PURIX_DIRNAME), findFolderStoreDir(root)].filter((d): d is string => d !== null));
+  return [...names.map((n) => join(user, n)), ...[...oldDirs].flatMap((d) => names.slice(2, 4).map((n) => join(d, n)))];
+}
+
 function buildContext(root: string, governed: Map<string, string>, state: GovernedContext["state"], lockUsed: boolean): GovernedContext {
   const home = homedir();
   return {
     projectRoot: root,
     governed,
     protectedFiles: new Set(PROTECTED_PROJECT_FILES),
+    secretPaths: credentialFilePaths(root),
     protectedAbsolute: [
       join(root, PURIX_DIRNAME),
+      userDir(), // the user-level Purix folder: approvals, consent, the credential store. An agent has no reason to change any of it.
       resolveSharedStateDir(root),
       join(home, ".claude", "settings.json"),
       join(home, ".claude", "settings.local.json"),

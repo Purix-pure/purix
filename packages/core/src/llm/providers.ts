@@ -32,12 +32,13 @@
 import { dataDrivenEnv, purixEnv } from "../platform/env.js";
 import { netFetch } from "../platform/net.js";
 import { asArray, asObject } from "../platform/json_shape.js";
-import { getSecret } from "../security/secrets_manager.js";
+import { credentialLocations, resolveCredential } from "../security/user_secrets.js";
 import { sanitizeErrorText } from "../security/error_text.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { quarantineCorruptFile, readJsonFile, writeJsonAtomic } from "../platform/atomic_write.js";
 import { join } from "node:path";
 import { purixDir } from "../platform/layout.js";
+import { userDir } from "../platform/user_dir.js";
 import { createHash } from "node:crypto";
 import { userStateDir } from "../usage/consent.js";
 
@@ -281,16 +282,53 @@ const REGISTRY_BY_ID = new Map(REGISTRY.map((d) => [d.id, d]));
 export type ProviderId = string; // any REGISTRY id, or "custom"
 
 function resolveKey(envVarName: string, providerLabel: string): string {
-  const key = getSecret(envVarName) ?? dataDrivenEnv(envVarName);
-  if (!key) {
+  const found = resolveCredential(envVarName);
+  if (!found) {
     throw new Error(
       `${envVarName} isn't available. Purix does not ship or bill against a shared key — ` +
-        `bring your own for ${providerLabel}. Run "purix secret set ${envVarName}" (it asks for the value, so it stays out of your shell history; stored ` +
-        `encrypted locally, never leaves the machine except in the request to ${providerLabel} itself), ` +
-        `or set it in a local .env for quick dev (never commit it).`
+        `bring your own for ${providerLabel}. Easiest: run "purix start" in your own terminal. Or run "purix secret set ${envVarName}" in your own terminal (it asks for the value, so it stays out of your shell history; ` +
+        `kept in your OS keyring when there is one, otherwise in an encrypted file in your user folder; never leaves the machine except in the request to ${providerLabel} itself), ` +
+        `or export ${envVarName} in your shell, or put it in a local .env for quick dev (never commit it). ` +
+        `Places checked, in order: the environment (including .env), your user-level store, then an old per-folder key store (this folder or one above it).`
     );
   }
-  return key;
+  return found.value;
+}
+
+/**
+ * Where a key would come from and whether two different values are in play. Never returns a key. The order is the one resolveKey uses:
+ * the environment, then the user-level store, then the old per-folder store.
+ */
+export function keySourceInfo(envVarName: string): { source: ProviderKeySource; conflict: boolean } {
+  let loc;
+  try {
+    loc = credentialLocations(envVarName);
+  } catch {
+    return { source: "missing", conflict: false }; // an unreadable store must not crash a status command
+  }
+  const source: ProviderKeySource = loc.uses === "environment" ? "environment" : loc.uses === "user_store" ? "stored" : loc.uses === "project_store" ? "stored_folder" : "missing";
+  return { source, conflict: loc.conflict };
+}
+
+/**
+ * Appended to a provider's error when the provider says the key was refused (401, 403, or a 400 that names the key). The raw
+ * error says "API key not valid" and nothing about which place Purix took the key from, so a stale key in one place looked like a
+ * bad key in another. The environment is used first, then the user-level store, then the old per-folder store.
+ */
+export function keyRefusedNote(status: number | undefined, body: string, envVarName: string): string {
+  const refused = status === 401 || status === 403 || (status === 400 && /api[ _-]?key|API_KEY_INVALID/i.test(body));
+  if (!refused) return "";
+  const { source, conflict } = keySourceInfo(envVarName);
+  const ignored = conflict ? "; another place holds a different value that was NOT used" : "";
+  const where =
+    source === "environment"
+      ? `the ${envVarName} environment variable (the environment is used before stored keys${ignored})`
+      : source === "stored"
+        ? `the key in your user-level Purix store as ${envVarName}${ignored}`
+        : source === "stored_folder"
+          ? `the key in an old per-folder Purix key store as ${envVarName}${ignored}`
+          : `no key (${envVarName} was not found)`;
+  return ` [Purix sent ${where}. Check it with "purix secret status" and "purix provider status".]`;
 }
 
 function genericTransientCheck(status: number | undefined, message: string): boolean {
@@ -333,7 +371,7 @@ function openAiCompatibleAdapter(def: ProviderDefinition): LlmProvider {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw httpError(`${def.label} ${res.status}: ${providerErrorBody(body)}`, res.status);
+        throw httpError(`${def.label} ${res.status}: ${providerErrorBody(body)}${keyRefusedNote(res.status, body, def.keyEnvVar)}`, res.status);
       }
       const data = asObject(await res.json());
       const usage = asObject(data.usage);
@@ -373,7 +411,7 @@ function geminiAdapter(def: ProviderDefinition): LlmProvider {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw httpError(`Gemini ${res.status}: ${providerErrorBody(body)}`, res.status);
+        throw httpError(`Gemini ${res.status}: ${providerErrorBody(body)}${keyRefusedNote(res.status, body, def.keyEnvVar)}`, res.status);
       }
       const data = asObject(await res.json());
       const meta = asObject(data.usageMetadata);
@@ -417,7 +455,7 @@ function anthropicAdapter(def: ProviderDefinition): LlmProvider {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw httpError(`Anthropic ${res.status}: ${providerErrorBody(body)}`, res.status);
+        throw httpError(`Anthropic ${res.status}: ${providerErrorBody(body)}${keyRefusedNote(res.status, body, def.keyEnvVar)}`, res.status);
       }
       const data = asObject(await res.json());
       const usage = asObject(data.usage);
@@ -590,17 +628,61 @@ function configMtimeMs(): number | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The user's default provider (`purix start`). The key is kept per user, so the choice of provider has to be too: before this, a person who
+// set Purix up in one folder got "No LLM provider is configured" in the next, and an MCP server started by an agent in a folder the agent
+// picked could miss it entirely. The file is in the user's own folder, which a cloned repository cannot write. Registry providers only:
+// a "custom" endpoint stays a per-project choice behind the trust gate (isCustomProviderTrusted), so this file can never name a URL.
+// Order of lookup (activeProviderId): the PURIX_LLM_PROVIDER variable, then the project's provider-config.json, then this default.
+// ---------------------------------------------------------------------------
+const USER_DEFAULT_FILENAME = "provider-default.json";
+
+function userDefaultPath(dir: string = userDir()): string {
+  return join(dir, USER_DEFAULT_FILENAME);
+}
+
+/** The provider id saved as this user's default, or null when there is none (or the file is unreadable, or names something Purix does not know). */
+export function readUserDefaultProvider(dir?: string): string | null {
+  const read = readJsonFile<{ provider?: unknown }>(userDefaultPath(dir));
+  if (read.kind !== "ok") return null;
+  const id = asObject(read.value).provider;
+  return typeof id === "string" && REGISTRY_BY_ID.has(id) ? id : null;
+}
+
+/** Saves a registry provider as this user's default. Throws for an unknown id and for "custom". */
+export function persistUserDefaultProvider(id: string, dir?: string): void {
+  if (!REGISTRY_BY_ID.has(id)) {
+    throw new Error(`"${id}" cannot be a user default. Registered providers only; run "purix provider list". A custom endpoint is set per project with "purix provider set custom".`);
+  }
+  const path = userDefaultPath(dir);
+  if (readJsonFile(path).kind === "corrupt") quarantineCorruptFile(path);
+  writeJsonAtomic(path, { provider: id }, { mode: 0o600 });
+  _active = null;
+  _activeId = null;
+  _customConfigMtimeAtBuild = null;
+}
+
+export type ProviderChoiceSource = "environment" | "project" | "user_default";
+
+/** Where the active provider id comes from, or null when none is set. Same order as activeProviderId(). */
+export function activeProviderSource(): ProviderChoiceSource | null {
+  if (purixEnv("PURIX_LLM_PROVIDER")) return "environment";
+  if (readPersistedConfig()) return "project";
+  if (readUserDefaultProvider() !== null) return "user_default";
+  return null;
+}
+
 export function activeProviderId(): string {
   const fromEnv = purixEnv("PURIX_LLM_PROVIDER");
   if (fromEnv) return fromEnv;
   const config = readPersistedConfig();
-  if (!config) {
-    throw new Error(
-      `No LLM provider is configured. Run "purix provider list" to see the registry, ` +
-      `and "purix provider set <id>" to configure one.`
-    );
-  }
-  return config.provider;
+  if (config) return config.provider;
+  const fromUser = readUserDefaultProvider();
+  if (fromUser !== null) return fromUser;
+  throw new Error(
+    `No LLM provider is configured. Easiest: run "purix start" in your own terminal. Or run "purix provider list" to see the registry, ` +
+    `and "purix provider set <id>" to configure one.`
+  );
 }
 
 let _active: LlmProvider | null = null;
@@ -688,18 +770,21 @@ export function getProvider(id?: string): LlmProvider {
   return _active;
 }
 
-export type ProviderKeySource = "stored" | "environment" | "missing";
+/** "stored" is the user-level store (OS keyring or its file fallback); "stored_folder" is the old per-folder store, still read until `purix secret migrate` moves it. */
+export type ProviderKeySource = "stored" | "stored_folder" | "environment" | "missing";
 
 export interface ProviderKeyStatus {
   /** The variable name the provider's key is looked up under, for example OPENAI_API_KEY. */
   envVar: string;
   /** Where the key was found. Never the key itself. */
   source: ProviderKeySource;
+  /** True when more than one place holds this key and the values differ. The one named by `source` is used; the others are ignored. */
+  conflict: boolean;
 }
 
 /**
  * Where a provider's API key would come from, without reading it out or making a call. Same lookup
- * order as the real call (the encrypted store first, then the environment), so the answer matches what
+ * order as the real call (the environment, then the user-level store, then the old per-folder store), so the answer matches what
  * the first request will do. It says nothing about whether the provider accepts the key. Returns
  * undefined for a provider that is not configured (an unknown id, or "custom" with no custom block).
  */
@@ -709,15 +794,12 @@ export function providerKeyStatus(id?: string): ProviderKeyStatus | undefined {
   if (wanted === "custom") envVar = readPersistedConfig()?.custom?.keyEnvVar;
   else envVar = REGISTRY_BY_ID.get(wanted)?.keyEnvVar;
   if (!envVar) return undefined;
-  let stored: string | null | undefined;
-  try {
-    stored = getSecret(envVar);
-  } catch {
-    stored = undefined; // an unreadable store must not crash a status command; fall through to the environment
-  }
-  if (stored) return { envVar, source: "stored" };
-  if (dataDrivenEnv(envVar)) return { envVar, source: "environment" };
-  return { envVar, source: "missing" };
+  return { envVar, ...keySourceInfo(envVar) };
+}
+
+/** Every variable name a provider key is looked up under, with its provider, for the credential guard. Custom endpoints are added by the caller. */
+export function knownProviderKeyNames(): { envVar: string; providerId: string; label: string }[] {
+  return REGISTRY.map((d) => ({ envVar: d.keyEnvVar, providerId: d.id, label: d.label }));
 }
 
 export function persistProviderChoice(id: string, baseDir: string = process.cwd()): void {

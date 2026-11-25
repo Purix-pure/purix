@@ -67,6 +67,7 @@ const publicCommandTree: CommandSpec[] = [
       { name: "set", syntax: "set <name> [value]" },
       { name: "rotate", syntax: "rotate <name> [newValue]" },
       { name: "remove", syntax: "remove <name>" },
+      { name: "migrate" },
       { name: "status" },
     ],
   },

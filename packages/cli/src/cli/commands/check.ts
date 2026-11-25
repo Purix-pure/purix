@@ -17,6 +17,9 @@ export function renderCheckReport(report: CheckReport): string {
   for (const s of report.sections) {
     lines.push(`${MARK[s.outcome] ?? "  "} ${s.title}`);
     for (const i of s.items) lines.push(`     ${i.subject}: ${i.message}`);
+    // A next step shared by several items (five agent-written files, one "purix adopt") is printed once, after the items.
+    const nexts = [...new Set(s.items.flatMap((i) => (i.next === undefined ? [] : [i.next])))];
+    for (const n of nexts) lines.push(`     → ${n}`);
   }
   lines.push("", report.summary);
   if (report.strict && report.outcome === "skipped") lines.push("--strict: skipped items count as failures, so this exits 1.");
@@ -29,6 +32,7 @@ export function registerCheckCommand(program: Command) {
     .description("Check that governed files still match what Purix recorded and the audit chain is intact (read-only; no model, no network)")
     .option("--strict", "treat skipped items (nothing governed, never synced, pending, or no related test) as failures; use this in CI")
     .option("--json", "print the report as JSON on stdout (schema version 1)")
+    .option("--no-register", "do not move this project's last-seen time in the machine-wide registry (the dashboard uses this when it looks at a project)")
     .action(async (opts: { strict?: boolean; json?: boolean }) => {
       try {
         const { runCheck } = await import("@purix/core/entrypoints/check");

@@ -163,7 +163,11 @@ describe("a project's own tools do not see the person's environment (V1)", () =>
     const message = r.findings[0]!.message;
     expect(message).not.toContain("TOP-SECRET-VALUE");
     expect(message).toContain("secret=undefined");
-    expect(message).not.toContain(String(saved.HOME ?? process.env.HOME));
+    // The child's home is a folder of its own. Compared whole: the test runner's temp folder can sit inside the parent's home, so the
+    // child's home path may legitimately START with the parent's.
+    const childHome = /home=(.*)$/.exec(message)?.[1];
+    expect(childHome).toBeTruthy();
+    expect(childHome).not.toBe(String(saved.HOME ?? process.env.HOME));
   });
 
   it("with strict isolation on, ESLint does not run at all (it has no sandbox): ran false, never clean", unixOnly, () => {

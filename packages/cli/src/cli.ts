@@ -73,6 +73,7 @@ let commandActionStartMs = 0;
 // staying bundler-safe.
 const COMMAND_REGISTRY_SPECS = [
   { name: "registerLifecycleCommands", importer: () => import("./cli/commands/lifecycle.js"), exportName: "registerLifecycleCommands" },
+  { name: "registerStartCommand", importer: () => import("./cli/commands/start.js"), exportName: "registerStartCommand" },
   { name: "registerChangeCommands", importer: () => import("./cli/commands/change.js"), exportName: "registerChangeCommands" },
   { name: "registerMigrationsCommands", importer: () => import("./cli/commands/migrations.js"), exportName: "registerMigrationsCommands" },
   { name: "registerObservabilityCommands", importer: () => import("./cli/commands/observability.js"), exportName: "registerObservabilityCommands" },
@@ -97,6 +98,12 @@ const COMMAND_REGISTRY_SPECS = [
   { name: "registerTelemetryCommands", importer: () => import("./cli/commands/telemetry.js"), exportName: "registerTelemetryCommands" },
   { name: "registerApproveCommands", importer: () => import("./cli/commands/approve.js"), exportName: "registerApproveCommands" },
   { name: "registerBudgetCommands", importer: () => import("./cli/commands/budget.js"), exportName: "registerBudgetCommands" },
+  { name: "registerObserveCommands", importer: () => import("./cli/commands/observe.js"), exportName: "registerObserveCommands" },
+  { name: "registerDashboardCommand", importer: () => import("./cli/commands/dashboard.js"), exportName: "registerDashboardCommand" },
+  { name: "registerDigestCommand", importer: () => import("./cli/commands/digest.js"), exportName: "registerDigestCommand" },
+  { name: "registerReceiptCommand", importer: () => import("./cli/commands/receipt.js"), exportName: "registerReceiptCommand" },
+  { name: "registerLookupCommands", importer: () => import("./cli/commands/lookup.js"), exportName: "registerLookupCommands" },
+  { name: "registerPanelCommand", importer: () => import("./cli/commands/panel.js"), exportName: "registerPanelCommand" },
 ] as const;
 
 // Maps each top-level command name a user can type to the spec (by `name`,
@@ -138,11 +145,20 @@ const COMMAND_NAME_TO_SPEC: Record<string, (typeof COMMAND_REGISTRY_SPECS)[numbe
   adopt: "registerAdoptCommand",
   "mcp-serve": "registerMcpServeCommand",
   connect: "registerConnectCommand",
+  start: "registerStartCommand",
   hook: "registerHookCommand",
   hooks: "registerHooksCommands",
   telemetry: "registerTelemetryCommands",
   approve: "registerApproveCommands",
   deny: "registerApproveCommands",
+  watch: "registerObserveCommands",
+  statusline: "registerObserveCommands",
+  feedback: "registerObserveCommands",
+  dashboard: "registerDashboardCommand",
+  digest: "registerDigestCommand",
+  receipt: "registerReceiptCommand",
+  lookup: "registerLookupCommands",
+  panel: "registerPanelCommand",
 };
 
 /**
@@ -280,6 +296,9 @@ const READ_ONLY_COMMANDS = new Set([
   "connect",
   "login",
   "logout",
+  // `start` writes only the user's own folder (the provider default and the key) and runs `connect` as its own process, so like them it
+  // must not open the project's store or leave a .purix/ folder behind in a folder that has no project.
+  "start",
   // A person answering an agent's pending request (C-30). They read and write only .purix/approvals, and the audit event on a
   // decision opens the store itself; neither needs the reconcile/lock path, and listing in a folder with no project must create nothing.
   "approve",
@@ -301,7 +320,38 @@ const READ_ONLY_COMMANDS = new Set([
   "tools list",
   "tools plan",
   "tools status",
+  // Show what Purix did. They read the project's record (the dashboard and statusline open it read-only); `feedback` adds one event with
+  // the person's own answer and touches nothing else, so none of them needs the lock or a reconcile.
+  "watch",
+  "statusline",
+  "dashboard",
+  "feedback",
+  "digest",
+  "receipt",
+  // Machine-level switches and an agent's own config file: neither opens the project's store.
+  "lookup",
+  "lookup status",
+  "lookup on",
+  "lookup off",
+  "panel",
 ]);
+
+/**
+ * Lists this project in the user-level registry after a command ran in it, so the dashboard can show every project on the machine.
+ * Not for the commands that do not work on a project's record (connect, start, login, logout, hook, mcp-serve, telemetry). A side
+ * channel: it never throws and never changes the command's result.
+ */
+async function listProjectAfter(actionCommand: Command): Promise<void> {
+  try {
+    const name = commandPath(actionCommand);
+    if (["connect", "start", "login", "logout", "mcp-serve", "dashboard", "statusline", "panel"].includes(name) || name.startsWith("lookup") || name === "hook" || name.startsWith("hook ") || name.startsWith("telemetry")) return;
+    // `purix check --no-register`: the dashboard looking at a project is not the project being used, so it must not move "last seen".
+    if (name === "check" && actionCommand.opts().register === false) return;
+    const { storeExists } = await import("@purix/core/manifest/store");
+    if (!storeExists()) return;
+    (await import("@purix/core/observe/registry")).touchProject({ agent: "cli" });
+  } catch { /* a side channel */ }
+}
 
 function commandPath(cmd: Command): string {
   const parts: string[] = [];
@@ -420,15 +470,15 @@ function reportCommandFailure(err: unknown): void {
  * command can never go missing from help.
  */
 export const HELP_GROUPS: readonly { heading: string; commands: readonly string[] }[] = [
-  { heading: "Start here", commands: ["connect", "create", "change", "check", "tools"] },
-  { heading: "Everyday work", commands: ["modify", "adopt", "index", "status", "remember"] },
-  { heading: "Evidence and trust", commands: ["evidence", "lock", "stats", "audit-log", "audit"] },
-  { heading: "Account and setup", commands: ["login", "logout", "config", "budget", "provider", "secret", "lang", "tier-status"] },
+  { heading: "Start here", commands: ["start", "connect", "create", "change", "check", "tools"] },
+  { heading: "Everyday work", commands: ["modify", "adopt", "index", "status", "remember", "approve", "deny"] },
+  { heading: "Evidence and trust", commands: ["evidence", "lock", "stats", "dashboard", "watch", "digest", "receipt", "feedback", "audit-log", "audit"] },
+  { heading: "Account and setup", commands: ["login", "logout", "config", "budget", "provider", "secret", "lang", "tier-status", "lookup", "panel"] },
   { heading: "Advanced and operator", commands: ["ingest", "migration", "library", "mcp-serve", "backup", "reconcile", "diagnostics", "delete", "telemetry"] },
 ];
 const HELP_LAST_GROUP = "More";
 /** Commands that run but are never listed: they are what other programs (an agent's hook config) call, or set up such a call. */
-export const UNLISTED_COMMANDS: readonly string[] = ["hook", "hooks"];
+export const UNLISTED_COMMANDS: readonly string[] = ["hook", "hooks", "statusline"];
 
 function helpRank(name: string): { group: string; index: number } {
   if (name === "help") return { group: "Help", index: Number.MAX_SAFE_INTEGER };
@@ -455,9 +505,11 @@ function createBaseProgram(): Command {
       [
         "",
         "First steps:",
+        "  purix start                             set up in a few questions: model provider, your API key, your coding agent",
         '  purix create "what you want to build"   plan it, review the files, approve before anything is written',
         "  purix connect                           let your coding agent (Claude Code, Cursor, Codex, OpenCode, ...) use Purix",
         "  purix check                             see whether governed files still match what Purix recorded",
+        "  purix approve --list                    answer a request your coding agent is waiting on",
       ].join("\n"),
     );
 
@@ -467,12 +519,15 @@ function createBaseProgram(): Command {
       write(str);
       const unknown = /unknown command '([^']+)'/.exec(str)?.[1];
       if (unknown === undefined) return;
-      const start = new Set(["init", "setup", "start", "new", "scaffold", "bootstrap", "install", "begin"]);
+      const start = new Set(["init", "setup", "new", "scaffold", "bootstrap", "install", "begin"]);
       if (start.has(unknown)) {
-        write(`There is no "${unknown}" step: Purix sets itself up the first time you run a command.\n`);
+        write(`There is no "${unknown}" step. First-time setup is: purix start\n`);
         write('  Start a project:           purix create "what you want to build"\n');
         write("  Connect your coding agent: purix connect\n");
         write("  Install a tool it needs:   purix tools\n");
+      } else if (unknown === "doctor") {
+        write('  Did you mean "purix hooks doctor"? It checks each installed agent hook.\n');
+        write('  Run "purix --help" to see every command.\n');
       } else {
         write('  Run "purix --help" to see every command.\n');
       }
@@ -517,10 +572,15 @@ function createBaseProgram(): Command {
     setQuiet(Boolean(thisCommand.opts().quiet));
     // N-3: run from the project root, not from whatever subfolder the command was typed in. Everything
     // below (state, lock, manifest) resolves from the current directory, so this one step makes a run from
-    // src/components use the project's state instead of creating a stray .purix there. `connect` is left
-    // alone: it writes an agent's config into the folder the person chose.
+    // src/components use the project's state instead of creating a stray .purix there. `connect` and `start`
+    // are left alone: `connect` writes an agent's config into the folder the person chose, and `start` runs it there.
     const cmdName = commandPath(actionCommand);
-    if (cmdName !== "connect") {
+    // Credential notices ("not using the OS keyring", "using a key from the old store") are queued by core and printed here, to stderr. Not for a
+    // `hook ...` command: an agent reads a hook's stderr as the reason for a block, and a keyring notice there would read as one.
+    if (!(cmdName === "hook" || cmdName.startsWith("hook "))) {
+      (await import("@purix/core/security/user_secrets")).setCredentialNoticeSink((m) => process.stderr.write(`[purix] ${m}\n`));
+    }
+    if (cmdName !== "connect" && cmdName !== "start") {
       const { findProjectRoot } = await import("@purix/core/platform/project_root");
       const found = findProjectRoot(process.cwd());
       if (found && found.root !== process.cwd()) {
@@ -535,6 +595,9 @@ function createBaseProgram(): Command {
       commandActionStartMs = performance.now();
       return;
     }
+    // One id for this whole command: every event and model call it causes carries it (a side-channel label, nothing decides from it).
+    // Not for mcp-serve, which gives each tool call its own id.
+    if (cmdName !== "mcp-serve") (await import("@purix/core/observe/change_context")).beginProcessChange();
     // Lazy — these three are only needed once a real mutating command is
     // actually about to run. Importing them at module top-level (the
     // previous shape) meant Node evaluated
@@ -570,6 +633,7 @@ function createBaseProgram(): Command {
 
   program.hook("postAction", async (_thisCommand, actionCommand) => {
     timingState.actionMs = Math.max(0, performance.now() - commandActionStartMs);
+    await listProjectAfter(actionCommand);
     await recordCommandRun(actionCommand, 0);
     await syncSavingsAfter(actionCommand);
     if (isReadOnlyCommand(actionCommand)) return;

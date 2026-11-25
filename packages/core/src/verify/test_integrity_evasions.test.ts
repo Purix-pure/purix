@@ -10,7 +10,7 @@
 import { describe, it } from "node:test";
 import { expect } from "expect";
 import { checkTestIntegrity } from "./test_integrity";
-import { checkPythonTestIntegrity } from "./python_test_integrity";
+import { checkPythonTestIntegrity, pythonAnalysisAvailable } from "./python_test_integrity";
 
 interface Case {
   name: string;
@@ -129,7 +129,10 @@ describe("test-integrity check against reconstructed TypeScript evasions", () =>
   });
 });
 
-describe("test-integrity check against reconstructed Python evasions", { timeout: 120_000 }, () => {
+// Without a working Python the check cannot read a Python test file and flags it for a person to look at, which is the right behaviour
+// but makes every "does not flag" control fail (and every "flags" case pass for the wrong reason). So the block is skipped there.
+const pythonUsable = pythonAnalysisAvailable();
+describe("test-integrity check against reconstructed Python evasions", { timeout: 120_000, skip: pythonUsable ? false : "no usable Python interpreter on this machine" }, () => {
   for (const c of PY_EVASIONS) {
     it(`flags: ${c.name}`, () => {
       const r = checkPythonTestIntegrity(c.before, c.after);

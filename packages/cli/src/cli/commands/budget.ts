@@ -14,7 +14,7 @@ export function registerBudgetCommands(program: Command) {
     const { getBudgetSnapshot } = await import("@purix/core/llm/budget");
     const s = getBudgetSnapshot();
     if (!s) { console.log("No spend has been recorded for this repository yet."); return; }
-    console.log(`Estimated spend: $${s.totalSpentUsd.toFixed(4)} of a $${s.ceiling.toFixed(2)} ceiling, for this repository.`);
+    console.log(`Estimated spend: $${s.totalSpentUsd.toFixed(4)} of a $${s.ceiling.toFixed(2)} ceiling, for this repository (${`$${Math.max(0, s.ceiling - s.totalSpentUsd).toFixed(2)}`} left).`);
     if (s.totalSpentUsd >= s.ceiling) {
       console.log('The ceiling is reached, so model calls are refused. Start a new budget with: purix budget reset --reason "<why>"');
     }

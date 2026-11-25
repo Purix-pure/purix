@@ -25,18 +25,42 @@ interface PythonTestProfile {
   weakeners: Record<string, number>;
 }
 
+// The environment a Python child runs in: the same as ours, except that the test runner's throw-away home (scripts/test-home-preload.mjs)
+// is swapped back for the real one it saved. The Windows Python launcher keeps its settings and runtime under the user profile, and
+// in an empty profile it hung until the stop, which read as "no Python" and flagged a harmless edit as test tampering.
+function pythonEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  if (process.env.PURIX_REAL_HOME) env.HOME = process.env.PURIX_REAL_HOME;
+  if (process.env.PURIX_REAL_USERPROFILE) env.USERPROFILE = process.env.PURIX_REAL_USERPROFILE;
+  return env;
+}
+
+// A found interpreter is remembered for the life of the process. A miss is remembered for a minute only: before, every check probed
+// again (up to two stops each), but installing Python must still be noticed without a restart.
+let cachedPythonBinary: string | null = null;
+let probeFailedAt = 0;
+const PROBE_MISS_MEMORY_MS = 60_000;
+
 function getPythonBinary(): string | null {
-  for (const bin of ["python3", "python"]) {
+  if (cachedPythonBinary) return cachedPythonBinary;
+  if (probeFailedAt && Date.now() - probeFailedAt < PROBE_MISS_MEMORY_MS) return null;
+  // On Windows "python3" is usually the Microsoft Store stub, which can open the Store or wait; "python" goes first there (the same
+  // order tools/installer.ts uses).
+  const candidates = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"];
+  for (const bin of candidates) {
     // cwd must never default to process.cwd() (packages/core during test
     // runs) — a bare "python"/"python3" probe with no matching interpreter
     // on PATH can trigger Windows' py launcher / pymanager shim to silently
     // self-install a runtime into cwd. Same reasoning as python.ts and
     // python.pack.ts; pin cwd to the OS tmpdir instead since this function
     // has no baseDir of its own to route through .purix/tmp/.
-    // tier T1 (platform/spawn_sync.ts): a hung interpreter must not be waited on for the default ten minutes.
-    const res = spawnSync([bin, "--version"], { cwd: tmpdir(), stdout: "pipe", stderr: "pipe", tier: "T1" });
-    if (res.exitCode === 0) return bin;
+    const res = spawnSync([bin, "--version"], { cwd: tmpdir(), env: pythonEnv(), stdout: "pipe", stderr: "pipe", tier: "T1", deadlineMs: 15_000 });
+    if (res.exitCode === 0) {
+      cachedPythonBinary = bin;
+      return bin;
+    }
   }
+  probeFailedAt = Date.now();
   return null;
 }
 
@@ -150,6 +174,7 @@ print(json.dumps({
     // A stop (deadline, signal, output cap) has a null exit code and gives null here, which the caller turns into a flag for a person.
     const res = spawnSync([pythonBin, scriptFile, tmpFile], {
       cwd: workDir,
+      env: pythonEnv(),
       stdout: "pipe",
       stderr: "pipe",
       // T2 (60 s), not T1 (10 s): one analysis takes about 1 s on a quiet Windows machine and ten times that when the whole suite
@@ -172,6 +197,11 @@ print(json.dumps({
   } finally {
     try { rmSync(workDir, { recursive: true, force: true }); } catch { /* temp folder cleanup is best-effort */ }
   }
+}
+
+/** True when this machine can run the analysis at all. Tests that need a working interpreter skip on false (same idea as precheck.test.ts). */
+export function pythonAnalysisAvailable(): boolean {
+  return analyzePythonFile("x = 1\n", getPythonBinary()) !== null;
 }
 
 export function checkPythonTestIntegrity(
