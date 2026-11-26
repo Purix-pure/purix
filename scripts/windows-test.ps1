@@ -298,14 +298,15 @@ Check 'D14' 'a byte-order mark is a real byte change (information only)' {
 }
 
 # ---------------------------------------------------------------- E. secrets
+# PURIX_WEBHOOK_SECRET: a name Purix reads (an invented name is refused), with no model provider behind it, so it cannot clash with a key in the environment.
 Check 'E1' 'a stored secret is not readable as plain text' {
   $canary = 'canary-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
-  $r = P $proj 'secret-set' @('secret', 'set', 'PT_TEST_SECRET', $canary)
+  $r = P $proj 'secret-set' @('secret', 'set', 'PURIX_WEBHOOK_SECRET', $canary)
   $roots = @((Join-Path $proj '.purix'), $UserDir)
   $hits = @(); $files = @()
   foreach ($d in $roots) { if (Test-Path $d) { Get-ChildItem $d -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object { $files += $_.FullName; if ((Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match [regex]::Escape($canary)) { $hits += $_.FullName } } } }
   $script:SecretFiles = $files
-  [void](P $proj 'secret-remove' @('secret', 'remove', 'PT_TEST_SECRET'))
+  [void](P $proj 'secret-remove' @('secret', 'remove', 'PURIX_WEBHOOK_SECRET'))
   if ($r.Code -ne 0) { return Fail ('secret set failed: ' + $r.All.Trim()) }
   if ($hits.Count -gt 0) { Fail ('plain text found in ' + ($hits -join ', ')) } else { Pass ('checked ' + $files.Count + ' files') }
 }

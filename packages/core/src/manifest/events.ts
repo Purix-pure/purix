@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, readFileSync, statSync, unlinkSync } from "
 import { dirname, join } from "node:path";
 import { getDbCompat as getDb, getDbFilePath } from "./store.js";
 import { isDatabaseBusy } from "../platform/db_busy.js";
+import { currentChangeId } from "../observe/change_context.js";
 
 /**
  * §10 Observability's substrate. Every metric that section lists
@@ -31,13 +32,21 @@ export type EventKind =
   | "component_adopted" // an indexed file was registered as a component by `purix adopt`
   | "anchor_match" // AI-06: a prompt_text anchor needed a looser reading to match (detail.outcome "rescued", with the stages) or matched nothing ("missed")
   | "compile_retry" // AI-11: the first edits did not apply and the cheap tier was asked once more (detail.outcome "recovered" or "failed")
+  | "policy_block" // the secret scan or the security gate stopped a change (detail: source, findings, categories as name -> count, files; never a matched value or a message)
   | "precheck_block" // AI-07: the parse check failed an edit before the sandbox copy (detail: files, errorClass)
   | "input_neutralized" // AI-12: instruction-like text or hidden characters were removed from repair input before a prompt (detail: stage, source, hit_count, hits)
   | "repair_early_stop" // AI-12: the repair loop stopped because the same error class came back at the same place (detail: stage, attempt, error_class, location)
   | "hook_denied" // an agent hook blocked a call that would have bypassed Purix (detail: agent, rule, targets)
   | "injection_flag" // F03-08: the phrase tripwire fired and a person was required to approve the change (detail: stage, action, sightings)
   | "memory_recorded" // a note was saved to Repository Memory through rememberNote (detail: scope, source, agent_id, chars, duplicate)
-  | "unadopted_write"; // C5: an agent hook allowed a write to a project file Purix does not govern, and named it (detail: agent, files)
+  | "unadopted_write" // C5: an agent hook allowed a write to a project file Purix does not govern, and named it (detail: agent, files)
+  | "change_landed" // a change reached the audit chain (detail: schema, kind, version, source). Closes a change's record
+  | "approval_decided" // a person answered a pending approval and the answer was used (detail: schema, tool, state, wait_ms)
+  | "change_feedback" // the person's own one-tap answer to "did this help?" (detail: schema, change_id, helped, reason)
+  | "secrets_scrubbed" // known secret formats were redacted from text bound for, or returned by, a model provider (detail: direction, count, formats as name -> count; never a value)
+  | "apply_rolled_back" // a change was applied to files and then undone because the write failed or the manifest changed underneath it (detail: reason, rollback_failed); it never reached the audit chain
+  | "audit_run" // `purix audit` / `purix_audit` ran (detail: pinning_findings, vuln {ran, findings, by_severity | reason}, tracked_files, idiom {ran, findings | reason}); ran:false means not checked, never clean
+  | "dependency_lookup"; // PURIX_DEP_LOOKUP ran for a change that adds or raises dependencies (detail: mode, registry exists/missing/unanswered, advisories pairs/with/unanswered, missing_names, vulnerable; "unanswered" means not checked)
 
 export interface EventRecord {
   id: string;
@@ -82,7 +91,7 @@ export function recordEvent(
     kind,
     component_id: fields.component_id ?? null,
     operation: fields.operation ?? null,
-    detail: JSON.stringify(fields.detail ?? {}),
+    detail: JSON.stringify(withChangeId(fields.detail ?? {})),
   };
   try {
     ensureTable();
@@ -101,6 +110,13 @@ export function recordEvent(
     return;
   }
   flushPendingEvents();
+}
+
+/** Adds the current change's id to an event's detail, unless the caller already set one. Outside a change nothing is added. */
+function withChangeId(detail: Record<string, unknown>): Record<string, unknown> {
+  const id = currentChangeId();
+  if (id === null || "change_id" in detail) return detail;
+  return { ...detail, change_id: id };
 }
 
 // ---- pending events (research 15, finding 3) ----

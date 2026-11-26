@@ -4,7 +4,7 @@
 //
 // What it does: for the dependencies a change ADDS or RAISES, ask (a) the package registry whether the name exists and when it was first
 // published, and (b) OSV whether the exact (name, version) has advisories or a malicious-package record (`MAL-` ids). It is OFF unless
-// PURIX_DEP_LOOKUP is set, because it sends package names off the machine.
+// PURIX_DEP_LOOKUP is set or the person has said yes once (`purix lookup on`, dep_lookup_setting.ts), because it sends package names off the machine.
 //
 // How it fits the synchronous gate (ADR-009 keeps the network out of the gate's own path): the caller awaits `prefetchDependencyLookup`
 // BEFORE verification, which fills an in-memory cache; the gate then reads the cache through `dependencyGateOptions()`, synchronously. A
@@ -25,6 +25,7 @@ import { netFetch } from "../platform/net.js";
 import { purixEnv } from "../platform/env.js";
 import { resolveSafePath } from "../gates/path_guard.js";
 import { isLockfile } from "./lock_parsers.js";
+import { storedLookupApplies } from "./dep_lookup_setting.js";
 import { isDependencyFile, isRegistrySpec, manifestDelta, type DepPair, type RegistryVerdict } from "./dep_delta.js";
 
 export interface DepLookupMode {
@@ -35,7 +36,8 @@ export interface DepLookupMode {
 /** PURIX_DEP_LOOKUP: "all" (or "1", "on", "true") = both; "osv" or "registry" = one; anything else, or unset = off. Comma lists work ("osv,registry"). */
 export function depLookupMode(): DepLookupMode {
   const raw = (purixEnv("PURIX_DEP_LOOKUP") ?? "").trim().toLowerCase();
-  if (raw === "") return { osv: false, registry: false };
+  // No variable: the answer stored by `purix lookup on` (or the one-time question) decides, except in CI. See dep_lookup_setting.ts.
+  if (raw === "") return storedLookupApplies() ? { osv: true, registry: true } : { osv: false, registry: false };
   const parts = raw.split(/[\s,]+/).filter(Boolean);
   if (parts.some((p) => ["all", "1", "on", "true", "yes"].includes(p))) return { osv: true, registry: true };
   return { osv: parts.includes("osv"), registry: parts.includes("registry") };
@@ -267,13 +269,27 @@ async function askOsv(fetcher: Fetcher, queries: OsvQuery[]): Promise<string[][]
   return ids; // a query still holding a token after the page cap already has ids, which is enough to report it
 }
 
+/** What one lookup found, for the event log. Counts, plus the names of packages the registry said do not exist and the pairs that have advisories. */
+export interface DependencyLookupSummary {
+  mode: { osv: boolean; registry: boolean };
+  /** Registry-resolvable names a manifest in this change adds or raises. */
+  names: number;
+  registry: { exists: number; missing: number; unanswered: number };
+  /** Exact name+version pairs. `unanswered` counts the ones with no answer, which the gate reports as not checked, never as clean. */
+  advisories: { pairs: number; with_advisories: number; unanswered: number };
+  missing_names: { ecosystem: string; name: string }[];
+  vulnerable: { ecosystem: string; name: string; version: string; advisory_count: number }[];
+}
+
+const SUMMARY_LIST_CAP = 10;
+
 /**
  * Looks up what this change adds, and fills the cache the gate reads. Never throws and never blocks the change: every failure means
  * "nothing cached for that pair", which the gate reports as not checked. Does nothing, and costs nothing, unless PURIX_DEP_LOOKUP is set.
  */
-export async function prefetchDependencyLookup(files: { path: string; new_content: string }[], targetDir: string, io: LookupIo = {}): Promise<void> {
+export async function prefetchDependencyLookup(files: { path: string; new_content: string }[], targetDir: string, io: LookupIo = {}): Promise<DependencyLookupSummary | undefined> {
   const mode = depLookupMode();
-  if (!mode.osv && !mode.registry) return;
+  if (!mode.osv && !mode.registry) return undefined;
   try {
     const fetcher = io.fetch ?? netFetch;
     const now = (io.now ?? Date.now)();
@@ -285,7 +301,7 @@ export async function prefetchDependencyLookup(files: { path: string; new_conten
       pairs.push(...added);
       if (!isLockfile(f.path)) manifestPairs.push(...added);
     }
-    if (pairs.length === 0) return;
+    if (pairs.length === 0) return undefined;
     const npmrc = parseNpmrcRegistries(readProjectFile(targetDir, ".npmrc"));
 
     // (a) registry existence and first-publish date, one request per new name
@@ -335,9 +351,45 @@ export async function prefetchDependencyLookup(files: { path: string; new_conten
         }
       }
     }
+    return summarizeLookup(mode, wantedNames, pairs, now);
   } catch {
     /* a lookup problem must never break a change */
+    return undefined;
   }
+}
+
+function summarizeLookup(mode: DepLookupMode, wanted: Map<string, DepPair>, pairs: DepPair[], now: number): DependencyLookupSummary {
+  const registry = { exists: 0, missing: 0, unanswered: 0 };
+  const missing_names: DependencyLookupSummary["missing_names"] = [];
+  if (mode.registry) {
+    for (const [k, p] of wanted) {
+      const v = fresh(registryCache, k, now);
+      if (!v) registry.unanswered++;
+      else if (v.state === "missing") {
+        registry.missing++;
+        if (missing_names.length < SUMMARY_LIST_CAP) missing_names.push({ ecosystem: p.ecosystem, name: p.name });
+      } else registry.exists++;
+    }
+  }
+  const advisories = { pairs: 0, with_advisories: 0, unanswered: 0 };
+  const vulnerable: DependencyLookupSummary["vulnerable"] = [];
+  if (mode.osv) {
+    const seen = new Set<string>();
+    for (const p of pairs) {
+      if (p.version === undefined || !isRegistrySpec(p.spec)) continue;
+      const k = pairKey({ ecosystem: p.ecosystem, name: p.name, version: p.version });
+      if (seen.has(k)) continue;
+      seen.add(k);
+      advisories.pairs++;
+      const ids = fresh(advisoryCache, k, now);
+      if (ids === undefined) advisories.unanswered++;
+      else if (ids.length > 0) {
+        advisories.with_advisories++;
+        if (vulnerable.length < SUMMARY_LIST_CAP) vulnerable.push({ ecosystem: p.ecosystem, name: p.name, version: p.version, advisory_count: ids.length });
+      }
+    }
+  }
+  return { mode, names: wanted.size, registry, advisories, missing_names, vulnerable };
 }
 
 // ---- what the synchronous gate reads -----------------------------------------------------------------------------------------------

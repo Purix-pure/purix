@@ -225,12 +225,17 @@ export function acquireRepoLock(baseDir: string = process.cwd()): void {
 
     let existing = readJsonFile<LockData>(p);
     if (existing.kind === "missing") continue; // released between our create attempt and our read; try again
-    for (let waited = 0; existing.kind === "corrupt" && ageMs(p) < FRESH_MS && waited < FRESH_WAIT_MS; waited += POLL_MS) {
+    // Judged once, before waiting. The wait is measured on the wall clock, not by counting polls: on a loaded machine one
+    // Atomics.wait(25) can take far longer than 25 ms, so a count of polls let the wait run past FRESH_MS, the file then aged
+    // out of "being written", and a lock that was still being written was reclaimed (seen on Windows: the wait took 2085 ms).
+    const freshAtStart = existing.kind === "corrupt" && ageMs(p) < FRESH_MS;
+    const waitUntil = Date.now() + FRESH_WAIT_MS;
+    while (existing.kind === "corrupt" && ageMs(p) < FRESH_MS && Date.now() < waitUntil) {
       sleepSync(POLL_MS);
       existing = readJsonFile<LockData>(p);
     }
     if (existing.kind === "missing") continue;
-    if (existing.kind === "corrupt" && ageMs(p) < FRESH_MS) {
+    if (existing.kind === "corrupt" && freshAtStart) {
       throw new Error(`Could not acquire the repository lock: ${p} is being written by another process. Try again in a moment.`);
     }
     if (existing.kind === "ok" && typeof existing.value.pid === "number") {

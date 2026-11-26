@@ -32,6 +32,7 @@ export function registerCheckCommand(program: Command) {
     .description("Check that governed files still match what Purix recorded and the audit chain is intact (read-only; no model, no network)")
     .option("--strict", "treat skipped items (nothing governed, never synced, pending, or no related test) as failures; use this in CI")
     .option("--json", "print the report as JSON on stdout (schema version 1)")
+    .option("--no-register", "do not move this project's last-seen time in the machine-wide registry (the dashboard uses this when it looks at a project)")
     .action(async (opts: { strict?: boolean; json?: boolean }) => {
       try {
         const { runCheck } = await import("@purix/core/entrypoints/check");

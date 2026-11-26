@@ -42,7 +42,10 @@ describe("C2 V1: a project's own planted eslint", () => {
         const seen = readFileSync(p.marker, "utf-8");
         expect(seen).not.toContain("SECRET-IN-PARENT-ENV-12345");
         expect(seen).not.toContain("sk-ant-fake-parent-key");
-        expect(seen).not.toMatch(/^HOME=\/(root|home)\//m);
+        // The child gets a home of its own, never the parent's. Compared whole, not by a "/home/" pattern: the test runner's own home and
+        // temp folders can themselves sit under /home on a machine, and the child's home is a folder inside the temp folder.
+        const childHome = /^HOME=(.*)$/m.exec(seen)?.[1];
+        expect(childHome).not.toBe(process.env.HOME);
       }
     } finally { p.cleanup(); }
   });

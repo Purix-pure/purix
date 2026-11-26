@@ -17,7 +17,9 @@ import { join } from "node:path";
 import { checkVersionPinning, runVulnScan, formatVulnScan, type PinningFinding } from "./deps_audit.js";
 import { checkIdioms, type IdiomCheckResult } from "../verify/idiom.js";
 import { getLanguageProvider, languageForFile } from "../language/registry.js";
-import { listManifest } from "../manifest/store.js";
+import { listManifest, storeExists } from "../manifest/store.js";
+import { recordEvent } from "../manifest/events.js";
+import type { VulnScanResult } from "./deps_audit.js";
 
 export interface FullAuditResult {
   pinning: PinningFinding[];
@@ -29,13 +31,35 @@ export interface FullAuditResult {
 }
 
 /**
+ * What one audit run found, as stored in an `audit_run` event so a trend can be drawn later. A part that did not run is stored as
+ * `ran: false` with its reason, never as zero findings: "skipped" and "none found" are different answers.
+ */
+export function auditRunDetail(result: FullAuditResult, vuln: VulnScanResult): Record<string, unknown> {
+  const bySeverity: Record<string, number> = {};
+  for (const f of vuln.findings) bySeverity[f.severity] = (bySeverity[f.severity] ?? 0) + 1;
+  return {
+    pinning_findings: result.pinning.length,
+    vuln: vuln.ran ? { ran: true, findings: vuln.findings.length, by_severity: bySeverity } : { ran: false, reason: vuln.reason ?? "unknown" },
+    tracked_files: result.trackedFileCount,
+    idiom: result.idiom === null ? { ran: false, reason: "no manifest-tracked files" } : result.idiom.ran ? { ran: true, findings: result.idiom.findings.length } : { ran: false, reason: result.idiomSkippedReason ?? "no local ESLint binary and config" },
+  };
+}
+
+/**
  * Runs the full `purix audit`/`purix_audit` sequence and returns
  * structured results — no console.log/lines.push here, callers format.
+ * Each run is also kept as an `audit_run` event when the project has a store (the one place both callers go through).
  */
 export async function runFullAudit(targetDir: string = process.cwd()): Promise<FullAuditResult> {
   const pinning = await checkVersionPinning(targetDir);
-  const vulnScanFormatted = formatVulnScan(runVulnScan(targetDir));
+  const vuln = runVulnScan(targetDir);
+  const vulnScanFormatted = formatVulnScan(vuln);
+  const result = await finishAudit(pinning, vulnScanFormatted, targetDir);
+  if (storeExists()) recordEvent("audit_run", { operation: "audit", detail: auditRunDetail(result, vuln) });
+  return result;
+}
 
+async function finishAudit(pinning: PinningFinding[], vulnScanFormatted: string, targetDir: string): Promise<FullAuditResult> {
   const trackedPaths = Array.from(new Set(listManifest().flatMap((e) => e.files))).map((f) => join(targetDir, f));
   if (trackedPaths.length === 0) {
     return { pinning, vulnScanFormatted, trackedFileCount: 0, idiom: null };

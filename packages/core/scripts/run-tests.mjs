@@ -15,7 +15,7 @@
 // passes an explicit file list to `node --test`.
 import { spawn } from "node:child_process";
 import { glob } from "node:fs/promises";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hideSandboxTools } from "../../../scripts/hide-sandbox-tools.mjs";
@@ -71,11 +71,13 @@ function runNode(files, extraArgs, env) {
 }
 
 const fakeHome = mkdtempSync(join(tmpdir(), "purix-test-home-"));
+const fakeTmp = join(fakeHome, "tmp"); // temp folders of the serial group sit inside the throw-away home too (see scripts/test-home-preload.mjs)
+mkdirSync(fakeTmp, { recursive: true });
 // The parallel group also gets its own empty home per test file (scripts/test-home-preload.mjs). Before the credential store moved to the user
 // folder these files could not reach a real key; now `createUserSecrets()` defaults to ~/.purix, and a test must never read or write a developer's own.
 const homePreload = new URL("../../../scripts/test-home-preload.mjs", import.meta.url).href;
 const codeA = await runNode(parallelFiles, ["--import", homePreload, ...(Number.isInteger(concurrency) && concurrency > 0 ? [`--test-concurrency=${concurrency}`] : [])], process.env);
-const codeB = await runNode(serialFiles, ["--test-concurrency=1"], { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome });
+const codeB = await runNode(serialFiles, ["--test-concurrency=1"], { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, TMPDIR: fakeTmp, TEMP: fakeTmp, TMP: fakeTmp });
 try {
   rmSync(fakeHome, { recursive: true, force: true });
 } catch {

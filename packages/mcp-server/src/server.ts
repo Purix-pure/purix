@@ -18,6 +18,11 @@ import { strictIsolation } from "@purix/core/sandbox/sandbox_env";
 import { approvalStatus, peekApproved, peekRequest, requestOrConsume } from "@purix/core/approvals/pending";
 import { appliedNotTestedLine, buildModifyResult, parseModifyResultPayload, payloadBytes, staleReason, verificationFailureText, MAX_MODIFY_PAYLOAD_BYTES } from "./modify_result.js";
 import { PURIX_VERSION } from "./version.js";
+import { newChangeId, withChange } from "@purix/core/observe/change_context";
+import { resultLineForChange } from "@purix/core/observe/result_line";
+import { touchProject } from "@purix/core/observe/registry";
+import { resolveSharedStateDir } from "@purix/core/state/git_common_dir";
+import { listApprovals } from "@purix/core/approvals/pending";
 
 /**
  * Fix (2026-09-13): confirmGated()/confirm() opens its own readline
@@ -1007,14 +1012,41 @@ export function toolErrorResult(err: unknown, roots: readonly string[] = project
   return { content: [{ type: "text" as const, text }], isError: true };
 }
 
-async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof createGatedActionBudget>) {
-  let result: Awaited<ReturnType<typeof handleToolCallInner>>;
+/**
+ * Adds Purix's one-line summary (checks, stops, spend, budget left) as the last text part of a change tool's prose reply. Left out
+ * when it is turned off (PURIX_RESULT_LINE=off), when the reply is JSON (it must stay parseable), when the tool does not change
+ * anything, or when there is nothing to say. It sits before the data notice so the notice stays last. Never throws.
+ */
+export function withResultLine<T extends { content: { type: "text"; text: string }[] }>(tool: string, result: T, changeId: string | null): T {
   try {
-    result = await handleToolCallInner(request, gatedActionBudget);
-  } catch (err) {
-    result = toolErrorResult(err);
+    if (!CHANGE_TOOLS.has(tool) || result.content.length === 0) return result;
+    const last = result.content[result.content.length - 1]!;
+    try { JSON.parse(last.text); return result; } catch { /* prose: carry on */ }
+    let waiting = 0;
+    try { waiting = listApprovals(process.cwd()).filter((r) => r.state === "pending").length; } catch { /* count unknown: say nothing about it */ }
+    const line = resultLineForChange(resolveSharedStateDir(), changeId, waiting);
+    if (!line) return result;
+    const at = last.text.lastIndexOf(DATA_NOTICE);
+    const text = at >= 0 ? `${last.text.slice(0, at).trimEnd()}\n\n${line}\n\n${DATA_NOTICE}` : `${last.text}\n\n${line}`;
+    return { ...result, content: [...result.content.slice(0, -1), { ...last, text }] };
+  } catch {
+    return result;
   }
-  return finalizeToolResult(String(request?.params?.name ?? ""), result);
+}
+
+async function handleToolCall(request: any, gatedActionBudget: ReturnType<typeof createGatedActionBudget>) {
+  const name = String(request?.params?.name ?? "");
+  // One id for this call: every event and model call it causes carries it, so the dashboard can build a receipt for it.
+  const changeId = newChangeId();
+  return withChange(async () => {
+    let result: Awaited<ReturnType<typeof handleToolCallInner>>;
+    try {
+      result = await handleToolCallInner(request, gatedActionBudget);
+    } catch (err) {
+      result = toolErrorResult(err);
+    }
+    return withResultLine(name, finalizeToolResult(name, result), changeId);
+  }, changeId);
 }
 
 async function handleToolCallInner(request: any, gatedActionBudget: ReturnType<typeof createGatedActionBudget>) {
@@ -2068,6 +2100,8 @@ export async function runMcpServer(): Promise<void> {
   // Questions that need a person are refused with a message that names the terminal command to run instead.
   lockPrompts("this is an MCP session: stdin and stdout carry the protocol, so a person cannot be asked here");
   const server = createPurixMcpServer();
+  // Lists this project in the user-level registry (a side channel: it never throws and never blocks the server).
+  touchProject({ agent: getAgentId() });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[purix-mcp] MCP server running on stdio transport.");

@@ -99,3 +99,10 @@ repeat-run-logs/
 
 # Written by `node scripts/smoke-test.mjs` when run by hand (test:all deletes it itself)
 purix-mcp-report.md
+
+# Written by the agent during a Purix self-test or user test; never commit these
+/PURIX-SELFTEST-REPORT.md
+/PURIX-USER-TEST-REPORT.md
+
+# Local security-audit skill: kept on this machine, not published
+.agents/

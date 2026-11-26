@@ -7,9 +7,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
-const authModule = fileURLToPath(new URL("./auth.ts", import.meta.url));
+// A file:// URL, not a plain path: on Windows a plain `E:\...` path in an import is refused by Node ("absolute paths must be valid file:// URLs").
+const authModule = new URL("./auth.ts", import.meta.url).href;
 // The child runs in a temp folder, where a bare `--import tsx` cannot be found; give it the absolute location.
 const tsxLoader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
 

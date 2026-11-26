@@ -59,6 +59,18 @@ describe("purix budget", () => {
     expect(lines.join("\n")).toContain('purix budget reset --reason "<why>"');
   });
 
+  test("says how much is left, and never a negative amount once the ceiling is passed", async () => {
+    process.env.PURIX_COST_CEILING_USD = "0.10";
+    assertBudgetAvailable();
+    await run("show");
+    expect(lines.join("\n")).toContain("$0.05 left");
+    assertBudgetAvailable();
+    lines.length = 0;
+    await run("show");
+    expect(lines.join("\n")).toContain("$0.00 left");
+    expect(lines.join("\n")).not.toMatch(/\$-/);
+  });
+
   test("reset clears the total, says what it cleared, and model calls are allowed again", async () => {
     assertBudgetAvailable();
     expect(() => assertBudgetAvailable()).toThrow(/Cost guardrail tripped/);

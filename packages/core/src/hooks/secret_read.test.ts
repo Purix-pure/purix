@@ -34,14 +34,21 @@ const readTool = (tool: string, readPaths: string[]): NormalizedCall =>
   ({ agent: "claude-code", event: "pre-tool-use", tool, toolClass: "other", cwd: "/p", roots: [], paths: [], readPaths, command: null, stopHookActive: false }) as unknown as NormalizedCall;
 
 // `~` is expanded from the real home folder, so the tests that use it point HOME at the folder the context was written for.
+// os.homedir() reads HOME on macOS and Linux but USERPROFILE on Windows, so both are pointed at it (with HOME alone, a Windows run expanded
+// `~` to the developer's real home and the `~/.purix/*.key` glob case was judged against the wrong folder).
 let savedHome: string | undefined;
+let savedProfile: string | undefined;
 before(() => {
   savedHome = process.env.HOME;
+  savedProfile = process.env.USERPROFILE;
   process.env.HOME = HOME;
+  process.env.USERPROFILE = HOME;
 });
 after(() => {
   if (savedHome === undefined) delete process.env.HOME;
   else process.env.HOME = savedHome;
+  if (savedProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = savedProfile;
 });
 
 describe("secret-read: shell", () => {

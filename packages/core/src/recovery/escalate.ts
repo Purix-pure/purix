@@ -25,6 +25,7 @@ import { healEarlyStopEnabled } from "./heal_config.js";
 import { infrastructureOf, infrastructureStopOf, stopMessage } from "./infrastructure_stop.js";
 import type { InfrastructureKind } from "../verify/outcome.js";
 import { searchCutDetail, securityNotesDetail } from "../verify/discovery_cut.js";
+import { metricsDetail } from "../verify/metrics_detail.js";
 
 const ESCALATION_MAX_ATTEMPTS = 2; // separate from heal.ts's 3 — §6.1's "three distinct retry caps"
 
@@ -300,7 +301,7 @@ export async function runEscalation(
     const verification = verify(componentId, candidateFiles, targetDir);
     if (verification.status === "pass") {
       console.log(`   ✅ escalation attempt ${attempt} passes verification.`);
-      recordEvent("verification_pass", { component_id: componentId, operation, detail: { stage: "escalation", attempt, isolation: verification.isolation, ...(verification.notTested ? { not_tested: verification.notTested } : {}), ...searchCutDetail(verification), ...securityNotesDetail(verification) } });
+      recordEvent("verification_pass", { component_id: componentId, operation, detail: { stage: "escalation", attempt, isolation: verification.isolation, ...(verification.notTested ? { not_tested: verification.notTested } : {}), ...searchCutDetail(verification), ...securityNotesDetail(verification), ...metricsDetail(verification) } });
 
       const lang = resolveLanguage(componentId, targetDir);
       const provider = getLanguageProvider(lang);

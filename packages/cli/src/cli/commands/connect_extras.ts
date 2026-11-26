@@ -212,3 +212,23 @@ export async function checkServerStarts(opts: { timeoutMs?: number; execPath?: s
     }
   }
 }
+
+export interface LookupOfferDeps {
+  interactive: boolean;
+  /** Already decided (a stored answer exists) or the variable is deciding. */
+  alreadyDecided: boolean;
+  disclosure: string;
+  ask: (question: string) => Promise<boolean>;
+  save: (state: "on" | "off") => void;
+  print: (line: string) => void;
+}
+
+/** The one-time question about looking up added packages. Asked once, only when a person can answer; "no" is remembered too, so it is not asked again. */
+export async function offerLookup(d: LookupOfferDeps): Promise<"asked-on" | "asked-off" | "skipped"> {
+  if (!d.interactive || d.alreadyDecided) return "skipped";
+  d.print(`\n${d.disclosure}`);
+  const yes = await d.ask("Turn the package check on?");
+  d.save(yes ? "on" : "off");
+  d.print(yes ? "Package check is on. `purix lookup off` turns it off." : "Package check stays off. `purix lookup on` turns it on later.");
+  return yes ? "asked-on" : "asked-off";
+}

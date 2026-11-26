@@ -1830,7 +1830,7 @@
           },
           {
             "file": "packages/core/src/security/full_audit.ts",
-            "contains": "const vulnScanFormatted = formatVulnScan(runVulnScan(targetDir));"
+            "contains": "const vulnScanFormatted = formatVulnScan(vuln);"
           }
         ],
         "refs_unchecked": [
@@ -2383,7 +2383,7 @@
         "evidence": [
           {
             "file": "packages/core/src/llm/classify.ts",
-            "contains": "const outbound = scrubOutboundPrompt(prompt).prompt;"
+            "contains": "const scrubbedOut = scrubOutboundPrompt(prompt);"
           },
           {
             "file": "packages/core/src/llm/classify.ts",
@@ -2391,7 +2391,7 @@
           },
           {
             "file": "packages/core/src/llm/classify.ts",
-            "contains": "return scrubOutboundText(result.text ?? \"\").text;"
+            "contains": "const scrubbedIn = scrubOutboundText(result.text ?? \"\");"
           },
           {
             "file": "packages/core/src/recovery/escalate.ts",

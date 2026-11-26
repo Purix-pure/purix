@@ -26,6 +26,9 @@ import { createFileExclusive, readJsonFile, writeFileAtomic, writeJsonAtomic } f
 import { purixDir } from "../platform/layout.js";
 import { userStateDir } from "../usage/consent.js";
 import { recordGovernanceEvent } from "../security/audit_events.js";
+import { recordEvent } from "../manifest/events.js";
+import { storeExists } from "../manifest/store.js";
+import { LEDGER_SCHEMA_VERSION } from "../observe/ledger_version.js";
 
 export const APPROVAL_TTL_MS = 30 * 60 * 1000;
 /** Finished records are kept this long after they expire, so `purix approve --list --all` and status lookups still work. */
@@ -265,6 +268,7 @@ export function requestOrConsume(baseDir: string, input: ApprovalRequestInput, n
       mkdirSync(approvalsDir(baseDir), { recursive: true });
       if (createFileExclusive(usedMarker(baseDir, live.id), `${now.toISOString()}\n`)) {
         auditApproval(baseDir, "consumed", live, now);
+        recordDecisionWait(live, "approved");
         return { state: "approved", record: live };
       }
     } else if (state === "denied") {
@@ -293,6 +297,19 @@ export function requestOrConsume(baseDir: string, input: ApprovalRequestInput, n
   });
   auditApproval(baseDir, "requested", record, now);
   return { state: "pending", record };
+}
+
+/**
+ * Keeps how long a person took to answer, after the answer is used. The pending record is deleted a day after it expires, so
+ * without this the wait could not be shown later. Numbers only; a side channel that never throws and never creates a store.
+ */
+function recordDecisionWait(record: ApprovalRecord, state: "approved" | "denied"): void {
+  try {
+    if (!record.decidedAt || !storeExists()) return;
+    const wait = Date.parse(record.decidedAt) - Date.parse(record.createdAt);
+    if (!Number.isFinite(wait) || wait < 0) return;
+    recordEvent("approval_decided", { component_id: record.componentId, operation: record.tool, detail: { schema: LEDGER_SCHEMA_VERSION, tool: record.tool, checkpoint_kind: record.checkpointKind, state, wait_ms: wait } });
+  } catch { /* a side channel */ }
 }
 
 /**

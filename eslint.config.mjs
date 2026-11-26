@@ -15,9 +15,15 @@ export default tseslint.config(
       "**/fixtures/**",
       "**/conformance/fixtures/**",
       "opencode/**",
+      "**/.agents/**",
     ],
   },
   ...tseslint.configs.recommended,
+  {
+    // CommonJS files (.cjs) have no other way to load a module than require(); forbidding it there is forbidding the file.
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   {
     files: ["**/*.{ts,mts,cts,js,mjs,cjs}"],
     rules: {

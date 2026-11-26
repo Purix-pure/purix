@@ -16,6 +16,21 @@ export interface SecurityFindingItem {
   message: string;
 }
 
+/**
+ * What the gate looks for, grouped by how it looks, for the places that tell a person what Purix checks (the dashboard's Security panel).
+ * Every category the gate, the manifest and lockfile checks and the advisory scan can emit is listed once; security_checks.test.ts reads the source files and
+ * fails if a category is added or removed there without being added or removed here, so the list cannot drift into a claim the code does not back.
+ */
+export const SECURITY_CHECK_GROUPS: readonly { group: string; how: string; categories: readonly string[] }[] = [
+  { group: "Code patterns", how: "each line of a changed source file, one line at a time", categories: ["Hardcoded Secret", "SQL Injection", "Command/Code Injection", "Unsafe Deserialization / Evaluation", "Secret Exfiltration", "Weak Cryptography"] },
+  { group: "Manifest and .npmrc changes", how: "what the change did to package.json or .npmrc, against what it held before", categories: ["Typosquatting Risk", "Dependency Source", "Install Script", "Registry Change", "Override Added"] },
+  { group: "Lockfile changes", how: "what the change did to a lockfile, against what it held before", categories: ["Lockfile Source", "Lockfile Host", "Lockfile Integrity", "Lockfile Unreadable"] },
+  { group: "Registry and advisory lookup", how: "only when PURIX_DEP_LOOKUP is set; otherwise these are reported as not checked", categories: ["Dependency Not Found", "New Package", "Known Vulnerability", "Malicious Package", "Dependency Check"] },
+  { group: "Limits", how: "a line or file the rules could not read in full", categories: ["Scan Limit"] },
+  // security_audit.ts, run by `purix modify` on the component's original files. It prints what it finds and never blocks; nothing is stored, so no panel can count it.
+  { group: "Advisory scan (shown during `purix modify`, never blocks, Express-style code only)", how: "each line of the component's existing files, one line at a time", categories: ["rate_limiting", "input_validation", "dangerous_eval"] },
+];
+
 export interface SecurityGateResult {
   ok: boolean;
   findings: SecurityFindingItem[];

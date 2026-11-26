@@ -21,7 +21,10 @@ interface Child {
 }
 
 async function race(mode: "lock" | "machine" | "key", dir: string): Promise<Child[]> {
-  const startAt = Date.now() + 2500; // tsx start-up is slower than this on a cold cache only; spinners align after it
+  // A child that starts after this moment does not spin and is not part of the collision. During a full suite run on a busy machine
+// tsx took over 2.5 s to start for some children, so the winner (which holds for HOLD_MS, see the worker) had already let go and a
+// late child won legitimately: two winners. Longer lead and longer hold make a late start still land inside the hold.
+const startAt = Date.now() + 8000;
   const runs = Array.from({ length: N }, (_, idx) =>
     new Promise<Child>((resolve, reject) => {
       const c = spawn(process.execPath, ["--import", "tsx", WORKER, mode, dir, String(startAt), String(idx)], { stdio: ["ignore", "pipe", "pipe"] });

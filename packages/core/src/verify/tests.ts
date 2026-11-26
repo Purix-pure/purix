@@ -515,7 +515,7 @@ export function runTestsWithQuarantine(
   return { status: "pass", quarantinedFailures: quarantined, isolation: isolated.isolation, discovery: discoverySummary, counts, ...(preExisting && preExisting.length > 0 ? { preExistingFailures: preExisting } : {}), ...coverage };
 }
 
-function readAndRemove(file: string, dir?: string): string | undefined {
+export function readAndRemove(file: string, dir?: string): string | undefined {
   try {
     return readFileSync(file, "utf-8");
   } catch {

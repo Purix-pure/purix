@@ -1,6 +1,6 @@
 # Release 1 scope
 
-Last updated 2026-11-08. This file says what Release 1 covers and what it does not. It replaces the 2026-08-05 beta scope note, which is not in this snapshot of the repository. One sentence of that note is kept elsewhere in the project's records: "Purix beta ships with TypeScript and Python support. Rust, Go, and Ruby provider code has been removed from this release entirely — not deferred, removed."
+Last updated 2026-11-25. This file says what Release 1 covers and what it does not. It replaces the 2026-08-05 beta scope note, which is not in this snapshot of the repository. One sentence of that note is kept elsewhere in the project's records: "Purix beta ships with TypeScript and Python support. Rust, Go, and Ruby provider code has been removed from this release entirely — not deferred, removed."
 
 ## What Release 1 is
 
@@ -8,7 +8,7 @@ Release 1 is published as **0.4.0-beta.x** under the npm `beta` tag. What a user
 
 A command-line tool and an MCP server that run on your own machine. Apache 2.0. Everything in this repository runs without a Purix account. Sign-in, billing, team features and the hosted API are not part of Release 1.
 
-In this snapshot the client still enforces a limit of 25 tracked components on the free tier, and there is no way to pay to lift it yet. Treat that limit as a known rough edge until it is changed.
+There is no limit on tracked components in Release 1: the free tier has none (changed 2026-11-02, since there is no way to pay). The client would still honour a limit sent by a server (`flags.componentLimit`); the hosted API is not part of Release 1. Earlier release notes (0.4.0-beta.0) mention a limit of 25; that no longer applies.
 
 ## Languages
 
@@ -21,6 +21,10 @@ In this snapshot the client still enforces a limit of 25 tracked components on t
 1. Add a manifest in `packages/core/src/language/manifests/` (file extensions, tier, capabilities).
 2. Write a provider in `packages/core/src/language/providers/` and add it to the internal list in `registry.ts`. That list is empty today and is switched on with `PURIX_INTERNAL_LANGUAGES=true`, so a new language can be tried without shipping it.
 3. Add its id to the `languages` list in `packages/core/src/language/conformance/run.ts` and add fixtures under `conformance/fixtures/<id>/`. The conformance suite must pass before the language is moved to the public list.
+
+## Showing what Purix did (local only)
+
+The result line, `purix watch`, `purix digest`, `purix receipt` (with `--redact` for a pull request), the local dashboard, `purix statusline --install` for Claude Code and `purix panel` for OpenCode read the project's own record on your machine. None of them makes a network call; the dashboard serves only to the machine it runs on. What they do not show: deployments, incidents and CI results (Purix cannot see them), and any saving against a plain agent. That last line reads "not measured": the paired-run scripts (`docs/BENCHMARK_PROTOCOL.md`) exist, and no one has run them against a real agent. The status line install, the OpenCode panel and the dashboard have been run only against stand-in input and a headless browser on Linux, not in a live Claude Code or OpenCode session, and not on Windows or macOS.
 
 ## Platforms and agents
 
@@ -39,8 +43,8 @@ In this snapshot the client still enforces a limit of 25 tracked components on t
 ## Not in Release 1
 
 - The dependents check covers only components Purix created. Components added with `adopt` or `index` have no recorded dependency edges, so the check finds no dependents for them.
-- Dependency checks inside verification: a change that adds a dependency is not scanned for known vulnerabilities, and nothing checks that the new package exists. `purix audit` runs the vulnerability scan on request. It has been measured returning nothing for pnpm projects that have known advisories, so do not read "none found" on a pnpm project as clean.
-- Retrieval over the component index, mutation testing, changed-line coverage, managed policy files per agent, Java and C#, binary tools in the tools catalog, log retention and replay.
+- Dependency checks inside verification are off unless a person turns them on. With the lookup on (`purix lookup on`, asked once at the end of `purix connect`, or `PURIX_DEP_LOOKUP`), a change that adds a package is checked against the package registry and OSV; this sends package names off the machine (see [PRIVACY.md](./PRIVACY.md)). With it off, a change that adds a dependency is not scanned for known vulnerabilities and nothing checks that the new package exists. `purix audit` runs the vulnerability scan on request. It has been measured returning nothing for pnpm projects that have known advisories, so do not read "none found" on a pnpm project as clean.
+- Retrieval over the component index, mutation testing, managed policy files per agent, Java and C#, binary tools in the tools catalog, and replay of recorded events. Changed-line coverage exists only for JavaScript, TypeScript and Python runs (information on the receipt, never a gate); other languages have no coverage because they have no provider. Old events are deleted after `scheduler.logRetentionDays` (365 by default).
 - The hosted API, Team and Enterprise tiers.
 
 ## What is not claimed anywhere in this repository

@@ -2,7 +2,8 @@
 //
 // F06-04 (research 06 section 5), first slice: the pure parts of "did a test run the lines this change touched?". Nothing here runs a
 // test, reads the disk or decides anything; it turns (old text, new text, a runner's lcov report) into a number and a list of lines.
-// The producer that asks a runner for coverage, and the trust-gate step that reads the number, are NOT built yet (see the handoff).
+// The producer that asks a runner for coverage is built for JavaScript and TypeScript runners (sandbox/sandbox.ts, verify/tests.ts) and for Python through pytest-cov (language/providers/python.ts); the number is
+// recorded on the verification event and shown on the dashboard receipt. Other languages have no producer. Nothing here gates a change.
 //
 // Rules the research sets, and what each function does about them:
 //  - Coverage is a finder of untested code, never a target: this module returns data, and nothing here can block.

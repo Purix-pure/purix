@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --import ./scripts/test_user_dir.mjs --test \"src/**/*.test.ts\"",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {

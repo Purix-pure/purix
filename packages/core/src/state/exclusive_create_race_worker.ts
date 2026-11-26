@@ -22,7 +22,7 @@ if (mode === "lock") {
     setTimeout(() => {
       releaseRepoLock(dir);
       process.exit(0);
-    }, 1500);
+    }, 12_000); // long enough that a child delayed by a busy machine still finds the lock held
   } catch (err) {
     report({ idx, result: "LOST", message: (err as Error).message });
     process.exit(0);

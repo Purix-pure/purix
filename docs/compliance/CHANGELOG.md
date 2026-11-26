@@ -8,6 +8,46 @@ same version number.
 
 ## [Unreleased]
 
+### Added (open items and decisions, 2026-11-24)
+- `purix panel`: Purix line in OpenCode 1.x's sidebar (one plugin file and one `tui.json` entry; never touches what it did not write). Not checked in a live OpenCode session.
+- Dashboard: `purix check` state on each project card (background, read-only, never shown as clean when it could not run) and a per-agent split on the project page.
+- Python changed-line coverage through pytest-cov; pytest-cov is locked into the pinned pytest install.
+- `purix lookup on|off|status` and a one-time question at the end of `purix connect`; the dependency lookup stays off until a person says yes, and the stored answer is ignored in CI.
+- `docs/PR_RECEIPTS.md` (trailer plus redacted receipt; bundle on request) and `docs/BENCHMARK_PROTOCOL.md` with `scripts/benchmark-analyze.ts`.
+- The R6 guard test for the dashboard folder now also forbids network clients, dynamic imports of network modules and `require`, and allows a child process only in `check_state.ts` (`execFile`, no shell).
+
+### Added (showing what Purix did, 2026-11-24)
+- `purix receipt [changeId] [--last n] [--out file] [--redact]`: one change's receipt as Markdown for a pull request, from the local record, read-only, with the chain head to compare with the `Purix-Evidence` trailer.
+- Change receipt: "Changed lines", "Dependencies added" and "Rework risk" lines; a missing fact reads "not measured" or "not checked", never none. The verification event now stores changed-line coverage as counts (no file names).
+- Project page: a four-week trend table and a Process panel (repairs, library reuse, changed-line coverage, landed by agent, drift accepted, notes kept, approvals by kind). `/telemetry` shows what `purix telemetry show` would send.
+- Optional duplication check, `PURIX_DUPLICATION_CHECK=1`: lines of the changed files inside a repeating block of six or more lines elsewhere in the project, before and after. Local, no network, information only, never a gate.
+- `/how` no longer lists finished work as "not built yet".
+
+### Added (showing what Purix did, 2026-11-22 and 2026-11-23)
+- One local record of what Purix does, read by every surface: a result line on MCP replies (`PURIX_RESULT_LINE=off` turns it off), `purix watch`, `purix statusline`, `purix dashboard` (127.0.0.1 only, read-only), `purix feedback`, and `purix digest [--days n] [--json]`. Description: `docs/OBSERVABILITY.md`.
+- Stored per change: a change id, test counts and verification time, approval wait times, `change_landed`, plus events for secrets removed from prompts and replies (counts and format names, never values), dependency lookups, `purix audit` runs and rolled-back applies. A project registry (`projects.json`) in the user folder lists the projects Purix has run in.
+- A change stopped by the secret scan or by a Critical or High security-gate finding stores a `policy_block` event: source, finding count, categories and up to 10 paths. Never a matched value and never message text. Nothing is written in a folder that has no store.
+- `purix budget show` also says how much is left.
+- The dashboard's Security panel lists what the scans look for, including the advisory scan that `purix modify` runs (rate limiting, input validation, `eval`). A test reads the scanner source files and fails when a category exists there that the list does not name.
+- `purix digest` reads the same record as the dashboard. It takes no repository lock, so a change in progress does not stop it. Invalid `--days` exits 2.
+
+### Added (2026-11-24)
+- `purix statusline --install | --uninstall | --status [--shared|--user]`: adds or removes Claude Code's `statusLine` entry that runs `purix statusline`. It never replaces a status line that is not Purix's, keeps every other setting, and refuses a settings file that is not valid JSON.
+- Change receipt (dashboard): a "Dependencies added" line and a "Rework risk" line. Each says "not recorded" or "too recent to judge" instead of "none" when the record cannot say.
+- `purix digest` says when the record does not cover the period before (the date the record starts), and prints no "the period before" figure when the record starts inside the current period. `--json` carries `firstEventAt`.
+- The result line is capped at 120 characters; the least urgent parts are dropped first.
+
+### Changed (what the software sends or stores, 2026-11-24)
+- `PRIVACY.md` now lists the dependency lookup (`PURIX_DEP_LOOKUP`, off by default) as a fourth place Purix can send package names, says what it sends and to which hosts, and describes the project list `projects.json`, the new event fields stored per project, the result line and the local dashboard. The code already did all of this; the document had said "three kinds of place" and "only when you run `purix audit`".
+
+### Fixed
+- `BETA_SCOPE.md` no longer says the free tier enforces 25 components; `licensing/tier.ts` has had no free-tier cap since 2026-11-02.
+- `docs/OBSERVABILITY.md` listed built features as "not built yet".
+- The CLI test suite no longer writes `projects.json` and the usage ledger into the real user folder (`PURIX_USER_DIR` is set to a temporary folder for the run).
+
+### Not done
+- OpenCode sidebar panel, changed-line coverage, an optional duplication check, pull-request receipts, and a benchmark mode. All of it was run only on Linux, Node 22, with no real model; nothing on Windows or macOS.
+
 ## [0.4.0-beta.5]
 
 ### Added (`purix start`, 2026-11-21)

@@ -49,6 +49,7 @@ import { assertRepoLockHeld } from "../state/repo_lock.js";
 import { computeSyncHash } from "../state/hash.js";
 import { getDependents, reVerifyDependents } from "../verify/impact.js";
 import { recordLandedChange } from "../state/landed_change.js";
+import { recordEvent } from "./events.js";
 import type { ManifestEntry, Provenance } from "./schema.js";
 
 export interface CommitVersionedChangeParams {
@@ -111,6 +112,8 @@ export async function commitVersionedChange(params: CommitVersionedChangeParams)
     });
   } catch (err) {
     console.error(`\n🛑 File write failed, rolled back: ${err instanceof Error ? err.message : String(err)}`);
+    // Kept so a change that was started and undone can be counted: the audit chain records only changes that landed.
+    recordEvent("apply_rolled_back", { component_id: componentId, operation, detail: { reason: "file_write_failed", rollback_failed: Boolean((err as { rollbackFailures?: unknown }).rollbackFailures) } });
     // Everything was undone (a failed undo carries rollbackFailures and keeps its row for reconcile to find): the row describes
     // a change that never happened, so it must not wait for the next command to be reconciled.
     if (!(err as { rollbackFailures?: unknown }).rollbackFailures) deletePendingOperation(pendingId);
@@ -144,6 +147,7 @@ export async function commitVersionedChange(params: CommitVersionedChangeParams)
     // hand back to the human rather than clobbering the other write.
     await rollbackModification(backups);
     deletePendingOperation(pendingId);
+    recordEvent("apply_rolled_back", { component_id: componentId, operation, detail: { reason: "manifest_conflict", rollback_failed: false } });
     console.error(
       `\n🛑 Manifest write conflict — "${componentId}" changed underneath this run. Rolled back file writes. Re-run ${reRunCommandHint} against current state.`
     );

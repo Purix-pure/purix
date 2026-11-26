@@ -12,6 +12,7 @@ import { appendLedger, renderLedger, sameFailurePlace, type LedgerEntry, type Le
 import { healEarlyStopEnabled } from "./heal_config.js";
 import { infrastructureStopOf, type InfrastructureStop } from "./infrastructure_stop.js";
 import { searchCutDetail, securityNotesDetail } from "../verify/discovery_cut.js";
+import { metricsDetail } from "../verify/metrics_detail.js";
 
 const MAX_ATTEMPTS = 3;
 
@@ -156,7 +157,7 @@ export async function runSelfHealingLoop(
     const verification = verify(componentId, candidateFiles, targetDir);
     if (verification.status === "pass") {
       console.log(`   ✅ attempt ${attempt} passes verification.`);
-      recordEvent("verification_pass", { component_id: componentId, operation, detail: { stage: "self_heal", attempt, isolation: verification.isolation, ...(verification.notTested ? { not_tested: verification.notTested } : {}), ...searchCutDetail(verification), ...securityNotesDetail(verification) } });
+      recordEvent("verification_pass", { component_id: componentId, operation, detail: { stage: "self_heal", attempt, isolation: verification.isolation, ...(verification.notTested ? { not_tested: verification.notTested } : {}), ...searchCutDetail(verification), ...securityNotesDetail(verification), ...metricsDetail(verification) } });
       attempts.push({ attempt, result: "pass", reasoning: repair.reasoning });
       return { ok: true, files: candidateFiles, attempts, verification, ...(partialPaths.size > 0 ? { partialLinePaths: [...partialPaths] } : {}) };
     }

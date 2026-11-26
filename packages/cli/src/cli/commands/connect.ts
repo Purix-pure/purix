@@ -205,6 +205,20 @@ Examples:
         });
         if (offer.failed > 0) process.exitCode = 1;
       }
+
+      // The one-time package-check question (never in CI, never without a terminal, never twice).
+      try {
+        const setting = await import("@purix/core/security/dep_lookup_setting");
+        const interactive = extras.canPrompt();
+        await extras.offerLookup({
+          interactive,
+          alreadyDecided: !setting.mayAskLookup({ isTTY: interactive, stored: setting.hasLookupChoice() }) || !interactive,
+          disclosure: setting.LOOKUP_DISCLOSURE,
+          ask: async (q) => (await import("@purix/core/cli-io/confirm")).confirm(q),
+          save: (st) => { setting.setLookupSetting(st); },
+          print: (l) => console.log(l),
+        });
+      } catch { /* a failed question never fails a connect */ }
       },
     );
 }

@@ -98,6 +98,12 @@ const COMMAND_REGISTRY_SPECS = [
   { name: "registerTelemetryCommands", importer: () => import("./cli/commands/telemetry.js"), exportName: "registerTelemetryCommands" },
   { name: "registerApproveCommands", importer: () => import("./cli/commands/approve.js"), exportName: "registerApproveCommands" },
   { name: "registerBudgetCommands", importer: () => import("./cli/commands/budget.js"), exportName: "registerBudgetCommands" },
+  { name: "registerObserveCommands", importer: () => import("./cli/commands/observe.js"), exportName: "registerObserveCommands" },
+  { name: "registerDashboardCommand", importer: () => import("./cli/commands/dashboard.js"), exportName: "registerDashboardCommand" },
+  { name: "registerDigestCommand", importer: () => import("./cli/commands/digest.js"), exportName: "registerDigestCommand" },
+  { name: "registerReceiptCommand", importer: () => import("./cli/commands/receipt.js"), exportName: "registerReceiptCommand" },
+  { name: "registerLookupCommands", importer: () => import("./cli/commands/lookup.js"), exportName: "registerLookupCommands" },
+  { name: "registerPanelCommand", importer: () => import("./cli/commands/panel.js"), exportName: "registerPanelCommand" },
 ] as const;
 
 // Maps each top-level command name a user can type to the spec (by `name`,
@@ -145,6 +151,14 @@ const COMMAND_NAME_TO_SPEC: Record<string, (typeof COMMAND_REGISTRY_SPECS)[numbe
   telemetry: "registerTelemetryCommands",
   approve: "registerApproveCommands",
   deny: "registerApproveCommands",
+  watch: "registerObserveCommands",
+  statusline: "registerObserveCommands",
+  feedback: "registerObserveCommands",
+  dashboard: "registerDashboardCommand",
+  digest: "registerDigestCommand",
+  receipt: "registerReceiptCommand",
+  lookup: "registerLookupCommands",
+  panel: "registerPanelCommand",
 };
 
 /**
@@ -306,7 +320,38 @@ const READ_ONLY_COMMANDS = new Set([
   "tools list",
   "tools plan",
   "tools status",
+  // Show what Purix did. They read the project's record (the dashboard and statusline open it read-only); `feedback` adds one event with
+  // the person's own answer and touches nothing else, so none of them needs the lock or a reconcile.
+  "watch",
+  "statusline",
+  "dashboard",
+  "feedback",
+  "digest",
+  "receipt",
+  // Machine-level switches and an agent's own config file: neither opens the project's store.
+  "lookup",
+  "lookup status",
+  "lookup on",
+  "lookup off",
+  "panel",
 ]);
+
+/**
+ * Lists this project in the user-level registry after a command ran in it, so the dashboard can show every project on the machine.
+ * Not for the commands that do not work on a project's record (connect, start, login, logout, hook, mcp-serve, telemetry). A side
+ * channel: it never throws and never changes the command's result.
+ */
+async function listProjectAfter(actionCommand: Command): Promise<void> {
+  try {
+    const name = commandPath(actionCommand);
+    if (["connect", "start", "login", "logout", "mcp-serve", "dashboard", "statusline", "panel"].includes(name) || name.startsWith("lookup") || name === "hook" || name.startsWith("hook ") || name.startsWith("telemetry")) return;
+    // `purix check --no-register`: the dashboard looking at a project is not the project being used, so it must not move "last seen".
+    if (name === "check" && actionCommand.opts().register === false) return;
+    const { storeExists } = await import("@purix/core/manifest/store");
+    if (!storeExists()) return;
+    (await import("@purix/core/observe/registry")).touchProject({ agent: "cli" });
+  } catch { /* a side channel */ }
+}
 
 function commandPath(cmd: Command): string {
   const parts: string[] = [];
@@ -427,13 +472,13 @@ function reportCommandFailure(err: unknown): void {
 export const HELP_GROUPS: readonly { heading: string; commands: readonly string[] }[] = [
   { heading: "Start here", commands: ["start", "connect", "create", "change", "check", "tools"] },
   { heading: "Everyday work", commands: ["modify", "adopt", "index", "status", "remember", "approve", "deny"] },
-  { heading: "Evidence and trust", commands: ["evidence", "lock", "stats", "audit-log", "audit"] },
-  { heading: "Account and setup", commands: ["login", "logout", "config", "budget", "provider", "secret", "lang", "tier-status"] },
+  { heading: "Evidence and trust", commands: ["evidence", "lock", "stats", "dashboard", "watch", "digest", "receipt", "feedback", "audit-log", "audit"] },
+  { heading: "Account and setup", commands: ["login", "logout", "config", "budget", "provider", "secret", "lang", "tier-status", "lookup", "panel"] },
   { heading: "Advanced and operator", commands: ["ingest", "migration", "library", "mcp-serve", "backup", "reconcile", "diagnostics", "delete", "telemetry"] },
 ];
 const HELP_LAST_GROUP = "More";
 /** Commands that run but are never listed: they are what other programs (an agent's hook config) call, or set up such a call. */
-export const UNLISTED_COMMANDS: readonly string[] = ["hook", "hooks"];
+export const UNLISTED_COMMANDS: readonly string[] = ["hook", "hooks", "statusline"];
 
 function helpRank(name: string): { group: string; index: number } {
   if (name === "help") return { group: "Help", index: Number.MAX_SAFE_INTEGER };
@@ -550,6 +595,9 @@ function createBaseProgram(): Command {
       commandActionStartMs = performance.now();
       return;
     }
+    // One id for this whole command: every event and model call it causes carries it (a side-channel label, nothing decides from it).
+    // Not for mcp-serve, which gives each tool call its own id.
+    if (cmdName !== "mcp-serve") (await import("@purix/core/observe/change_context")).beginProcessChange();
     // Lazy — these three are only needed once a real mutating command is
     // actually about to run. Importing them at module top-level (the
     // previous shape) meant Node evaluated
@@ -585,6 +633,7 @@ function createBaseProgram(): Command {
 
   program.hook("postAction", async (_thisCommand, actionCommand) => {
     timingState.actionMs = Math.max(0, performance.now() - commandActionStartMs);
+    await listProjectAfter(actionCommand);
     await recordCommandRun(actionCommand, 0);
     await syncSavingsAfter(actionCommand);
     if (isReadOnlyCommand(actionCommand)) return;

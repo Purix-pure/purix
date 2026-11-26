@@ -236,6 +236,46 @@
       "types": "./dist/manifest/store.d.ts",
       "default": "./dist/manifest/store.js"
     },
+    "./observe/change_context": {
+      "types": "./dist/observe/change_context.d.ts",
+      "default": "./dist/observe/change_context.js"
+    },
+    "./observe/event_lines": {
+      "types": "./dist/observe/event_lines.d.ts",
+      "default": "./dist/observe/event_lines.js"
+    },
+    "./security/dep_lookup": {
+      "types": "./dist/security/dep_lookup.d.ts",
+      "default": "./dist/security/dep_lookup.js"
+    },
+    "./security/dep_lookup_setting": {
+      "types": "./dist/security/dep_lookup_setting.d.ts",
+      "default": "./dist/security/dep_lookup_setting.js"
+    },
+    "./observe/opencode_panel": {
+      "types": "./dist/observe/opencode_panel.d.ts",
+      "default": "./dist/observe/opencode_panel.js"
+    },
+    "./observe/ledger_reader": {
+      "types": "./dist/observe/ledger_reader.d.ts",
+      "default": "./dist/observe/ledger_reader.js"
+    },
+    "./observe/ledger_version": {
+      "types": "./dist/observe/ledger_version.d.ts",
+      "default": "./dist/observe/ledger_version.js"
+    },
+    "./observe/registry": {
+      "types": "./dist/observe/registry.d.ts",
+      "default": "./dist/observe/registry.js"
+    },
+    "./observe/result_line": {
+      "types": "./dist/observe/result_line.d.ts",
+      "default": "./dist/observe/result_line.js"
+    },
+    "./observe/statusline_install": {
+      "types": "./dist/observe/statusline_install.d.ts",
+      "default": "./dist/observe/statusline_install.js"
+    },
     "./platform/atomic_write": {
       "types": "./dist/platform/atomic_write.d.ts",
       "default": "./dist/platform/atomic_write.js"
@@ -348,6 +388,10 @@
       "types": "./dist/state/drift.d.ts",
       "default": "./dist/state/drift.js"
     },
+    "./state/git_common_dir": {
+      "types": "./dist/state/git_common_dir.d.ts",
+      "default": "./dist/state/git_common_dir.js"
+    },
     "./state/governed_lock": {
       "types": "./dist/state/governed_lock.d.ts",
       "default": "./dist/state/governed_lock.js"
@@ -383,6 +427,10 @@
     "./state/repo_lock": {
       "types": "./dist/state/repo_lock.d.ts",
       "default": "./dist/state/repo_lock.js"
+    },
+    "./state/rework": {
+      "types": "./dist/state/rework.d.ts",
+      "default": "./dist/state/rework.js"
     },
     "./state/scheduler": {
       "types": "./dist/state/scheduler.d.ts",

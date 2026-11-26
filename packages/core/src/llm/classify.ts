@@ -17,6 +17,8 @@ import { loadContextConfig } from "./context/config.js";
 import { buildRepairFilesBlock } from "./context/failure_windows.js";
 import { sanitizeAndRecord } from "./input_scan.js";
 import { scrubOutboundPrompt, scrubOutboundText } from "../security/outbound_scrub.js";
+import { recordEvent } from "../manifest/events.js";
+import { storeExists } from "../manifest/store.js";
 import type { FailureLocation } from "../verify/failure_shape.js";
 import { OPERATIONS } from "./prompts/edit_kinds.js";
 import {
@@ -81,7 +83,9 @@ export async function callLlm(
     // A7-1: the one place text leaves for a provider. Known secret formats are redacted on the way out (component files,
     // the instruction, the rejected reply of a format re-ask, anything a caller put in the prompt) and on the way back.
     // promptChars below stays the size of what the caller built, so the call log is unchanged.
-    const outbound = scrubOutboundPrompt(prompt).prompt;
+    const scrubbedOut = scrubOutboundPrompt(prompt);
+    const outbound = scrubbedOut.prompt;
+    if (scrubbedOut.count > 0 && storeExists()) recordEvent("secrets_scrubbed", { operation: callType, detail: { direction: "outbound", count: scrubbedOut.count, formats: scrubbedOut.formats } });
     const result = typeof outbound === "string"
       ? await provider.generate(outbound, tier)
       : await provider.generate(outbound.user, tier, outbound.system);
@@ -101,7 +105,9 @@ export async function callLlm(
       recordSavings(savingsContext.call, savingsContext.decision, result.usage, provider.id);
     }
     recordCircuitSuccess();
-    return scrubOutboundText(result.text ?? "").text;
+    const scrubbedIn = scrubOutboundText(result.text ?? "");
+    if (scrubbedIn.count > 0 && storeExists()) recordEvent("secrets_scrubbed", { operation: callType, detail: { direction: "inbound", count: scrubbedIn.count, formats: scrubbedIn.formats } });
+    return scrubbedIn.text;
   } catch (err: any) {
     // BUG FIX (GAPS-REPORT-2 §2): assertBudgetAvailable() reserves
     // estimatedCost into total_spent_usd at the top of THIS invocation —

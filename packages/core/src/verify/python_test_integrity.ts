@@ -25,18 +25,34 @@ interface PythonTestProfile {
   weakeners: Record<string, number>;
 }
 
+// A found interpreter is remembered for the life of the process. A miss is remembered for a minute only: before, every check probed
+// again (up to two stops each), but installing Python must still be noticed without a restart.
+let cachedPythonBinary: string | null = null;
+let probeFailedAt = 0;
+const PROBE_MISS_MEMORY_MS = 60_000;
+
 function getPythonBinary(): string | null {
-  for (const bin of ["python3", "python"]) {
+  if (cachedPythonBinary) return cachedPythonBinary;
+  if (probeFailedAt && Date.now() - probeFailedAt < PROBE_MISS_MEMORY_MS) return null;
+  // On Windows "python3" is usually the Microsoft Store stub, which can open the Store or wait; "python" goes first there (the same
+  // order tools/installer.ts uses).
+  const candidates = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"];
+  for (const bin of candidates) {
     // cwd must never default to process.cwd() (packages/core during test
     // runs) — a bare "python"/"python3" probe with no matching interpreter
     // on PATH can trigger Windows' py launcher / pymanager shim to silently
     // self-install a runtime into cwd. Same reasoning as python.ts and
     // python.pack.ts; pin cwd to the OS tmpdir instead since this function
     // has no baseDir of its own to route through .purix/tmp/.
-    // tier T1 (platform/spawn_sync.ts): a hung interpreter must not be waited on for the default ten minutes.
-    const res = spawnSync([bin, "--version"], { cwd: tmpdir(), stdout: "pipe", stderr: "pipe", tier: "T1" });
-    if (res.exitCode === 0) return bin;
+    // Windows gets a little longer than the T1 stop (10 s) because its launcher and the Store stub can be slow to answer; elsewhere a probe
+    // that has not answered by the T1 stop is stopped, so two hung candidates cost 20 s, not 30 (python_stop_handling.test.ts holds it to 25 s).
+    const res = spawnSync([bin, "--version"], { cwd: tmpdir(), stdout: "pipe", stderr: "pipe", tier: "T1", ...(process.platform === "win32" ? { deadlineMs: 15_000 } : {}) });
+    if (res.exitCode === 0) {
+      cachedPythonBinary = bin;
+      return bin;
+    }
   }
+  probeFailedAt = Date.now();
   return null;
 }
 
@@ -172,6 +188,11 @@ print(json.dumps({
   } finally {
     try { rmSync(workDir, { recursive: true, force: true }); } catch { /* temp folder cleanup is best-effort */ }
   }
+}
+
+/** True when this machine can run the analysis at all. Tests that need a working interpreter skip on false (same idea as precheck.test.ts). */
+export function pythonAnalysisAvailable(): boolean {
+  return analyzePythonFile("x = 1\n", getPythonBinary()) !== null;
 }
 
 export function checkPythonTestIntegrity(

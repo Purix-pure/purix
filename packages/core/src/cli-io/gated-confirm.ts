@@ -32,10 +32,12 @@ export async function confirmGated(
       `  ⚠ AUTO_CONFIRM active — "${checkpointKind}" checkpoint auto-approved with no human prompt (test-environment-only bypass; see confirm.ts)`
     );
   }
+  const askedAt = Date.now();
   const approved = await confirm(message);
   recordEvent("confirm_response", {
     component_id: componentId,
-    detail: { checkpoint_kind: checkpointKind, approved, auto_confirmed: autoConfirmed },
+    // wait_ms: how long the person took to answer. Absent when AUTO_CONFIRM answered, since nobody waited.
+    detail: { checkpoint_kind: checkpointKind, approved, auto_confirmed: autoConfirmed, ...(autoConfirmed ? {} : { wait_ms: Date.now() - askedAt }) },
   });
   return approved;
 }

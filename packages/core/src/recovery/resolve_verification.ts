@@ -28,6 +28,7 @@ import { recordEvent } from "../manifest/events.js";
 import type { CompiledFileChange } from "../verify/compile.js";
 import type { InfrastructureKind } from "../verify/outcome.js";
 import { searchCutDetail, securityNotesDetail } from "../verify/discovery_cut.js";
+import { metricsDetail } from "../verify/metrics_detail.js";
 import {
   infrastructureOf,
   infrastructureStopOf,
@@ -114,7 +115,9 @@ export async function resolveVerification(
       : verifyInSandbox);
   // F03-03 / F03-02 (D-q): the gate is synchronous, so the lookup of what this change adds runs here first and the gate reads its cache.
   // Off unless PURIX_DEP_LOOKUP is set; never throws; a failed lookup means "not checked".
-  await prefetchDependencyLookup(candidateFiles, targetDir);
+  const lookup = await prefetchDependencyLookup(candidateFiles, targetDir);
+  // Keep what the lookup found as an event (counts, names of packages the registry says do not exist), so a view can show it later.
+  if (lookup) recordEvent("dependency_lookup", { component_id: componentId, operation, detail: { ...lookup } });
   const heal = deps.runSelfHealingLoop ?? runSelfHealingLoop;
   const escalate = deps.runEscalation ?? runEscalation;
   let verification = verify(componentId, candidateFiles, targetDir);
@@ -144,7 +147,7 @@ export async function resolveVerification(
     recordEvent("verification_pass", {
       component_id: componentId,
       operation,
-      detail: { stage: verificationStageLabel, isolation: verification.isolation, ...(verification.notTested ? { not_tested: verification.notTested } : {}), ...searchCutDetail(verification), ...securityNotesDetail(verification) },
+      detail: { stage: verificationStageLabel, isolation: verification.isolation, ...(verification.notTested ? { not_tested: verification.notTested } : {}), ...searchCutDetail(verification), ...securityNotesDetail(verification), ...metricsDetail(verification) },
     });
     return { finalFiles: candidateFiles, fromEscalation: false, verification };
   }

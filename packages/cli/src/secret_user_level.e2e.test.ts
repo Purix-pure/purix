@@ -31,8 +31,10 @@ describe("purix secret / provider status with a user-level store", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "purix-secret-e2e-"));
     userDir = join(root, "userdir");
-    a = join(root, "a");
-    b = join(root, "b", "nested");
+    // The project folders sit INSIDE the home folder the child is given. The search for an old per-folder store stops at the home folder, so a
+    // store that happens to exist higher up (on a developer's machine the real temp folder is under the real home) is never reached.
+    a = join(root, "home", "a");
+    b = join(root, "home", "b", "nested");
     mkdirSync(join(root, "home"), { recursive: true });
     mkdirSync(a, { recursive: true });
     mkdirSync(b, { recursive: true });

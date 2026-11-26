@@ -16,6 +16,7 @@
 // identity is machine-scoped." Two stores, two keys, closes that. 
 import { existsSync, readFileSync, chmodSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { createFileExclusive, writeFileAtomic } from "../platform/atomic_write.js";
 import { purixDir } from "../platform/layout.js";
@@ -224,12 +225,20 @@ export function createSecretsStore(baseDir: string, storeFilename = "secrets.enc
  * Old versions wrote it into the folder Purix was run in, so a key saved in a project root was invisible from its subfolders; reading
  * upward finds it from any of them. (Taken from the first of the two parallel key-store changes; the user-level store has its own
  * file names, so the user folder is never mistaken for an old per-folder store.)
+ *
+ * The search stops at the person's home folder (it looks there, then goes no higher). A project under the home folder still finds a
+ * store saved in the project or in the home folder; a store ABOVE the home folder is never an old Purix store. It also means a test
+ * whose temp folder sits inside a throw-away home cannot reach the developer's real home folder.
  */
 export function findFolderStoreDir(start: string = process.cwd()): string | null {
   let dir = resolve(start);
+  const sameFolder = (a: string, b: string): boolean => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  let home: string | null = null;
+  try { home = resolve(homedir()); } catch { /* no home folder: search to the top as before */ }
   for (let i = 0; i < 64; i++) {
     const candidate = purixDir(dir);
     if (existsSync(join(candidate, "secrets.enc.json"))) return candidate;
+    if (home !== null && sameFolder(dir, home)) return null;
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
