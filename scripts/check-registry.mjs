@@ -79,8 +79,10 @@ async function main() {
   if (rest.includes("--install")) {
     const dir = mkdtempSync(join(tmpdir(), "purix-registry-"));
     try {
-      execFileSync("npm", ["init", "-y"], { cwd: dir, stdio: "ignore" });
-      execFileSync("npm", ["install", `@purix/cli@${version}`], { cwd: dir, stdio: "inherit" });
+      // On Windows npm is npm.cmd, which cannot be started without a shell (ENOENT); the arguments here are fixed strings and a checked version.
+      const shell = process.platform === "win32";
+      execFileSync("npm", ["init", "-y"], { cwd: dir, stdio: "ignore", shell });
+      execFileSync("npm", ["install", `@purix/cli@${version}`], { cwd: dir, stdio: "inherit", shell });
       const out = execFileSync(join(dir, "node_modules", ".bin", process.platform === "win32" ? "purix.cmd" : "purix"), ["--version"], { cwd: dir, encoding: "utf8", shell: process.platform === "win32" }).trim();
       if (out !== version) { console.error(`FAIL  installed purix reports "${out}", expected ${version}`); process.exit(1); }
       console.log(`PASS  fresh install of @purix/cli@${version} from npm runs and reports ${out}`);
